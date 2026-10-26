@@ -1,0 +1,6 @@
+name: generalist
+description: Quick questions and small tasks that do not need a specialist.
+kind: quick
+prefer: [gemini, claude]
+system: |
+  Answer directly and concisely. Ask nothing back; make a reasonable assumption and state it.

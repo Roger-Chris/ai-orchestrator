@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Orchestrator</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="logo">◈</span> Orchestrator <span id="nodeName" class="muted"></span></div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="run" role="tab">Run</button>
+      <button class="tab" data-tab="agents" role="tab">Agents</button>
+      <button class="tab" data-tab="caps" role="tab">Routing</button>
+      <button class="tab" data-tab="usage" role="tab">Usage</button>
+    </nav>
+    <button id="tokenBtn" class="ghost" title="Access token for remote devices">🔑</button>
+  </header>
+
+  <div class="layout">
+    <aside class="side">
+      <section>
+        <div class="side-h"><h2>Devices &amp; models</h2><button id="refreshNodes" class="ghost small" title="Refresh">↻</button></div>
+        <div id="nodes" class="nodes"></div>
+      </section>
+      <section>
+        <h2>History</h2>
+        <ul id="history" class="history"></ul>
+      </section>
+    </aside>
+
+    <main>
+      <section id="tab-run" class="panel active">
+        <form id="composer" class="composer">
+          <textarea id="task" rows="4" placeholder="Describe the work. e.g. “Design an ESP32-S3 sensor board with USB-C power, then a 3D-printable enclosure for it, and review both.”" required></textarea>
+          <div class="controls">
+            <label>Mode
+              <select id="mode">
+                <option value="auto">Auto (brain decides)</option>
+                <option value="plan">Always plan &amp; split</option>
+                <option value="direct">Direct (one model)</option>
+              </select>
+            </label>
+            <label>Model
+              <select id="provider"><option value="">Best for the job</option></select>
+            </label>
+            <label>Agent
+              <select id="agent"><option value="">Auto</option></select>
+            </label>
+            <label>Access
+              <select id="permission">
+                <option value="">Read-only</option>
+                <option value="edit">Edit files</option>
+                <option value="full">Full (run anything)</option>
+              </select>
+            </label>
+            <label class="grow">Folder
+              <input id="cwd" placeholder="Working folder on this device (default: server folder)" />
+            </label>
+            <button type="submit" class="primary" id="runBtn">Run ▸</button>
+          </div>
+        </form>
+
+        <div id="runView" class="run-view hidden">
+          <div class="run-head">
+            <div>
+              <div id="runTitle" class="run-title"></div>
+              <div id="runMeta" class="muted small"></div>
+            </div>
+            <button id="cancelBtn" class="ghost">Cancel</button>
+          </div>
+          <div id="steps" class="steps"></div>
+          <div id="resultWrap" class="result hidden">
+            <div class="result-h"><h3>Result</h3><button id="copyBtn" class="ghost small">Copy</button></div>
+            <div id="result" class="md"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-agents" class="panel">
+        <p class="muted">Specialists the brain assigns work to. Add your own by dropping a YAML file in <code>agents/</code>.</p>
+        <div id="agents" class="cards"></div>
+      </section>
+
+      <section id="tab-caps" class="panel">
+        <p class="muted">How strong each subscription is per kind of work (0–10). Override in <code>orchestrator.config.yaml → routing.overrides</code>; your 👍/👎 ratings shift these automatically.</p>
+        <div class="table-wrap"><table id="caps" class="caps"></table></div>
+      </section>
+
+      <section id="tab-usage" class="panel">
+        <p class="muted">Calls per model and device over the last 7 days.</p>
+        <div class="table-wrap"><table id="usage" class="caps"></table></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="tokenDlg">
+    <form method="dialog">
+      <h3>Access token</h3>
+      <p class="muted small">Only needed when opening this page from another device (e.g. your phone over Tailscale). Paste the ORC_TOKEN from the server's .env.</p>
+      <input id="tokenInput" type="password" autocomplete="off" />
+      <menu><button value="cancel" class="ghost">Close</button><button id="tokenSave" value="ok" class="primary">Save</button></menu>
+    </form>
+  </dialog>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+name: long-context-analyst
+description: Digests very large inputs — whole repos, long documents, big logs.
+kind: long_context
+prefer: [gemini, claude]
+system: |
+  You analyse very large inputs. Map the whole thing first, then answer the question
+  with precise references (file paths, sections, line numbers) to where things are.

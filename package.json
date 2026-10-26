@@ -1,0 +1,35 @@
+{
+  "name": "ai-orchestrator",
+  "version": "0.1.0",
+  "description": "A brain that routes and splits work across Claude, ChatGPT/Codex, Gemini and Perplexity subscriptions, across multiple devices over Tailscale.",
+  "type": "module",
+  "bin": {
+    "orc": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "tsx watch src/cli.ts serve",
+    "start": "tsx src/cli.ts serve",
+    "orc": "tsx src/cli.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@hono/node-server": "^2.1.5",
+    "cross-spawn": "^7.0.6",
+    "hono": "^4.13.14",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/cross-spawn": "^6.0.6",
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
