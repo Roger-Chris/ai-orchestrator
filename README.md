@@ -112,6 +112,29 @@ Access controls what agents may do in the chosen folder on the hub: read-only (t
 
 Requests that come through `tailscale serve` always need the token, even though the proxy runs on the PC itself.
 
+### Linux hub (systemd)
+
+On a Linux machine the hub runs as a systemd user service: it starts at boot, restarts if it crashes, and needs no login. The setup is sized for a small always-on box (8 GB RAM, hard disk, no GPU) that also runs the [AI_Assistant](https://github.com/Roger-Chris/AI_Assistant) brain.
+
+1. Install Git, Node 22 LTS (22.13+) and Tailscale (`sudo tailscale up`). For global npm installs without sudo, run `npm config set prefix ~/.local` (`~/.local/bin` is on Ubuntu's `PATH` once it exists; open a new shell).
+2. Install the CLIs and log in **on this machine**:
+   - `npm i -g @anthropic-ai/claude-code`, run `claude`, then `/login`. It shows a URL; finish in any browser and paste the code back.
+   - `npm i -g @openai/codex`, then `codex login --device-auth`. It shows a code to enter on another device.
+   - The Antigravity CLI: `curl -fsSL https://antigravity.google/cli/install.sh | bash`, then run `agy` once and sign in.
+3. Clone and install:
+   ```bash
+   git clone https://github.com/Roger-Chris/ai-orchestrator.git ~/ai-orchestrator
+   cd ~/ai-orchestrator
+   ```
+   Moving from another hub? Copy its `.env` (keeps the `ORC_TOKEN` your phone and devices already use), `fcm-service-account.json` and `data/` into this folder **before** the next step. Let the installer make a fresh `orchestrator.config.yaml` rather than copying a Windows one.
+   ```bash
+   deploy/linux/install.sh
+   ```
+   It checks Node and the CLIs, runs `npm ci`, creates the config if there is none (with `maxConcurrent: 1` per subscription and `maxParallelSteps: 2`, so the AI CLIs fit in 8 GB), builds the web app once, writes `~/.config/systemd/user/orchestrator-hub.service`, enables lingering and starts the hub. At boot the service waits for Tailscale before binding, and it is capped with `MemoryHigh=4G`.
+4. `npm run orc -- doctor --live` checks every subscription. The installer prints the phone app's address (`http://<tailscale-ip>:4317`). For HTTPS, run `tailscale serve --bg 4317` as above.
+
+Everyday: `journalctl --user -u orchestrator-hub -f` for logs, `systemctl --user restart orchestrator-hub` to restart, and `deploy/linux/update.sh` to update (`git pull --ff-only`, then the installer). `acceptBranchWork` stays `false` on this machine: coding on branches belongs on the laptop and, later, the Mac mini.
+
 ### The Android app
 
 [mobile/](mobile) is a native Android app (React Native with Expo) that does everything the web app does: conversations, answering agents, Continue/Edit/Redo/Stop, design approval, merging branches, devices and usage. You install it from an APK file; it is not on the Play Store. It talks to the hub over Tailscale with the same `ORC_TOKEN`, which it keeps in Android's encrypted storage.

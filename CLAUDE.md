@@ -19,6 +19,8 @@ npm run orc -- doctor --live
 npm start                  # builds the web app, serves on :4317 (loopback + this machine's Tailscale IP)
 ```
 
+The permanent hub is a **Linux machine** (8 GB RAM, hard disk, no GPU) that also runs the AI_Assistant brain (`../AI_Assistant`, brain on 127.0.0.1:8000). There the hub is a systemd user service: `deploy/linux/install.sh` (safe to re-run; makes a small-machine config if none exists), `deploy/linux/update.sh`, and `journalctl --user -u orchestrator-hub -f`. The unit runs `tsx src/cli.ts serve` directly, not `npm start`: the web app is built by the installer, not on every boot. The Windows laptop is for development and is a worker. The Mac mini joins later as a coding device (`acceptBranchWork: true`).
+
 Secrets that are not in git, on purpose:
 - `.env`: `ORC_TOKEN` (every device and the phone app use the same one) and optional `PERPLEXITY_API_KEY`.
 - `fcm-service-account.json`: Firebase private key (project `orchestrator-b6a5d`) so the hub can send phone notifications. On a new machine, generate a new one: Firebase console → Project settings → Service accounts → Generate new private key, saved in the repo root under that name. Delete old keys there.

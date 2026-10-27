@@ -1,0 +1,22 @@
+[Unit]
+Description=AI Orchestrator hub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=@REPO@
+# The hub runs the claude / codex / agy CLIs, so it needs the PATH they were installed on.
+Environment="PATH=@PATH@"
+# With server.host: tailscale the hub binds its Tailscale IP once, at start. At boot Tailscale may
+# not be up yet, and the hub would serve on loopback only, out of the phone's reach.
+ExecStartPre=@REPO@/deploy/linux/wait-tailscale.sh
+# The web app is built by install.sh / update.sh, not on every start (`npm start` would rebuild it).
+ExecStart=@REPO@/node_modules/.bin/tsx src/cli.ts serve
+Restart=always
+RestartSec=10
+TimeoutStartSec=180
+# Throttle the hub and its AI CLIs before they squeeze the brain and bridge on an 8 GB machine.
+MemoryHigh=4G
+
+[Install]
+WantedBy=default.target
