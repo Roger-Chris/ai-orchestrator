@@ -8,7 +8,7 @@ A brain that routes work across the owner's Claude, ChatGPT (Go), Gemini (Google
 - `web/`: React + Vite web app (PWA), built to `web/dist` by `npm start`.
 - `mobile/`: Expo (SDK 58) React Native Android app, installed from an APK, not the Play Store. It has its own `AGENTS.md`: read it before touching Expo APIs.
 - `agents/`: specialist agent YAML files.
-- `tests/`: vitest with fake providers. `npm test` must stay green (64 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
+- `tests/`: vitest with fake providers. `npm test` must stay green (70 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
 
 ## Running the hub
 
@@ -23,7 +23,7 @@ The permanent hub is a **Linux machine** (8 GB RAM, hard disk, no GPU) that also
 
 Secrets that are not in git, on purpose:
 - `gmail-client.json`: Google OAuth client for the Gmail reader (README: Gmail); the sign-in itself is in `data/gmail-token.json`.
-- `.env`: `ORC_TOKEN` (every device and the phone app use the same one) and optional `PERPLEXITY_API_KEY`.
+- `.env`: `ORC_TOKEN` (every device and the phone app use the same one), optional `PERPLEXITY_API_KEY` and `GROQ_API_KEY`.
 - `fcm-service-account.json`: Firebase private key (project `orchestrator-b6a5d`) so the hub can send phone notifications. On a new machine, generate a new one: Firebase console → Project settings → Service accounts → Generate new private key, saved in the repo root under that name. Delete old keys there.
 - `data/`: run history, memory, push subscriptions. Copy it to keep history; otherwise it starts empty and the phone app must tap Settings → Notifications → Turn on again.
 
@@ -50,6 +50,11 @@ Hard-won details:
 - The app opens on tabs: Home, Chats, Insights, Devices (`mobile/src/app/(tabs)/`). Home reads `GET /api/home` (`src/server/home.ts`): today's tasks, open decisions, running work, "needs a look" and recent runs. Insights reads `GET /api/insights`.
 - Today's tasks come from the `tasks` table via `POST /api/tasks` (`{title, time?, day?, source: gmail|whatsapp|manual, detail?, id?}`; re-sending the same `id` replaces it). The Gmail reader (`src/integrations/gmail.ts`) fills it; WhatsApp is not built yet.
 - Gmail: the owner's own OAuth client (`gmail-client.json`, not in git) and a refresh token in `data/gmail-token.json` from `orc gmail connect` (works headless: paste the redirect address). The reader polls every `gmail.pollMinutes`, sends new mail in batches of 10 to the first ready of Claude/Gemini/ChatGPT for JSON tasks, and marks mail seen (`gmail_seen`) only after a batch parses, so failures retry.
+
+## Groq and other OpenAI-compatible APIs
+
+- `src/providers/openai-compat.ts` is a generic streaming `/chat/completions` provider; Groq is an instance of it (`providers.groq`, `GROQ_API_KEY` or `GROQ_API_KEYS` comma-separated: keys rotate, a 429 rests that key until its retry-after, a 401/403 rests it for an hour) and Perplexity extends it for citations. A new service needs a `ProviderId`, a config block, a registry line and a row in `src/brain/capabilities.ts` (every `Record<ProviderId, ...>` must list it: `AGENTIC`, `PROVIDER_NAME`, app labels).
+- Groq is not agentic (no files, no web), so the router never gives it workspace or branch steps. It leads only `quick` (Gemini via `agy` was too slow there), classifies each task when `brain.classifier` is `model` (8 s timeout, keyword fallback; see `refineClassification`), and is tried first for Gmail.
 
 ## Phone notifications (FCM)
 

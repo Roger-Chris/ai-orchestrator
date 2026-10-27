@@ -57,8 +57,11 @@ Log each CLI in once with **your** account:
 | ChatGPT Go/Plus/Pro | `npm i -g @openai/codex@latest` (or the Codex desktop app) | `codex login`, then **Sign in with ChatGPT** |
 | Google AI Pro | Antigravity CLI (`agy`): `irm https://antigravity.google/cli/install.ps1 \| iex` (Windows) or `curl -fsSL https://antigravity.google/cli/install.sh \| bash` | run `agy` once and sign in with Google |
 | Perplexity Pro (optional) | none | the API is billed separately from Pro. If you have API credit, put `PERPLEXITY_API_KEY=` in `.env`; without it, research goes to Claude, ChatGPT and Gemini, which search the web themselves |
+| Groq (optional, free tier) | none | create a key at [console.groq.com](https://console.groq.com/keys) and put `GROQ_API_KEY=` in `.env` (or several keys as `GROQ_API_KEYS=key1,key2`: when one hits its limit or is rejected, the next is used). Groq answers in about a second, so it takes quick questions, classifies every task and reads your Gmail; without it those go to the other models |
 
 Since June 2026 the Gemini CLI's Google sign-in no longer works for Google AI Pro, so the orchestrator uses the Antigravity CLI when it's installed. It still falls back to `gemini` if you have a `GEMINI_API_KEY` or a work licence.
+
+Groq is an OpenAI-compatible API (`providers.groq`: `baseUrl`, `model`, `deepModel`). It runs open models (gpt-oss, Qwen; default `openai/gpt-oss-120b`): much faster than the CLIs but weaker at hard reasoning and code, with no web access and no file access, so the router only gives it quick work. Its free tier has per-model daily limits; when one is hit, the orchestrator cools Groq down and uses the others. Any other OpenAI-compatible service (OpenRouter, Mistral, Cloudflare Workers AI) can be added the same way in `src/providers/registry.ts`.
 
 On Windows the orchestrator automatically uses the Codex desktop app's bundled CLI when present. Older npm `codex` versions reject current models for ChatGPT-plan accounts.
 

@@ -1,4 +1,5 @@
 import { createVerify, generateKeyPairSync } from "node:crypto";
+import { createServer } from "node:http";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +13,7 @@ import { parseConfig } from "../src/config.js";
 import type { Provider } from "../src/providers/base.js";
 import { ProviderPool } from "../src/providers/registry.js";
 import { GmailReader, parseTasks } from "../src/integrations/gmail.js";
+import { OpenAICompatProvider } from "../src/providers/openai-compat.js";
 import { createApp } from "../src/server/app.js";
 import { localDay } from "../src/server/home.js";
 import { Fcm } from "../src/server/fcm.js";
@@ -287,6 +289,80 @@ describe("gmail reader", () => {
     const text = `{"tasks":[{"email":1,"title":"Old","day":"2000-01-01"},{"email":5,"title":"Ghost"},{"email":1,"title":" "},{"email":1,"title":"Reply to Priya","time":"null"}]}`;
     expect(parseTasks(text, mails, today)).toEqual([{ id: "gmail:a:3", day: today, time: undefined, title: "Reply to Priya", detail: undefined }]);
     expect(parseTasks("no json here", mails, today)).toBeUndefined();
+  });
+});
+
+describe("groq", () => {
+  it("classifies with Groq, then answers a quick question with it", async () => {
+    const s = system({
+      groq: (req) => ({ text: req.prompt.startsWith("Classify this task") ? '{"kind":"quick","complexity":"simple","needsWeb":false,"needsWorkspace":false}' : "Paris" }),
+      claude: () => ({ text: "from claude" }),
+    });
+    const run = await s.orchestrator.runToCompletion("What's the capital of France? Explain the decision briefly.", { mode: "auto" });
+    expect(run.classification).toMatchObject({ kind: "quick", complexity: "simple" });
+    expect(run.steps[0].provider).toBe("groq");
+    expect(run.result).toBe("Paris");
+  });
+
+  it("falls back to keywords when Groq fails, and the run still finishes", async () => {
+    const s = system({ groq: () => ({ ok: false, error: "HTTP 500" }), claude: () => ({ text: "from claude" }) });
+    const run = await s.orchestrator.runToCompletion("Fix this TypeError crash in my React app", { mode: "direct" });
+    expect(run.classification?.kind).toBe("debugging");
+    expect(run.result).toBe("from claude");
+  });
+
+  it("streams from an OpenAI-compatible API and reads its rate limits", async () => {
+    let mode = "ok";
+    let body: any;
+    const seenKeys: string[] = [];
+    const server = createServer((req, res) => {
+      let raw = "";
+      req.on("data", (d) => (raw += d));
+      req.on("end", () => {
+        body = JSON.parse(raw);
+        const key = String(req.headers.authorization).slice(7);
+        if (mode === "per-key") {
+          seenKeys.push(key);
+          if (key.startsWith("limited")) return void res.writeHead(429, { "retry-after": "60" }).end("slow down");
+          if (key === "revoked") return void res.writeHead(401).end("invalid key");
+        }
+        if (mode === "limit") return void res.writeHead(429, { "retry-after": "30" }).end('{"error":{"message":"rate limit"}}');
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.write('data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n');
+        res.write('data: {"choices":[{"delta":{"content":"lo"}}],"x_groq":{"usage":{"prompt_tokens":5,"completion_tokens":2}}}\n\n');
+        res.end("data: [DONE]\n\n");
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    cleanup.push(() => server.close());
+    const baseUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`;
+    const p = new OpenAICompatProvider("groq", { baseUrl, apiKey: "k", model: "small", deepModel: "big" }, "no key");
+
+    const deltas: string[] = [];
+    const r = await p.run({ prompt: "hi", system: "be brief", deep: true, onDelta: (t) => deltas.push(t) });
+    expect(r).toMatchObject({ ok: true, text: "Hello", provider: "groq", model: "big", usage: { inputTokens: 5, outputTokens: 2 } });
+    expect(deltas).toEqual(["Hel", "lo"]);
+    expect(body.messages).toEqual([{ role: "system", content: "be brief" }, { role: "user", content: "hi" }]);
+
+    mode = "limit";
+    const limited = await p.run({ prompt: "hi" });
+    expect(limited).toMatchObject({ ok: false, rateLimited: true });
+    expect(limited.retryAt! - Date.now()).toBeGreaterThan(25_000);
+
+    // Several keys: a limited one rests and the next is used; a rejected one is skipped.
+    mode = "per-key";
+    const rot = new OpenAICompatProvider("groq", { baseUrl, apiKeys: ["limited", "revoked", "good"], model: "small" }, "no key");
+    expect((await rot.detect()).detail).toContain("3 keys in rotation");
+    expect(await rot.run({ prompt: "hi" })).toMatchObject({ ok: true, text: "Hello" });
+    expect(await rot.run({ prompt: "hi" })).toMatchObject({ ok: true, text: "Hello" });
+    expect(seenKeys).toEqual(["limited", "revoked", "good", "good"]); // the resting keys are not tried again
+
+    const allLimited = new OpenAICompatProvider("groq", { baseUrl, apiKeys: ["limited", "limited2"], model: "small" }, "no key");
+    expect(await allLimited.run({ prompt: "hi" })).toMatchObject({ ok: false, rateLimited: true });
+
+    const noKey = new OpenAICompatProvider("groq", { baseUrl, model: "small" }, "Set GROQ_API_KEY");
+    expect(await noKey.detect()).toMatchObject({ authenticated: false, detail: "Set GROQ_API_KEY" });
+    expect((await noKey.run({ prompt: "hi" })).error).toBe("Set GROQ_API_KEY");
   });
 });
 

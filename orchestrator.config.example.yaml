@@ -53,6 +53,12 @@ providers:
     model: sonar-pro
     deepModel: sonar-deep-research
     maxConcurrent: 2
+  groq:                      # optional, free tier: fast answers for quick questions, task classification, Gmail
+    apiKey: ${GROQ_API_KEY}  # console.groq.com/keys; or several: GROQ_API_KEYS=key1,key2 (rotated on limits)
+    baseUrl: https://api.groq.com/openai/v1
+    model: openai/gpt-oss-120b    # see console.groq.com/docs/models; Groq retires models, so check if calls fail
+    deepModel: openai/gpt-oss-120b
+    maxConcurrent: 4
 
 branches:                    # coding on git branches across devices ("Branches across devices" / --branches)
   remote: origin
@@ -82,7 +88,7 @@ gmail:                       # today's tasks from your mail; off until `orc gmai
   clientFile: gmail-client.json
   pollMinutes: 15
   query: "in:inbox newer_than:2d -category:promotions -category:social -category:forums"
-  provider: auto             # model that reads the mail: auto | claude | gemini | codex
+  provider: auto             # model that reads the mail: auto (Groq first) | groq | claude | gemini | codex
 
 cluster:
   enabled: true

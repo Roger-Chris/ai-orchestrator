@@ -1,4 +1,4 @@
-import type { Classification, TaskKind } from "../types.js";
+import { type Classification, TASK_KINDS, type TaskKind } from "../types.js";
 
 /** Weighted keyword signals per kind. Fast and free; the planner refines complex tasks. */
 const SIGNALS: Record<TaskKind, [RegExp, number][]> = {
@@ -75,5 +75,39 @@ export function classify(task: string): Classification {
     needsWeb: WEB.test(task) || kind === "research",
     needsWorkspace: WORKSPACE.test(task),
     scores,
+  };
+}
+
+/** Asks a fast model what kind of work a task is; the answer refines the keyword guess. */
+export function classifyPrompt(task: string): string {
+  return [
+    "Classify this task for a router that sends work to AI models. Answer with JSON only:",
+    `{"kind":"<one of: ${TASK_KINDS.join(", ")}>","complexity":"simple|moderate|complex","needsWeb":true|false,"needsWorkspace":true|false}`,
+    "simple: one model can answer it in one go. moderate: a few parts. complex: several different kinds of work that need a plan.",
+    "needsWeb: needs current information from the internet. needsWorkspace: must read or change files in a project folder.",
+    "",
+    "TASK:",
+    task.length > 4000 ? `${task.slice(0, 4000)}…` : task,
+  ].join("\n");
+}
+
+/** The model's answer merged over the keyword classification; anything invalid keeps the keyword value. */
+export function refineClassification(c: Classification, answer: string): Classification {
+  let m: any;
+  try {
+    m = JSON.parse(answer.slice(answer.indexOf("{"), answer.lastIndexOf("}") + 1));
+  } catch {
+    return c;
+  }
+  const kind = (TASK_KINDS as readonly string[]).includes(m?.kind) ? (m.kind as TaskKind) : c.kind;
+  const complexity = ["simple", "moderate", "complex"].includes(m?.complexity) ? m.complexity : c.complexity;
+  return {
+    ...c,
+    kind,
+    alsoKinds: c.alsoKinds.filter((k) => k !== kind),
+    complexity,
+    // Keywords like "latest" or "edit the files" are strong signals; the model can add, not remove, them.
+    needsWeb: c.needsWeb || m?.needsWeb === true,
+    needsWorkspace: c.needsWorkspace || m?.needsWorkspace === true,
   };
 }

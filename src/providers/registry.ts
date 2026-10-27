@@ -4,6 +4,7 @@ import type { Provider } from "./base.js";
 import { ClaudeProvider } from "./claude.js";
 import { CodexProvider } from "./codex.js";
 import { GeminiProvider } from "./gemini.js";
+import { OpenAICompatProvider } from "./openai-compat.js";
 import { PerplexityProvider } from "./perplexity.js";
 
 /** Counting semaphore so one device never floods a subscription. */
@@ -54,6 +55,7 @@ export class ProviderPool {
       overrides?.codex ?? new CodexProvider(p.codex),
       overrides?.gemini ?? new GeminiProvider(p.gemini),
       overrides?.perplexity ?? new PerplexityProvider(p.perplexity),
+      overrides?.groq ?? new OpenAICompatProvider("groq", p.groq, "Optional. Set GROQ_API_KEY (free at console.groq.com) for fast answers to quick questions and Gmail reading."),
     ];
     for (const prov of all) {
       if (!p[prov.id].enabled && !overrides?.[prov.id]) continue;

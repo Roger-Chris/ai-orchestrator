@@ -5,7 +5,7 @@ import type { GmailReader } from "../integrations/gmail.js";
 import type { Store } from "../store/db.js";
 import type { Attention, Decision, Home, Insights, ProviderId, Running } from "../types.js";
 
-export const PROVIDER_NAME: Record<ProviderId, string> = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity" };
+export const PROVIDER_NAME: Record<ProviderId, string> = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity", groq: "Groq" };
 
 /** Local date as YYYY-MM-DD (the hub's time zone, which is yours). */
 export const localDay = (t = new Date()) => `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;

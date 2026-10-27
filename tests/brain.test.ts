@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildCapabilities } from "../src/brain/capabilities.js";
-import { classify } from "../src/brain/classifier.js";
+import { classify, refineClassification } from "../src/brain/classifier.js";
 import { extractJson, normalizePlan } from "../src/brain/planner.js";
 import { Router } from "../src/brain/router.js";
 import { looksRateLimited, parseRetryAt } from "../src/providers/base.js";
@@ -32,6 +32,19 @@ describe("classifier", () => {
   });
 });
 
+describe("classification by a model", () => {
+  it("takes the model's kind and complexity, keeps keyword web and workspace signals", () => {
+    const c = classify("edit the files so the latest totals show"); // workspace + web by keyword
+    const r = refineClassification(c, 'Here: {"kind":"data_analysis","complexity":"simple","needsWeb":false,"needsWorkspace":false}');
+    expect(r).toMatchObject({ kind: "data_analysis", complexity: "simple", needsWeb: true, needsWorkspace: true });
+  });
+  it("ignores an invalid answer", () => {
+    const c = classify("hi there");
+    expect(refineClassification(c, "not json")).toEqual(c);
+    expect(refineClassification(c, '{"kind":"poetry","complexity":"huge"}')).toMatchObject({ kind: c.kind, complexity: c.complexity });
+  });
+});
+
 describe("router", () => {
   const router = new Router(buildCapabilities(), { localBias: 0.5, learn: true }, {
     feedbackStats: (kind) => (kind === "coding" ? { codex: { up: 20, down: 0 }, claude: { up: 0, down: 20 } } : {}),
@@ -40,6 +53,13 @@ describe("router", () => {
 
   it("sends research to Perplexity", () => {
     expect(router.rank({ kind: "research", needsWeb: true }, all)[0].provider).toBe("perplexity");
+  });
+  it("sends quick questions to Groq, but never workspace or branch work", () => {
+    const withGroq = [...all, { node: "me", provider: "groq" as const, local: true, load: 0, branchWork: true }];
+    expect(router.rank({ kind: "quick" }, withGroq)[0].provider).toBe("groq");
+    expect(router.rank({ kind: "coding" }, withGroq)[0].provider).not.toBe("groq");
+    expect(router.rank({ kind: "quick", needsWorkspace: true }, withGroq).some((x) => x.provider === "groq")).toBe(false);
+    expect(router.rank({ kind: "quick", branchWork: true }, withGroq).some((x) => x.provider === "groq")).toBe(false);
   });
   it("sends long context to Gemini", () => {
     expect(router.rank({ kind: "long_context" }, all)[0].provider).toBe("gemini");

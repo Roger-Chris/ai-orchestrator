@@ -91,7 +91,7 @@ async function cmdServe(config: Config) {
   const status = await sys.pool.status();
   console.log(`\n  AI Orchestrator · device "${config.node.name}"`);
   for (const host of hosts) console.log(`  → http://${host === "0.0.0.0" ? "localhost" : host}:${config.server.port}`);
-  console.log(`  → OpenAI-compatible: http://localhost:${config.server.port}/v1  (model: orchestrator | auto | claude | codex | gemini | perplexity | agent:<name>)\n`);
+  console.log(`  → OpenAI-compatible: http://localhost:${config.server.port}/v1  (model: orchestrator | auto | claude | codex | gemini | perplexity | groq | agent:<name>)\n`);
   for (const s of status) console.log(`  ${s.installed && s.authenticated ? "✓" : "✗"} ${s.id.padEnd(10)} ${s.version ?? ""} ${s.detail ?? ""}`);
   console.log(`  ${sys.agents.size} agents loaded · cluster ${config.cluster.enabled ? `on (tailscale discovery ${config.cluster.tailscale ? "on" : "off"})` : "off"}\n`);
 }
@@ -213,8 +213,7 @@ async function cmdGmail(config: Config, sub = "status") {
       const pasted = new Promise<string>((r) => rl.once("line", r));
       try {
         const email = await sys.gmail.connect({ print: (s) => console.log(s), pasted });
-        console.log(`
-✓ Gmail connected as ${email}. Checking your mail now…`);
+        console.log(`\n✓ Gmail connected as ${email}. Checking your mail now…`);
       } finally {
         rl.close();
       }
@@ -257,7 +256,7 @@ function cmdInit() {
   const envPath = resolve(process.cwd(), ".env");
   const env = existsSync(envPath) ? readFileSync(envPath, "utf8") : "";
   if (!/^ORC_TOKEN=/m.test(env)) {
-    writeFileSync(envPath, `${env}${env && !env.endsWith("\n") ? "\n" : ""}ORC_TOKEN=${randomBytes(32).toString("hex")}\n# PERPLEXITY_API_KEY=pplx-...\n`);
+    writeFileSync(envPath, `${env}${env && !env.endsWith("\n") ? "\n" : ""}ORC_TOKEN=${randomBytes(32).toString("hex")}\n# PERPLEXITY_API_KEY=pplx-...\n# GROQ_API_KEY=gsk_...\n`);
     console.log(`wrote a new ORC_TOKEN to ${envPath}; copy the SAME token to every device`);
   }
 }
@@ -270,13 +269,13 @@ async function cmdMcp(config: Config) {
     {
       name: "orchestrate",
       description:
-        "Hand a task to the multi-model orchestrator. It plans, routes sub-tasks to the best model (Claude, ChatGPT/Codex, Gemini, Perplexity) across your devices, and returns the merged result.",
+        "Hand a task to the multi-model orchestrator. It plans, routes sub-tasks to the best model (Claude, ChatGPT/Codex, Gemini, Perplexity, Groq) across your devices, and returns the merged result.",
       inputSchema: {
         type: "object",
         properties: {
           task: { type: "string" },
           mode: { type: "string", enum: ["auto", "direct", "plan"] },
-          provider: { type: "string", enum: ["claude", "codex", "gemini", "perplexity"] },
+          provider: { type: "string", enum: ["claude", "codex", "gemini", "perplexity", "groq"] },
           agent: { type: "string", description: "Specialist agent name, e.g. researcher, pcb-designer, cad-modeler" },
         },
         required: ["task"],

@@ -50,6 +50,8 @@ const ConfigSchema = z.object({
       /** Provider that plans and synthesizes. */
       planner: z.enum(["claude", "codex", "gemini"]).default("claude"),
       plannerModel: z.string().optional(),
+      /** "model": Groq refines the keyword classification of each task (when GROQ_API_KEY is set); "keywords": keywords only. */
+      classifier: z.enum(["model", "keywords"]).default("model"),
       maxParallelSteps: z.number().int().min(1).default(4),
       maxPlanSteps: z.number().int().min(1).default(8),
       defaultPermission: z.enum(["read", "edit", "full"]).default("read"),
@@ -72,6 +74,22 @@ const ConfigSchema = z.object({
           model: z.string().default("sonar-pro"),
           deepModel: z.string().default("sonar-deep-research"),
           baseUrl: z.string().default("https://api.perplexity.ai"),
+        })
+        .prefault({}),
+      /**
+       * Groq: a fast OpenAI-compatible API with a free tier (console.groq.com). Takes quick
+       * questions and reads Gmail. Any other OpenAI-compatible service works the same way.
+       */
+      groq: z
+        .object({
+          ...providerBase,
+          apiKey: z.string().optional(),
+          /** Several keys to rotate through (GROQ_API_KEYS, comma-separated): when one hits its limit the next is used. */
+          apiKeys: z.array(z.string()).default([]),
+          baseUrl: z.string().default("https://api.groq.com/openai/v1"),
+          model: z.string().default("openai/gpt-oss-120b"),
+          deepModel: z.string().default("openai/gpt-oss-120b"),
+          maxConcurrent: z.number().int().min(1).default(4),
         })
         .prefault({}),
     })
@@ -129,8 +147,8 @@ const ConfigSchema = z.object({
       pollMinutes: z.number().min(2).default(15),
       /** Gmail search for mail worth reading. */
       query: z.string().default("in:inbox newer_than:2d -category:promotions -category:social -category:forums"),
-      /** Model that reads the mail: auto uses the first ready of Claude, Gemini, ChatGPT. */
-      provider: z.enum(["auto", "claude", "codex", "gemini"]).default("auto"),
+      /** Model that reads the mail: auto uses the first ready of Groq, Claude, Gemini, ChatGPT. */
+      provider: z.enum(["auto", "groq", "claude", "codex", "gemini"]).default("auto"),
     })
     .prefault({}),
   cluster: z
@@ -170,6 +188,8 @@ export function parseConfig(raw: unknown): Config {
   if (!cfg.server.token) cfg.server.token = process.env.ORC_TOKEN || undefined;
   // Without a key Perplexity stays listed but reports itself as not logged in.
   if (!cfg.providers.perplexity.apiKey) cfg.providers.perplexity.apiKey = process.env.PERPLEXITY_API_KEY || undefined;
+  if (!cfg.providers.groq.apiKey) cfg.providers.groq.apiKey = process.env.GROQ_API_KEY || undefined;
+  if (!cfg.providers.groq.apiKeys.length) cfg.providers.groq.apiKeys = (process.env.GROQ_API_KEYS ?? "").split(",").map((k) => k.trim()).filter(Boolean);
   return cfg;
 }
 

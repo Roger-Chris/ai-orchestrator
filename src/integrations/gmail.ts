@@ -10,7 +10,7 @@ import type { ProviderId } from "../types.js";
 /**
  * Reads your Gmail (read-only) every few minutes and turns mail you have to act on
  * (appointments, bills due, deliveries, requests) into tasks for the home screen.
- * Uses your own Google OAuth client (gmail-client.json) and one of your model CLIs to
+ * Uses your own Google OAuth client (gmail-client.json) and one of your models (Groq first) to
  * pick the tasks out; no mail is stored, only the ids of messages already looked at.
  */
 
@@ -226,8 +226,8 @@ export class GmailReader {
   private async pickProvider(): Promise<ProviderId> {
     if (this.opts.provider !== "auto") return this.opts.provider;
     const ready = await this.pool.available();
-    const pick = (["claude", "gemini", "codex"] as ProviderId[]).find((p) => ready.includes(p));
-    if (!pick) throw new Error("no model is ready to read mail (Claude, Gemini or ChatGPT)");
+    const pick = (["groq", "claude", "gemini", "codex"] as ProviderId[]).find((p) => ready.includes(p));
+    if (!pick) throw new Error("no model is ready to read mail (Groq, Claude, Gemini or ChatGPT)");
     return pick;
   }
 

@@ -11,6 +11,7 @@ import type { Store } from "../store/db.js";
 import { git } from "../cluster/branchwork.js";
 import type {
   BranchJob,
+  Classification,
   TestRun,
   DesignDecision,
   Permission,
@@ -26,7 +27,7 @@ import type {
   StepRecord,
 } from "../types.js";
 import { DEEP_KINDS } from "./capabilities.js";
-import { classify } from "./classifier.js";
+import { classify, classifyPrompt, refineClassification } from "./classifier.js";
 import { type PriorRound, designSlug, elephantPrompt, goldfishPrompt, implementationTask, pickGoldfish } from "./design.js";
 import { buildPlannerPrompt, extractJson, normalizePlan, singleStepPlan, synthesisPrompt } from "./planner.js";
 import type { Router } from "./router.js";
@@ -186,7 +187,7 @@ export class Orchestrator {
     const opts = run.options;
     try {
       this.emit(l, "run.started", { task: run.task, options: opts });
-      const c = classify(run.task);
+      const c = await this.classify(run.task, opts);
       run.classification = c;
       this.emit(l, "run.classified", c);
       if (opts.branches) await this.prepareBranches(l);
@@ -490,6 +491,21 @@ export class Orchestrator {
       this.emit(l, "step.progress", { note: `could not save the design: ${(e as Error).message}` }, l.run.design?.draftStepId);
       return undefined;
     }
+  }
+
+  /**
+   * Keyword classification, refined by Groq when it is set up (about a second). It decides
+   * which model gets the work and whether a task needs a plan, so a better guess here
+   * saves a slow planning call. Any problem keeps the keyword guess.
+   */
+  private async classify(task: string, opts: RunOptions): Promise<Classification> {
+    const c = classify(task);
+    if (this.config.brain.classifier !== "model" || opts.agent || opts.provider) return c;
+    const target = (await this.cluster.candidates()).filter((x) => x.provider === "groq").sort((a, b) => Number(b.local) - Number(a.local) || a.load - b.load)[0];
+    if (!target) return c;
+    const res = await this.cluster.run(target.node, "groq", { prompt: classifyPrompt(task), permission: "read", timeoutMs: 8000 });
+    this.store.recordUsage("groq", target.node, res.ok, res.durationMs);
+    return res.ok ? refineClassification(c, res.text) : c;
   }
 
   /** Asks the planner model for a step graph; falls back to one step on any problem. */
