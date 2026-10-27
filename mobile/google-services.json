@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "449944253922",
+    "project_id": "orchestrator-b6a5d",
+    "storage_bucket": "orchestrator-b6a5d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:449944253922:android:dd9b575fd3c5bd04fa35bb",
+        "android_client_info": {
+          "package_name": "dev.rogerchris.orchestrator"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCY-ug7g18XzXF4TJY15_EGRZSMNfpm4Wo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -44,8 +44,8 @@ yarn-error.*
 android/
 ios/
 
-# Your Firebase app config: personal to your project
-google-services.json
+# google-services.json is committed on purpose: it holds only public Firebase IDs, and builds
+# need it for notifications. The private key (fcm-service-account.json) lives on the hub only.
 
 # Local build log
 build.log
