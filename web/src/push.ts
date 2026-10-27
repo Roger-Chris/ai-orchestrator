@@ -26,7 +26,9 @@ export async function currentSubscription(): Promise<PushSubscription | null> {
 export async function enablePush(): Promise<void> {
   const support = pushSupport();
   if (!support.ok) throw new Error(support.why);
-  if ((await Notification.requestPermission()) !== "granted") throw new Error("Notifications are blocked for this site in your browser settings.");
+  const permission = await Notification.requestPermission();
+  if (permission === "denied") throw new Error("Notifications are blocked for this site. Allow them in the browser's site settings (the ⓘ next to the address).");
+  if (permission !== "granted") throw new Error("Notifications weren't allowed. Tap Turn on again and choose Allow.");
   const reg = await navigator.serviceWorker.ready;
   const { publicKey } = await Api.pushKey();
   const sub = (await reg.pushManager.getSubscription()) ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey) }));
