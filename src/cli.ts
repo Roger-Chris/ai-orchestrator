@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -18,6 +18,7 @@ import { type Config, loadConfig } from "./config.js";
 import { probeVersion } from "./providers/base.js";
 import { ProviderPool } from "./providers/registry.js";
 import { createApp } from "./server/app.js";
+import { Notifier } from "./server/push.js";
 import { Store } from "./store/db.js";
 import type { Permission, ProviderId, RunEvent, RunMode } from "./types.js";
 
@@ -30,8 +31,13 @@ export function buildSystem(config: Config) {
   const router = new Router(buildCapabilities(config.routing.overrides), { localBias: config.cluster.localBias, learn: config.brain.learnFromFeedback }, store);
   const agents = loadAgents([resolve(ROOT, "agents"), resolve(process.cwd(), "agents")]);
   const memory = new Memory(config, store);
-  const orchestrator = new Orchestrator(config, store, cluster, router, agents, { memory, workspace: (cwd) => workspaceMap(cwd, config) });
-  return { store, pool, cluster, router, orchestrator, agents, memory };
+  const notifier = new Notifier(store, resolve(config.dataDir));
+  const orchestrator = new Orchestrator(config, store, cluster, router, agents, {
+    memory,
+    workspace: (cwd) => workspaceMap(cwd, config),
+    onAttention: notifier.attention,
+  });
+  return { store, pool, cluster, router, orchestrator, agents, memory, notifier };
 }
 
 async function bindHosts(config: Config): Promise<string[]> {
@@ -52,7 +58,9 @@ async function bindHosts(config: Config): Promise<string[]> {
 async function cmdServe(config: Config) {
   const sys = buildSystem(config);
   sys.store.failStaleRuns();
-  const app = createApp({ ...sys, config, publicDir: relative(process.cwd(), resolve(ROOT, "public")) || "." });
+  const web = resolve(ROOT, "web", "dist");
+  if (!existsSync(join(web, "index.html"))) console.warn("! The app is not built yet: run `npm run build:web` (npm start does it for you).");
+  const app = createApp({ ...sys, config, publicDir: relative(process.cwd(), web) || "." });
   const hosts = await bindHosts(config);
   for (const hostname of hosts) serve({ fetch: app.fetch, port: config.server.port, hostname });
   sys.cluster.start();

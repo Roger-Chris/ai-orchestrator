@@ -115,15 +115,16 @@ export function normalizePlan(raw: unknown, task: string, c: Classification, age
   return { goal: parsed.goal || task.slice(0, 200), synthesize: parsed.synthesize && steps.length > 1, steps };
 }
 
-export function singleStepPlan(task: string, c: Classification, agents: Map<string, Agent>, agentName?: string): Plan {
+/** `label` is what you typed, when `task` also carries conversation history or a design. */
+export function singleStepPlan(task: string, c: Classification, agents: Map<string, Agent>, agentName?: string, label = task): Plan {
   const agent = (agentName && agents.get(agentName)) || [...agents.values()].find((a) => a.kind === c.kind);
   return {
-    goal: task.slice(0, 200),
+    goal: label.slice(0, 200),
     synthesize: false,
     steps: [
       {
         id: "s1",
-        title: agent ? `${agent.name}: ${task.slice(0, 60)}` : task.slice(0, 60),
+        title: agent ? `${agent.name}: ${label.slice(0, 60)}` : label.slice(0, 60),
         kind: agent?.kind ?? c.kind,
         agent: agent?.name,
         prompt: task,

@@ -4,7 +4,8 @@ import { classify } from "../src/brain/classifier.js";
 import { extractJson, normalizePlan } from "../src/brain/planner.js";
 import { Router } from "../src/brain/router.js";
 import { looksRateLimited, parseRetryAt } from "../src/providers/base.js";
-import { interpolateEnv, parseConfig } from "../src/config.js";
+import YAML from "yaml";
+import { dropNulls, interpolateEnv, parseConfig } from "../src/config.js";
 import { loadAgents } from "../src/agents/loader.js";
 import { messagesToPrompt, modelToOptions } from "../src/server/app.js";
 import { GeminiProvider } from "../src/providers/gemini.js";
@@ -118,6 +119,11 @@ describe("config & API helpers", () => {
     expect(cfg.server.port).toBe(4317);
     expect(cfg.server.token).toBeUndefined();
     expect(cfg.providers.perplexity.apiKey).toBeUndefined();
+  });
+  it("treats empty config values (unset ${VAR}) as not set", () => {
+    const raw = YAML.parse(interpolateEnv("providers:\n  perplexity:\n    apiKey: ${NOPE_UNSET_KEY}\n", {}));
+    expect(() => parseConfig(raw)).toThrow();
+    expect(parseConfig(dropNulls(raw)).providers.perplexity.model).toBe("sonar-pro");
   });
   it("maps OpenAI model names", () => {
     expect(modelToOptions("gemini")).toEqual({ mode: "direct", provider: "gemini" });

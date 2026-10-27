@@ -162,5 +162,12 @@ export function loadConfig(path?: string): { config: Config; path?: string } {
   const candidate = path ?? process.env.ORC_CONFIG ?? resolve(cwd, "orchestrator.config.yaml");
   if (!existsSync(candidate)) return { config: parseConfig({}) };
   const raw = YAML.parse(interpolateEnv(readFileSync(candidate, "utf8")));
-  return { config: parseConfig(raw), path: candidate };
+  return { config: parseConfig(dropNulls(raw)), path: candidate };
+}
+
+/** `key:` with nothing after it (e.g. an unset ${VAR}) parses as null; treat it as not set. */
+export function dropNulls(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(dropNulls);
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).filter(([, x]) => x !== null).map(([k, x]) => [k, dropNulls(x)]));
+  return v;
 }

@@ -14,6 +14,7 @@ import type {
   TestRun,
   DesignDecision,
   Permission,
+  ReviewDecision,
   Plan,
   PlanStep,
   ProviderId,
@@ -34,6 +35,20 @@ import type { Router } from "./router.js";
 const MAX_ATTEMPTS = 3;
 /** Cap on each upstream output pasted into a dependent step's prompt. */
 const MAX_DEP_CHARS = 16_000;
+/** Questions answered plus redos per step, before it just finishes. */
+const MAX_ROUNDS = 8;
+const MAX_HISTORY_TURNS = 6;
+const MAX_HISTORY_CHARS = 3000;
+
+const ASK_INSTRUCTIONS = `If you cannot do this well without a decision only the user can make (a missing requirement,
+or a choice between options with real trade-offs), reply with ONLY <ask>your question</ask> and nothing
+else; you will get the answer and continue. Decide everything you reasonably can yourself.`;
+
+/** The agent's question, when its answer ends with <ask>…</ask>. */
+export function parseQuestion(text: string): string | undefined {
+  const m = text.match(/<ask>([\s\S]+?)<\/ask>\s*$/i);
+  return m?.[1].trim() || undefined;
+}
 
 interface Live {
   run: RunRecord;
@@ -44,19 +59,26 @@ interface Live {
   context?: Promise<string | undefined>;
   /** Set when the run works on git branches: where devices clone from and branch off. */
   branchCtx?: { repoUrl: string; base: string; cwd: string };
+  /** The task as the agents see it: your message plus the conversation so far. */
+  task: string;
+  stepAborts: Map<string, AbortController>;
+  /** Steps currently waiting for you. */
+  parked: number;
 }
 
 export interface OrchestratorExtras {
   memory?: Memory;
   /** Code map of a working folder (Graphify), for planning. */
   workspace?: (cwd: string) => Promise<WorkspaceMap | undefined>;
+  /** Something needs you (a question, a checkpoint, a design) or a run ended: e.g. send a phone notification. */
+  onAttention?: (run: RunRecord, step: StepRecord | undefined, type: RunEventType) => void | Promise<void>;
 }
 
 export class Orchestrator {
   private live = new Map<string, Live>();
   private bus = new EventEmitter();
-  /** Runs paused for your design approval, keyed by run id. */
-  private decisions = new Map<string, (d: DesignDecision) => void>();
+  /** Runs and steps paused for you: design approval (key: run id), questions and checkpoints (run:step). */
+  private waiters = new Map<string, (v: unknown) => void>();
 
   constructor(
     private config: Config,
@@ -73,6 +95,7 @@ export class Orchestrator {
   submit(task: string, options: RunOptions = {}): RunRecord {
     const run: RunRecord = {
       id: randomUUID().slice(0, 8),
+      threadId: options.threadId,
       task,
       options,
       status: "queued",
@@ -80,7 +103,10 @@ export class Orchestrator {
       createdAt: Date.now(),
     };
     const abort = new AbortController();
-    const entry: Live = { run, seq: 0, abort, done: Promise.resolve(run) };
+    const history = options.threadId ? this.threadHistory(options.threadId, run.id) : undefined;
+    const agentTask = history ? `${history}\n\nNEW MESSAGE FROM THE USER:\n${task}` : task;
+    const entry: Live = { run, seq: 0, abort, done: Promise.resolve(run), task: agentTask, stepAborts: new Map(), parked: 0 };
+    if (options.threadId) this.store.touchThread(options.threadId);
     this.live.set(run.id, entry);
     this.store.saveRun(run);
     entry.done = this.execute(entry).finally(() => {
@@ -108,6 +134,34 @@ export class Orchestrator {
     if (!l || ["done", "failed", "cancelled"].includes(l.run.status)) return false;
     l.abort.abort();
     return true;
+  }
+
+  /** The conversation so far, for a follow-up message: earlier requests and their results. */
+  private threadHistory(threadId: string, exclude: string): string | undefined {
+    const turns = this.store
+      .threadRuns(threadId)
+      .filter((r) => r.id !== exclude && (r.result || r.error))
+      .slice(-MAX_HISTORY_TURNS);
+    if (!turns.length) return undefined;
+    const lines = turns.map(
+      (r) => `User: ${truncate(r.task, 2000)}\nResult${r.status === "done" ? "" : ` (${r.status})`}: ${truncate(r.result ?? r.error ?? "", MAX_HISTORY_CHARS)}`,
+    );
+    return `CONVERSATION SO FAR (earlier messages and what the agents produced):\n\n${lines.join("\n\n")}`;
+  }
+
+  /** Runs still in progress or waiting for you, newest first. */
+  active(): Pick<RunRecord, "id" | "threadId" | "task" | "status" | "createdAt">[] {
+    return [...this.live.values()]
+      .map((l) => l.run)
+      .filter((r) => !["done", "failed", "cancelled"].includes(r.status))
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map(({ id, threadId, task, status, createdAt }) => ({ id, threadId, task, status, createdAt }));
+  }
+
+  /** Every event of every run (for notifications). */
+  subscribeAll(fn: (ev: RunEvent) => void): () => void {
+    this.bus.on("event", fn);
+    return () => this.bus.off("event", fn);
   }
 
   /** Subscribe to a run's events. Returns an unsubscribe function. */
@@ -138,17 +192,17 @@ export class Orchestrator {
       if (opts.branches) await this.prepareBranches(l);
 
       const mode = opts.mode ?? "auto";
-      let task = run.task;
+      let task = l.task;
       if (mode === "design") {
         const { doc, notes } = await this.designPhase(l);
-        task = implementationTask(run.task, truncate(doc, MAX_DEP_CHARS * 4), notes);
+        task = implementationTask(l.task, truncate(doc, MAX_DEP_CHARS * 4), notes);
       }
 
       run.status = "planning";
       this.save(l);
       let plan =
         mode === "direct" || opts.agent || (mode === "auto" && c.complexity === "simple")
-          ? singleStepPlan(task, c, this.agents, opts.agent)
+          ? singleStepPlan(task, c, this.agents, opts.agent, run.task)
           : await this.plan(l, task);
       if (mode === "design") plan = prefixIds(plan, "impl-");
       if (opts.provider) for (const s of plan.steps) s.provider = opts.provider;
@@ -183,6 +237,7 @@ export class Orchestrator {
       run.finishedAt = Date.now();
       this.save(l);
       this.emit(l, "run.completed", { result: run.result });
+      void this.extras.onAttention?.(run, undefined, "run.completed");
       // Local memory is written before the first await; the NotebookLM upload finishes in the background.
       this.extras.memory?.remember(run, (msg) => console.warn(msg)).catch((e) => console.warn(`memory: ${(e as Error).message}`));
     } catch (e) {
@@ -191,6 +246,7 @@ export class Orchestrator {
       run.finishedAt = Date.now();
       this.save(l);
       this.emit(l, "run.failed", { error: run.error });
+      if (run.status === "failed") void this.extras.onAttention?.(run, undefined, "run.failed");
     }
     return run;
   }
@@ -223,7 +279,7 @@ export class Orchestrator {
   }
 
   /** One attempt at a coding step on its own branch, on the chosen device. */
-  private async branchAttempt(l: Live, spec: PlanStep, rec: StepRecord, byId: Map<string, StepRecord>, cand: { node: string; provider: ProviderId }, prompt: string, agent: Agent | undefined): Promise<ProviderResult> {
+  private async branchAttempt(l: Live, spec: PlanStep, rec: StepRecord, byId: Map<string, StepRecord>, cand: { node: string; provider: ProviderId }, prompt: string, agent: Agent | undefined, signal: AbortSignal): Promise<ProviderResult> {
     const ctx = l.branchCtx!;
     const deps = spec.dependsOn.map((d) => byId.get(d)?.branch).filter((b): b is NonNullable<StepRecord["branch"]> => !!b?.pushed);
     const job: BranchJob = {
@@ -241,7 +297,7 @@ export class Orchestrator {
       timeoutMs: this.config.brain.stepTimeoutMinutes * 60_000,
     };
     const br = await this.cluster.runBranch(cand.node, job, {
-      signal: l.abort.signal,
+      signal,
       onDelta: (text) => this.emit(l, "step.delta", { text }, spec.id),
       onProgress: (note) => this.emit(l, "step.progress", { note }, spec.id),
     });
@@ -334,7 +390,7 @@ export class Orchestrator {
             title: round === 1 ? "Elephant: draft the design" : `Elephant: revise the design (round ${round})`,
             kind: "system_design",
             agent: this.agents.has("architect") ? "architect" : undefined,
-            prompt: elephantPrompt(run.task, prior, await this.context(l)),
+            prompt: elephantPrompt(l.task, prior, await this.context(l)),
             dependsOn: [],
             provider: available.has("claude") ? "claude" : undefined,
             // Runs here so it can read the codebase it is designing for.
@@ -373,6 +429,7 @@ export class Orchestrator {
       this.save(l);
       // Listen before announcing, so a decision made straight from the event isn't lost.
       const pending = this.waitForDecision(l);
+      void this.extras.onAttention?.(run, undefined, "design.review_ready");
       this.emit(l, "design.review_ready", {
         round,
         draftStepId: draftId,
@@ -399,25 +456,22 @@ export class Orchestrator {
   private waitForDecision(l: Live): Promise<DesignDecision> {
     return new Promise((resolveDecision, reject) => {
       const onAbort = () => {
-        this.decisions.delete(l.run.id);
+        this.waiters.delete(l.run.id);
         reject(new Error("cancelled"));
       };
       if (l.abort.signal.aborted) return onAbort();
       l.abort.signal.addEventListener("abort", onAbort, { once: true });
-      this.decisions.set(l.run.id, (d) => {
+      this.waiters.set(l.run.id, (d) => {
         l.abort.signal.removeEventListener("abort", onAbort);
-        this.decisions.delete(l.run.id);
-        resolveDecision(d);
+        this.waiters.delete(l.run.id);
+        resolveDecision(d as DesignDecision);
       });
     });
   }
 
   /** Approve or send back a design that is waiting for you. False when nothing is waiting. */
   decide(id: string, decision: DesignDecision): boolean {
-    const resolveDecision = this.decisions.get(id);
-    if (!resolveDecision) return false;
-    resolveDecision(decision);
-    return true;
+    return this.live.get(id)?.run.status === "awaiting_approval" ? this.resolveWaiter(id, decision) : false;
   }
 
   /** Writes the approved design to docs/designs/ (EGM's convention) when the run may edit files. */
@@ -541,53 +595,203 @@ export class Orchestrator {
       return;
     }
 
-    for (const cand of ranked) {
-      if (rec.attempts.length >= MAX_ATTEMPTS || l.abort.signal.aborted) break;
-      if (rec.attempts.length) this.emit(l, "step.fallback", { to: cand.provider, node: cand.node, why: cand.why }, spec.id);
+    // Each step can be stopped on its own, as well as with the whole run.
+    const ctrl = new AbortController();
+    const onRunAbort = () => ctrl.abort();
+    l.abort.signal.addEventListener("abort", onRunAbort, { once: true });
+    l.stepAborts.set(spec.id, ctrl);
+    const opts = l.run.options;
+    const askNote = opts.ask ? `\n\n${ASK_INSTRUCTIONS}` : "";
+    // Your answers to its questions and your redo instructions, carried into the next round.
+    let followUp = "";
 
-      rec.provider = cand.provider;
-      rec.node = cand.node;
-      this.emit(l, "step.progress", { note: `running on ${cand.provider} @ ${cand.node} (${cand.why})` }, spec.id);
-      const res: ProviderResult = onBranch
-        ? await this.branchAttempt(l, spec, rec, byId, cand, prompt, agent)
-        : await this.cluster.run(cand.node, cand.provider, {
-        prompt,
-        system: agent?.system,
-        deep: agent?.deep || DEEP_KINDS.includes(spec.kind),
-        cwd: cand.local ? resolve(l.run.options.cwd ?? process.cwd()) : undefined,
-        permission: cand.local ? permission : "read",
-        timeoutMs: this.config.brain.stepTimeoutMinutes * 60_000,
-        signal: l.abort.signal,
-        onDelta: (text) => this.emit(l, "step.delta", { text }, spec.id),
-        onProgress: (note) => this.emit(l, "step.progress", { note }, spec.id),
-      });
-      this.store.recordUsage(cand.provider, cand.node, res.ok, res.durationMs);
-      rec.attempts.push({ provider: cand.provider, node: cand.node, ok: res.ok, error: res.error, durationMs: res.durationMs });
+    try {
+      for (let round = 0; round < MAX_ROUNDS; round++) {
+        let res: ProviderResult | undefined;
+        let node = "";
+        let tries = 0;
+        for (const cand of ranked) {
+          if (tries >= MAX_ATTEMPTS || ctrl.signal.aborted) break;
+          if (tries++) this.emit(l, "step.fallback", { to: cand.provider, node: cand.node, why: cand.why }, spec.id);
+          rec.provider = cand.provider;
+          rec.node = node = cand.node;
+          this.emit(l, "step.progress", { note: `running on ${cand.provider} @ ${cand.node} (${cand.why})` }, spec.id);
+          const full = `${prompt}${followUp}${askNote}`;
+          const r: ProviderResult = onBranch
+            ? await this.branchAttempt(l, spec, rec, byId, cand, full, agent, ctrl.signal)
+            : await this.cluster.run(cand.node, cand.provider, {
+                prompt: full,
+                system: agent?.system,
+                deep: agent?.deep || DEEP_KINDS.includes(spec.kind),
+                cwd: cand.local ? resolve(opts.cwd ?? process.cwd()) : undefined,
+                permission: cand.local ? permission : "read",
+                timeoutMs: this.config.brain.stepTimeoutMinutes * 60_000,
+                signal: ctrl.signal,
+                onDelta: (text) => this.emit(l, "step.delta", { text }, spec.id),
+                onProgress: (note) => this.emit(l, "step.progress", { note }, spec.id),
+              });
+          this.store.recordUsage(cand.provider, cand.node, r.ok, r.durationMs);
+          rec.attempts.push({ provider: cand.provider, node: cand.node, ok: r.ok, error: r.error, durationMs: r.durationMs });
+          if (r.ok) {
+            res = r;
+            break;
+          }
+          this.emit(
+            l,
+            "step.progress",
+            { note: `${cand.provider} @ ${cand.node} failed: ${r.error?.slice(0, 300)}${r.rateLimited ? " (usage limit, cooling down)" : ""}` },
+            spec.id,
+          );
+        }
+        if (!res) break;
 
-      if (res.ok) {
+        // The agent asked you something instead of guessing: wait for your answer, then carry on.
+        const question = opts.ask ? parseQuestion(res.text) : undefined;
+        if (question) {
+          rec.question = question;
+          const answer = await this.pause<string>(l, rec, "waiting", "step.question", { question }, ctrl.signal);
+          (rec.answers ??= []).push({ question, answer });
+          rec.question = undefined;
+          this.emit(l, "step.answered", { question, answer }, spec.id);
+          followUp += `\n\n---\nYou asked: ${question}\nThe user answered: ${answer}\nContinue the task with this answer.`;
+          continue;
+        }
+
+        let output = res.text;
+        if (opts.checkpoints) {
+          rec.output = output;
+          const d = await this.pause<ReviewDecision>(l, rec, "review", "step.review", { output, provider: res.provider, model: res.model, node }, ctrl.signal);
+          if (d.action === "redo") {
+            followUp += `\n\n---\nYour previous answer was:\n${truncate(output, MAX_DEP_CHARS)}\n\nThe user asked you to redo it: ${d.instructions}`;
+            this.emit(l, "step.progress", { note: `redoing: ${d.instructions}` }, spec.id);
+            continue;
+          }
+          if (d.action === "edit") {
+            this.recordCorrection(l.run, rec, output, d.output);
+            output = d.output;
+            rec.edited = true;
+            this.emit(l, "step.edited", { output }, spec.id);
+          }
+        }
+
         rec.status = "done";
-        rec.output = res.text;
+        rec.output = output;
         rec.finishedAt = Date.now();
-        this.emit(
-          l,
-          "step.completed",
-          { provider: res.provider, model: res.model, node: cand.node, durationMs: res.durationMs, usage: res.usage, output: res.text },
-          spec.id,
-        );
+        this.emit(l, "step.completed", { provider: res.provider, model: res.model, node, durationMs: res.durationMs, usage: res.usage, output }, spec.id);
         return;
       }
-      this.emit(
-        l,
-        "step.progress",
-        { note: `${cand.provider} @ ${cand.node} failed: ${res.error?.slice(0, 300)}${res.rateLimited ? " (usage limit, cooling down)" : ""}` },
-        spec.id,
-      );
-    }
 
-    rec.status = "failed";
-    rec.error = rec.attempts.at(-1)?.error ?? "cancelled";
+      rec.status = "failed";
+      rec.error = ctrl.signal.aborted && !l.abort.signal.aborted ? "stopped by you" : (rec.attempts.at(-1)?.error ?? "cancelled");
+    } catch (e) {
+      // Stopped while waiting for you.
+      rec.status = "failed";
+      rec.error = l.abort.signal.aborted ? "cancelled" : (e as Error).message;
+    } finally {
+      l.abort.signal.removeEventListener("abort", onRunAbort);
+      l.stepAborts.delete(spec.id);
+    }
+    rec.question = undefined;
     rec.finishedAt = Date.now();
     this.emit(l, "step.failed", { error: rec.error }, spec.id);
+  }
+
+  /**
+   * Parks a step until you respond (an answer, or a checkpoint decision). The run shows as
+   * waiting while any step is parked; stopping the step or the run ends the wait.
+   */
+  private async pause<T>(l: Live, rec: StepRecord, status: "waiting" | "review", type: RunEventType, data: unknown, signal: AbortSignal): Promise<T> {
+    const key = `${l.run.id}:${rec.id}`;
+    rec.status = status;
+    l.parked++;
+    l.run.status = "waiting";
+    this.save(l);
+    const pending = new Promise<T>((resolveIt, reject) => {
+      const onAbort = () => {
+        this.waiters.delete(key);
+        reject(new Error("stopped by you"));
+      };
+      if (signal.aborted) return onAbort();
+      signal.addEventListener("abort", onAbort, { once: true });
+      this.waiters.set(key, (v) => {
+        signal.removeEventListener("abort", onAbort);
+        this.waiters.delete(key);
+        resolveIt(v as T);
+      });
+    });
+    this.emit(l, type, data, rec.id);
+    void this.extras.onAttention?.(l.run, rec, type);
+    try {
+      return await pending;
+    } finally {
+      l.parked--;
+      rec.status = "running";
+      if (l.run.status === "waiting" && !l.parked) l.run.status = "running";
+      this.save(l);
+    }
+  }
+
+  /** Answer a step's question. False when that step is not asking. */
+  answer(runId: string, stepId: string, answer: string): boolean {
+    const rec = this.live.get(runId)?.run.steps.find((s) => s.id === stepId);
+    return rec?.status === "waiting" ? this.resolveWaiter(`${runId}:${stepId}`, answer) : false;
+  }
+
+  /** Continue, edit or redo a step paused at a checkpoint. */
+  review(runId: string, stepId: string, decision: ReviewDecision): boolean {
+    const rec = this.live.get(runId)?.run.steps.find((s) => s.id === stepId);
+    return rec?.status === "review" ? this.resolveWaiter(`${runId}:${stepId}`, decision) : false;
+  }
+
+  /** Stops one step (running, asking or paused); steps that depend on it are skipped. */
+  stopStep(runId: string, stepId: string): boolean {
+    const ctrl = this.live.get(runId)?.stepAborts.get(stepId);
+    if (!ctrl) return false;
+    ctrl.abort();
+    return true;
+  }
+
+  /**
+   * Replaces a finished step's answer. Later steps that have not started use your version;
+   * on a finished run it updates the record (and the result, when it was this step's answer).
+   */
+  editStep(runId: string, stepId: string, output: string): { ok: boolean; error?: string } {
+    const l = this.live.get(runId);
+    const run = l?.run ?? this.store.getRun(runId);
+    const rec = run?.steps.find((s) => s.id === stepId);
+    if (!run || !rec) return { ok: false, error: "step not found" };
+    if (rec.status === "review") return this.review(runId, stepId, { action: "edit", output }) ? { ok: true } : { ok: false, error: "not paused" };
+    if (rec.status !== "done") return { ok: false, error: "only finished steps can be edited" };
+    const finished = ["done", "failed", "cancelled"].includes(run.status);
+    const started = run.plan?.steps.filter((s) => s.dependsOn.includes(stepId)).some((s) => run.steps.find((x) => x.id === s.id)?.status !== "pending");
+    if (!finished && started) return { ok: false, error: "steps that use this answer have already started; turn on checkpoints to edit before they do" };
+    const old = rec.output ?? "";
+    this.recordCorrection(run, rec, old, output);
+    rec.output = output;
+    rec.edited = true;
+    if (finished && run.result === old) run.result = output;
+    if (l) this.emit(l, "step.edited", { output }, stepId);
+    this.store.saveRun(run);
+    return { ok: true };
+  }
+
+  private resolveWaiter(key: string, value: unknown): boolean {
+    const w = this.waiters.get(key);
+    if (!w) return false;
+    w(value);
+    return true;
+  }
+
+  /** Your edits become corrections in memory, so similar future tasks see what you changed. */
+  private recordCorrection(run: RunRecord, rec: StepRecord, before: string, after: string) {
+    if (before === after || !this.config.memory.enabled) return;
+    this.store.addMemory({
+      runId: `${run.id}:${rec.id}:correction`,
+      task: `${run.task}\n${rec.title}`,
+      kind: rec.kind,
+      summary: `The user corrected an answer (${rec.agent ?? rec.kind}, ${rec.provider ?? "?"}) for "${rec.title}".\nBefore (excerpt):\n${before.slice(0, 1200)}\n\nAfter, the user's version (excerpt):\n${after.slice(0, 1800)}`,
+      ts: Date.now(),
+    });
   }
 
   private async synthesize(l: Live, done: StepRecord[]): Promise<string> {

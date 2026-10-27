@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { CooldownStore } from "../providers/registry.js";
 import type { FeedbackSource } from "../brain/router.js";
-import type { ProviderId, RunEvent, RunRecord, TaskKind } from "../types.js";
+import type { ProviderId, RunEvent, RunRecord, TaskKind, Thread } from "../types.js";
 
 /** SQLite persistence: run history, event log, ratings, cooldowns and usage. */
 export class Store implements CooldownStore, FeedbackSource {
@@ -39,7 +39,57 @@ export class Store implements CooldownStore, FeedbackSource {
       CREATE VIRTUAL TABLE IF NOT EXISTS memories USING fts5(
         run_id UNINDEXED, task, kind UNINDEXED, summary, ts UNINDEXED
       );
+      CREATE TABLE IF NOT EXISTS threads (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS push_subs (endpoint TEXT PRIMARY KEY, sub TEXT NOT NULL, created_at INTEGER NOT NULL);
     `);
+  }
+
+  createThread(t: Thread) {
+    this.db.prepare("INSERT INTO threads (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)").run(t.id, t.title, t.createdAt, t.updatedAt);
+  }
+
+  touchThread(id: string, title?: string) {
+    if (title) this.db.prepare("UPDATE threads SET updated_at = ?, title = ? WHERE id = ?").run(Date.now(), title, id);
+    else this.db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(Date.now(), id);
+  }
+
+  getThread(id: string): Thread | undefined {
+    const r = this.db.prepare("SELECT * FROM threads WHERE id = ?").get(id) as any;
+    return r ? { id: r.id, title: r.title, createdAt: r.created_at, updatedAt: r.updated_at } : undefined;
+  }
+
+  listThreads(limit = 100): Thread[] {
+    return (this.db.prepare("SELECT * FROM threads ORDER BY updated_at DESC LIMIT ?").all(limit) as any[]).map((r) => ({
+      id: r.id,
+      title: r.title,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+  }
+
+  deleteThread(id: string) {
+    this.db.prepare("DELETE FROM threads WHERE id = ?").run(id);
+  }
+
+  /** A conversation's runs, oldest first. */
+  threadRuns(threadId: string): RunRecord[] {
+    return (this.db.prepare("SELECT record FROM runs WHERE json_extract(record, '$.threadId') = ? ORDER BY created_at").all(threadId) as { record: string }[]).map((r) =>
+      JSON.parse(r.record),
+    );
+  }
+
+  addPushSub(endpoint: string, sub: unknown) {
+    this.db.prepare("INSERT OR REPLACE INTO push_subs (endpoint, sub, created_at) VALUES (?, ?, ?)").run(endpoint, JSON.stringify(sub), Date.now());
+  }
+
+  removePushSub(endpoint: string) {
+    this.db.prepare("DELETE FROM push_subs WHERE endpoint = ?").run(endpoint);
+  }
+
+  pushSubs(): { endpoint: string; sub: any }[] {
+    return (this.db.prepare("SELECT endpoint, sub FROM push_subs").all() as any[]).map((r) => ({ endpoint: r.endpoint, sub: JSON.parse(r.sub) }));
   }
 
   addMemory(m: { runId: string; task: string; kind: string; summary: string; ts: number }) {
@@ -104,7 +154,7 @@ export class Store implements CooldownStore, FeedbackSource {
 
   /** Marks interrupted runs as failed after a restart. */
   failStaleRuns() {
-    for (const r of this.db.prepare("SELECT record FROM runs WHERE status IN ('queued','planning','running','awaiting_approval')").all() as { record: string }[]) {
+    for (const r of this.db.prepare("SELECT record FROM runs WHERE status IN ('queued','planning','running','awaiting_approval','waiting')").all() as { record: string }[]) {
       const run = JSON.parse(r.record) as RunRecord;
       run.status = "failed";
       run.error = "interrupted (server restarted)";

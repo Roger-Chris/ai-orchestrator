@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { Hono, type Context, type Next } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { stream, streamSSE } from "hono/streaming";
@@ -12,6 +12,7 @@ import type { Router } from "../brain/router.js";
 import type { ProviderPool } from "../providers/registry.js";
 import type { Store } from "../store/db.js";
 import { PROVIDER_IDS, type ProviderId, type RunEvent, type RunOptions } from "../types.js";
+import type { Notifier } from "./push.js";
 
 export interface AppDeps {
   config: Config;
@@ -22,11 +23,12 @@ export interface AppDeps {
   orchestrator: Orchestrator;
   /** Static UI directory, relative to the process working directory. */
   publicDir: string;
+  /** Phone notifications; absent in tests. */
+  notifier?: Notifier;
 }
 
 const Provider = z.enum(PROVIDER_IDS as [ProviderId, ...ProviderId[]]);
-const RunBody = z.object({
-  task: z.string().min(1).max(200_000),
+const RunOptionsBody = z.object({
   mode: z.enum(["auto", "direct", "plan", "design"]).optional(),
   provider: Provider.optional(),
   agent: z.string().optional(),
@@ -34,7 +36,17 @@ const RunBody = z.object({
   permission: z.enum(["read", "edit", "full"]).optional(),
   nodes: z.array(z.string()).optional(),
   branches: z.boolean().optional(),
+  ask: z.boolean().optional(),
+  checkpoints: z.boolean().optional(),
 });
+const RunBody = RunOptionsBody.extend({ task: z.string().min(1).max(200_000), threadId: z.string().optional() });
+const MessageBody = RunOptionsBody.extend({ text: z.string().min(1).max(200_000) });
+const ReviewBody = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("continue") }),
+  z.object({ action: z.literal("edit"), output: z.string().min(1) }),
+  z.object({ action: z.literal("redo"), instructions: z.string().min(1).max(20_000) }),
+]);
+const PushSubBody = z.object({ endpoint: z.string().url(), keys: z.object({ p256dh: z.string(), auth: z.string() }), expirationTime: z.number().nullable().optional() });
 const ExecBody = z.object({
   provider: Provider,
   prompt: z.string().min(1),
@@ -107,7 +119,10 @@ export function createApp(d: AppDeps) {
   // Loopback is trusted; everything else (other tailnet devices, your phone) needs the token.
   const auth = async (c: Context, next: Next) => {
     const addr = (c.env as any)?.incoming?.socket?.remoteAddress as string | undefined;
-    if (isLoopback(addr)) return next();
+    // A local proxy (tailscale serve, a reverse proxy) also connects from loopback but carries
+    // other devices' requests: only trust loopback when nothing forwarded the request.
+    const proxied = ["x-forwarded-for", "forwarded", "x-forwarded-host", "tailscale-user-login"].some((h) => c.req.header(h));
+    if (isLoopback(addr) && !proxied) return next();
     const header = c.req.header("authorization")?.replace(/^Bearer\s+/i, "");
     if (token && tokenOk(header, token)) return next();
     return c.json({ error: "unauthorized: send Authorization: Bearer <server.token>" }, 401);
@@ -149,6 +164,79 @@ export function createApp(d: AppDeps) {
     return run ? c.json(run) : c.json({ error: "not found" }, 404);
   });
   app.post("/api/runs/:id/cancel", (c) => c.json({ ok: d.orchestrator.cancel(c.req.param("id")) }));
+
+  // ---- talking to the agents while they work
+  const notWaiting = (c: Context, what: string) => c.json({ error: `this step is not ${what}` }, 409);
+  app.post("/api/runs/:id/steps/:step/answer", async (c) => {
+    const { answer } = z.object({ answer: z.string().min(1).max(20_000) }).parse(await c.req.json());
+    return d.orchestrator.answer(c.req.param("id"), c.req.param("step"), answer) ? c.json({ ok: true }) : notWaiting(c, "asking a question");
+  });
+  app.post("/api/runs/:id/steps/:step/review", async (c) => {
+    const decision = ReviewBody.parse(await c.req.json());
+    return d.orchestrator.review(c.req.param("id"), c.req.param("step"), decision) ? c.json({ ok: true }) : notWaiting(c, "paused for review");
+  });
+  app.post("/api/runs/:id/steps/:step/edit", async (c) => {
+    const { output } = z.object({ output: z.string().min(1) }).parse(await c.req.json());
+    const r = d.orchestrator.editStep(c.req.param("id"), c.req.param("step"), output);
+    return r.ok ? c.json(r) : c.json(r, 409);
+  });
+  app.post("/api/runs/:id/steps/:step/stop", (c) =>
+    d.orchestrator.stopStep(c.req.param("id"), c.req.param("step")) ? c.json({ ok: true }) : notWaiting(c, "running"),
+  );
+
+  app.get("/api/active", (c) => c.json(d.orchestrator.active()));
+
+  // ---- conversations
+  app.get("/api/threads", (c) => c.json(d.store.listThreads(Number(c.req.query("limit") ?? 100))));
+  app.post("/api/threads", async (c) => {
+    const { title } = z.object({ title: z.string().max(200).optional() }).parse(await c.req.json().catch(() => ({})));
+    const now = Date.now();
+    const t = { id: randomUUID().slice(0, 8), title: title?.trim() || "New conversation", createdAt: now, updatedAt: now };
+    d.store.createThread(t);
+    return c.json(t, 201);
+  });
+  app.get("/api/threads/:id", (c) => {
+    const thread = d.store.getThread(c.req.param("id"));
+    if (!thread) return c.json({ error: "not found" }, 404);
+    // Live runs are fresher than what is on disk.
+    const runs = d.store.threadRuns(thread.id).map((r) => d.orchestrator.get(r.id) ?? r);
+    return c.json({ thread, runs });
+  });
+  app.patch("/api/threads/:id", async (c) => {
+    const { title } = z.object({ title: z.string().min(1).max(200) }).parse(await c.req.json());
+    if (!d.store.getThread(c.req.param("id"))) return c.json({ error: "not found" }, 404);
+    d.store.touchThread(c.req.param("id"), title);
+    return c.json({ ok: true });
+  });
+  app.delete("/api/threads/:id", (c) => {
+    d.store.deleteThread(c.req.param("id"));
+    return c.json({ ok: true });
+  });
+  /** A new message in a conversation: a run that sees the earlier turns. */
+  app.post("/api/threads/:id/messages", async (c) => {
+    const thread = d.store.getThread(c.req.param("id"));
+    if (!thread) return c.json({ error: "not found" }, 404);
+    const { text, ...options } = MessageBody.parse(await c.req.json());
+    if (thread.title === "New conversation") d.store.touchThread(thread.id, text.replace(/\s+/g, " ").trim().slice(0, 80));
+    return c.json(d.orchestrator.submit(text, { ...options, threadId: thread.id }), 201);
+  });
+
+  // ---- phone notifications
+  app.get("/api/push/key", (c) => (d.notifier ? c.json({ publicKey: d.notifier.publicKey }) : c.json({ error: "notifications are off" }, 404)));
+  app.post("/api/push/subscribe", async (c) => {
+    if (!d.notifier) return c.json({ error: "notifications are off" }, 404);
+    d.notifier.subscribe(PushSubBody.parse(await c.req.json()) as never);
+    return c.json({ ok: true });
+  });
+  app.post("/api/push/unsubscribe", async (c) => {
+    const { endpoint } = z.object({ endpoint: z.string() }).parse(await c.req.json());
+    d.notifier?.unsubscribe(endpoint);
+    return c.json({ ok: true });
+  });
+  app.post("/api/push/test", async (c) => {
+    const sent = (await d.notifier?.notify({ title: "Orchestrator", body: "Notifications work.", url: "/", tag: "test" })) ?? 0;
+    return c.json({ sent });
+  });
   // Branch work: merge a step's branch into the branch checked out in the run's folder.
   app.post("/api/runs/:id/steps/:step/merge", async (c) => {
     const r = await d.orchestrator.mergeBranch(c.req.param("id"), c.req.param("step"));

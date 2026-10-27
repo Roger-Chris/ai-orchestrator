@@ -117,6 +117,23 @@ export interface RunOptions {
    * and push them for you to review and merge. Needs edit access and a git folder with a remote.
    */
   branches?: boolean;
+  /** Agents may stop and ask you a question instead of guessing. */
+  ask?: boolean;
+  /** Pause after every step so you can continue, edit its answer or have it redone. */
+  checkpoints?: boolean;
+  /** Conversation this run belongs to; earlier turns are given to the agents as context. */
+  threadId?: string;
+}
+
+/** What you decide at a checkpoint. */
+export type ReviewDecision = { action: "continue" } | { action: "edit"; output: string } | { action: "redo"; instructions: string };
+
+/** A conversation: a series of runs that build on each other. */
+export interface Thread {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 /** A coding step sent to a device to do on its own branch. */
@@ -175,7 +192,7 @@ export interface StepBranch {
   mergeError?: string;
 }
 
-export type RunStatus = "queued" | "planning" | "running" | "awaiting_approval" | "done" | "failed" | "cancelled";
+export type RunStatus = "queued" | "planning" | "running" | "awaiting_approval" | "waiting" | "done" | "failed" | "cancelled";
 
 export type RunEventType =
   | "run.started"
@@ -187,6 +204,10 @@ export type RunEventType =
   | "step.completed"
   | "step.failed"
   | "step.fallback"
+  | "step.question"
+  | "step.answered"
+  | "step.review"
+  | "step.edited"
   | "design.review_ready"
   | "design.approved"
   | "design.revising"
@@ -217,10 +238,17 @@ export interface StepRecord {
   agent?: string;
   provider?: ProviderId;
   node?: string;
-  status: "pending" | "running" | "done" | "failed" | "skipped";
+  /** waiting: asked you a question; review: paused at a checkpoint for you. */
+  status: "pending" | "running" | "waiting" | "review" | "done" | "failed" | "skipped";
   output?: string;
   error?: string;
   branch?: StepBranch;
+  /** Open question from the agent, while status is waiting. */
+  question?: string;
+  /** Questions it asked and your answers. */
+  answers?: { question: string; answer: string }[];
+  /** You changed its answer. */
+  edited?: boolean;
   attempts: StepAttempt[];
   startedAt?: number;
   finishedAt?: number;
@@ -228,6 +256,7 @@ export interface StepRecord {
 
 export interface RunRecord {
   id: string;
+  threadId?: string;
   task: string;
   options: RunOptions;
   status: RunStatus;

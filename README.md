@@ -69,7 +69,7 @@ On Windows the orchestrator automatically uses the Codex desktop app's bundled C
 3. Keep `server.host: tailscale` (the default in the example config). The server then listens only on loopback and the device's Tailscale IP, never on your LAN or the internet.
 4. Run `npm start` on each device. Each one discovers the others through `tailscale status` within about 20 seconds. You can also list peers explicitly under `cluster.peers`.
 
-Submit work on any device. Steps run wherever the best free subscription is, and the UI shows which device ran what (`Claude @ laptop`). Without branch work, steps that **edit files** stay on the device you submitted from, and steps sent to other devices run read-only. You can open the UI from your phone at `http://<device>.<tailnet>.ts.net:4317` and paste the token once (🔑).
+Submit work on any device. Steps run wherever the best free subscription is, and the UI shows which device ran what (`Claude @ laptop`). Without branch work, steps that **edit files** stay on the device you submitted from, and steps sent to other devices run read-only. To use it from your phone, see [The app](#the-app-talk-to-your-agents-from-anywhere).
 
 ### Coding on branches across devices
 
@@ -82,15 +82,35 @@ Tick **Branches across devices** (or pass `--branches`) to let other devices wri
 
 On each worker: set `node.acceptBranchWork: true`, make sure `git` can push to your repos (`gh auth login` or an SSH key), and install your project's toolchain (Node, Python…) so the tests can run there.
 
-## Using it
+## The app: talk to your agents from anywhere
 
-**Web UI.** Type a task, pick a mode, and watch the plan run live. Modes:
-- **Auto:** simple tasks go straight to the best model, complex ones get planned.
-- **Plan:** always split the task into steps.
-- **Direct:** one model, optionally pinned.
-- **Design first:** Elephant-Goldfish design, your approval, then the build.
+The orchestrator serves a React app (installable on your phone) at the hub's address. It works like a chat:
 
-Access controls what agents may do in the chosen folder: read-only (the default), edit files, or full. It is a ceiling: an agent's own `permission` can lower it, never raise it.
+- **Conversations.** Each message is a task. Follow-ups in the same conversation see the earlier messages and results, so "make it 2 mm thicker" knows what "it" is. Start a message with `@coder`, `@researcher`, `@pcb-designer`… to send it to one specialist.
+- **Agents ask you.** With *Agents may ask me* on (the default), an agent that needs a decision only you can make stops and asks instead of guessing. The step shows its question with a reply box; your answer goes back to it and it carries on.
+- **Step in.** Every step has controls for its state: **Stop** a step while it works; with *Pause after each step* on, each step waits for **Continue**, **Edit** (your version is what later steps use) or **Redo…** (with instructions); finished answers can be edited too. Your edits are saved as corrections in memory, so similar tasks later see what you changed. The models themselves don't learn from edits: your subscriptions don't allow retraining them.
+- **Watch.** Live output from each step, which model on which device is doing it, designs waiting for approval, branches to merge, devices and usage under Settings.
+- **Notifications.** Your phone gets a notification when an agent asks something, a step is paused, a design needs approval, or a run finishes or fails.
+
+Modes (⚙ in the message box): *Brain decides* (simple tasks go straight to the best model, complex ones get planned), *Plan and split*, *One model*, *Design first* (Elephant-Goldfish design, your approval, then the build).
+
+Access controls what agents may do in the chosen folder on the hub: read-only (the default), edit files, or full. It is a ceiling: an agent's own `permission` can lower it, never raise it.
+
+### Set up the always-on PC as the hub
+
+1. On the PC: install Node 22.13+, Git and Tailscale (log in), clone this repo, `npm install`, `npm run orc -- init`, log in the CLIs (`claude`, `codex`, `agy`), then `npm start`. `npm start` builds the app first.
+2. Give the app an HTTPS address on your tailnet (needed to install it and for notifications):
+   ```bash
+   tailscale serve --bg 4317
+   ```
+   It prints `https://<pc-name>.<tailnet>.ts.net`. Only your tailnet devices can open it. Don't use `tailscale funnel`, which would put it on the public internet.
+3. Keep the PC from sleeping (Windows: Settings → System → Power → Sleep: Never) and start the orchestrator on boot (Task Scheduler → *At log on* → `npm start` in the repo folder), so it's always there.
+4. On your phone (Tailscale on): open the `https://…ts.net` address, paste `ORC_TOKEN` from the PC's `.env` when asked, then:
+   - Android (Chrome): ⋮ → **Install app**.
+   - iPhone (Safari): Share → **Add to Home Screen**, and open it from there (iPhone only allows notifications for home-screen apps).
+   - In the app: Settings → Notifications → **Turn on**, then **Send a test**.
+
+Requests that come through `tailscale serve` always need the token, even though the proxy runs on the PC itself.
 
 **CLI**
 
@@ -140,9 +160,10 @@ src/
   store/       SQLite (node:sqlite): runs, events, ratings, cooldowns, usage, memory (FTS5)
   memory/      long-term memory of runs, optional NotebookLM mirror
   context/     Graphify code maps for planning
+  server/push.ts  phone notifications (Web Push)
 agents/        specialist agents (YAML)
-public/        web UI (no build step)
-tests/         unit + end-to-end tests with fake providers, including a two-device HTTP test
+web/           the app: React + Vite, installable (manifest, service worker); built to web/dist by npm start
+tests/         unit + end-to-end tests with fake providers, including two-device HTTP and real-git branch tests
 ```
 
 ## Security notes
@@ -155,6 +176,7 @@ tests/         unit + end-to-end tests with fake providers, including a two-devi
 
 ```bash
 npm test          # vitest; fake providers, no quota used
-npm run typecheck
+npm run typecheck # server and app
 npm run dev       # auto-restart server
+npm run dev:web   # the app with hot reload on http://localhost:5173 (talks to the server on 4317)
 ```
