@@ -52,8 +52,10 @@ Log each CLI in once with **your** account:
 |---|---|---|
 | Claude Pro/Max | `npm i -g @anthropic-ai/claude-code` | run `claude`, then `/login` |
 | ChatGPT Go/Plus/Pro | `npm i -g @openai/codex@latest` (or the Codex desktop app) | `codex login`, then **Sign in with ChatGPT** |
-| Google AI Pro | `npm i -g @google/gemini-cli` | run `gemini`, then **Login with Google** |
-| Perplexity Pro | none | create an API key at perplexity.ai → Settings → API (Pro includes monthly credit) and put `PERPLEXITY_API_KEY=` in `.env` |
+| Google AI Pro | Antigravity CLI (`agy`): `irm https://antigravity.google/cli/install.ps1 \| iex` (Windows) or `curl -fsSL https://antigravity.google/cli/install.sh \| bash` | run `agy` once and sign in with Google |
+| Perplexity Pro (optional) | none | the API is billed separately from Pro. If you have API credit, put `PERPLEXITY_API_KEY=` in `.env`; without it, research goes to Claude, ChatGPT and Gemini, which search the web themselves |
+
+Since June 2026 the Gemini CLI's Google sign-in no longer works for Google AI Pro, so the orchestrator uses the Antigravity CLI when it's installed. It still falls back to `gemini` if you have a `GEMINI_API_KEY` or a work licence.
 
 On Windows the orchestrator automatically uses the Codex desktop app's bundled CLI when present. Older npm `codex` versions reject current models for ChatGPT-plan accounts.
 

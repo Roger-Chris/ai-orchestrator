@@ -7,6 +7,7 @@ import { looksRateLimited, parseRetryAt } from "../src/providers/base.js";
 import { interpolateEnv, parseConfig } from "../src/config.js";
 import { loadAgents } from "../src/agents/loader.js";
 import { messagesToPrompt, modelToOptions } from "../src/server/app.js";
+import { GeminiProvider } from "../src/providers/gemini.js";
 
 const agents = loadAgents(["agents"]);
 
@@ -132,6 +133,13 @@ describe("config & API helpers", () => {
     ]);
     expect(r.system).toBe("be brief");
     expect(r.prompt).toContain("User: again");
+  });
+  it("builds Antigravity CLI args per permission", () => {
+    const g = new GeminiProvider(parseConfig({ providers: { gemini: { command: "agy" } } }).providers.gemini);
+    expect(g.buildAgyArgs({ prompt: "x", permission: "read" })).not.toContain("--dangerously-skip-permissions");
+    const edit = g.buildAgyArgs({ prompt: "x", permission: "edit", deep: true, timeoutMs: 90_000 });
+    expect(edit).toEqual(expect.arrayContaining(["--input-format", "stream-json", "--dangerously-skip-permissions", "--effort", "high"]));
+    expect(edit.slice(edit.indexOf("--print-timeout"), edit.indexOf("--print-timeout") + 2)).toEqual(["--print-timeout", "2m"]);
   });
   it("loads all starter agents", () => {
     expect(agents.size).toBeGreaterThanOrEqual(15);

@@ -18,7 +18,7 @@ export class PerplexityProvider implements Provider {
       id: this.id,
       installed: true,
       authenticated: has,
-      detail: has ? `model ${this.cfg.model}` : "Set PERPLEXITY_API_KEY (Perplexity → Settings → API; Pro includes monthly credit).",
+      detail: has ? `model ${this.cfg.model}` : "Optional. Set PERPLEXITY_API_KEY if you have API credit (billed separately from Pro); otherwise research uses Claude, ChatGPT and Gemini web search.",
     };
   }
 
