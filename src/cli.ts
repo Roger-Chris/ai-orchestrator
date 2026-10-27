@@ -11,8 +11,11 @@ import { buildCapabilities } from "./brain/capabilities.js";
 import { Orchestrator } from "./brain/orchestrator.js";
 import { Router } from "./brain/router.js";
 import { Cluster } from "./cluster/cluster.js";
+import { workspaceMap } from "./context/graphify.js";
+import { Memory } from "./memory/memory.js";
 import { tailnetDevices, tailscaleIPv4 } from "./cluster/tailscale.js";
 import { type Config, loadConfig } from "./config.js";
+import { probeVersion } from "./providers/base.js";
 import { ProviderPool } from "./providers/registry.js";
 import { createApp } from "./server/app.js";
 import { Store } from "./store/db.js";
@@ -26,8 +29,9 @@ export function buildSystem(config: Config) {
   const cluster = new Cluster(config, pool);
   const router = new Router(buildCapabilities(config.routing.overrides), { localBias: config.cluster.localBias, learn: config.brain.learnFromFeedback }, store);
   const agents = loadAgents([resolve(ROOT, "agents"), resolve(process.cwd(), "agents")]);
-  const orchestrator = new Orchestrator(config, store, cluster, router, agents);
-  return { store, pool, cluster, router, orchestrator, agents };
+  const memory = new Memory(config, store);
+  const orchestrator = new Orchestrator(config, store, cluster, router, agents, { memory, workspace: (cwd) => workspaceMap(cwd, config) });
+  return { store, pool, cluster, router, orchestrator, agents, memory };
 }
 
 async function bindHosts(config: Config): Promise<string[]> {
@@ -90,11 +94,40 @@ function printEvent(ev: RunEvent, verbose: boolean) {
     case "step.fallback":
       console.error(`↻ ${tag}falling back to ${d.to} @ ${d.node}`);
       break;
+    case "design.approved":
+      console.error(`· design approved${d.savedTo ? `, saved to ${d.savedTo}` : ""}; planning the build`);
+      break;
+    case "design.revising":
+      console.error("· sending the design back for revision");
+      break;
   }
 }
 
+/** Shows the draft and the goldfish reviews, then asks you to approve, revise or cancel. */
+async function askDesign(orc: Orchestrator, id: string) {
+  const run = orc.get(id)!;
+  const d = run.design!;
+  const step = (sid: string) => run.steps.find((s) => s.id === sid);
+  console.log(`\n===== DESIGN (round ${d.round}) =====\n\n${step(d.draftStepId)?.output ?? ""}`);
+  for (const sid of d.reviewStepIds) {
+    const s = step(sid);
+    console.log(`\n===== GOLDFISH REVIEW · ${s?.provider ?? "?"} =====\n\n${s?.output ?? `review failed: ${s?.error}`}`);
+  }
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  const ask = (q: string) => new Promise<string>((res) => rl.question(q, res));
+  const answer = (await ask("\n[a]pprove and build, [r]evise, [c]ancel? ")).trim().toLowerCase();
+  if (answer.startsWith("a")) {
+    const notes = (await ask("Which findings to address, or other notes (Enter for none): ")).trim();
+    orc.decide(id, { action: "approve", notes: notes || undefined });
+  } else if (answer.startsWith("r")) {
+    const feedback = (await ask("What should change? ")).trim();
+    orc.decide(id, { action: "revise", feedback: feedback || "Address the review findings you agree with." });
+  } else orc.cancel(id);
+  rl.close();
+}
+
 async function cmdRun(config: Config, task: string, v: Record<string, unknown>) {
-  if (!task) throw new Error('usage: orc run "<task>" [--mode auto|direct|plan] [--provider p] [--agent name] [--cwd dir] [--permission read|edit|full]');
+  if (!task) throw new Error('usage: orc run "<task>" [--mode auto|direct|plan|design] [--provider p] [--agent name] [--cwd dir] [--permission read|edit|full]');
   const sys = buildSystem(config);
   if (config.cluster.enabled) await sys.cluster.refresh();
   const run = sys.orchestrator.submit(task, {
@@ -104,7 +137,10 @@ async function cmdRun(config: Config, task: string, v: Record<string, unknown>) 
     cwd: v.cwd as string | undefined,
     permission: v.permission as Permission | undefined,
   });
-  sys.orchestrator.subscribe(run.id, (ev) => printEvent(ev, !!v.verbose));
+  sys.orchestrator.subscribe(run.id, (ev) => {
+    printEvent(ev, !!v.verbose);
+    if (ev.type === "design.review_ready") void askDesign(sys.orchestrator, run.id);
+  });
   const done = await sys.orchestrator.wait(run.id)!;
   if (done.status === "done") console.log(`\n${done.result}`);
   else console.error(`\nrun ${done.status}: ${done.error}`);
@@ -125,6 +161,9 @@ async function cmdDoctor(config: Config, live: boolean) {
   const devices = await tailnetDevices();
   console.log(devices.length ? `\nTailscale: ${devices.length} device(s) on your tailnet` : "\nTailscale: not running or logged out (multi-device discovery disabled)");
   for (const d of devices) console.log(`  ${d.self ? "*" : " "} ${d.hostName.padEnd(20)} ${d.ips[0] ?? ""} ${d.online ? "online" : "offline"} ${d.os ?? ""}`);
+  const graphify = await probeVersion(config.context.graphifyCommand);
+  console.log(`\n${graphify ? "✓" : "✗"} graphify   ${graphify ?? "not installed (optional: uv tool install graphifyy). Gives the planner a code map."}`);
+  console.log(`· memory     local${config.memory.enabled ? "" : " (disabled)"} · NotebookLM: ${await sys.memory.notebookStatus()}`);
   if (!live) console.log("\nRun `orc doctor --live` to send a tiny test prompt to each logged-in model.");
   sys.store.close();
 }

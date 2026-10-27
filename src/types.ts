@@ -88,6 +88,8 @@ export interface PlanStep {
   differentFrom?: string[];
   /** Step edits files in the local workspace, so it stays on the hub device. */
   needsWorkspace?: boolean;
+  /** Always read-only, whatever the run's access level (design and review steps). */
+  readOnly?: boolean;
 }
 
 export interface Plan {
@@ -97,7 +99,8 @@ export interface Plan {
   synthesize: boolean;
 }
 
-export type RunMode = "auto" | "direct" | "plan";
+/** design: Elephant-Goldfish. One model drafts a design, fresh models review only the document, you approve before any coding. */
+export type RunMode = "auto" | "direct" | "plan" | "design";
 
 export interface RunOptions {
   mode?: RunMode;
@@ -109,7 +112,7 @@ export interface RunOptions {
   nodes?: string[];
 }
 
-export type RunStatus = "queued" | "planning" | "running" | "done" | "failed" | "cancelled";
+export type RunStatus = "queued" | "planning" | "running" | "awaiting_approval" | "done" | "failed" | "cancelled";
 
 export type RunEventType =
   | "run.started"
@@ -121,6 +124,9 @@ export type RunEventType =
   | "step.completed"
   | "step.failed"
   | "step.fallback"
+  | "design.review_ready"
+  | "design.approved"
+  | "design.revising"
   | "run.completed"
   | "run.failed";
 
@@ -166,9 +172,20 @@ export interface RunRecord {
   steps: StepRecord[];
   result?: string;
   error?: string;
+  design?: DesignState;
   createdAt: number;
   finishedAt?: number;
 }
+
+export interface DesignState {
+  round: number;
+  draftStepId: string;
+  reviewStepIds: string[];
+  /** Where the approved design was written, when the run may edit files. */
+  savedTo?: string;
+}
+
+export type DesignDecision = { action: "approve"; notes?: string } | { action: "revise"; feedback: string };
 
 export interface Classification {
   kind: TaskKind;

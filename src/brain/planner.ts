@@ -20,7 +20,15 @@ const PlanSchema = z.object({
   steps: z.array(StepSchema).min(1),
 });
 
-export function buildPlannerPrompt(task: string, c: Classification, agents: Map<string, Agent>, caps: CapabilityMatrix, maxSteps: number, available: ProviderId[]): string {
+export function buildPlannerPrompt(
+  task: string,
+  c: Classification,
+  agents: Map<string, Agent>,
+  caps: CapabilityMatrix,
+  maxSteps: number,
+  available: ProviderId[],
+  context?: string,
+): string {
   return `You are the planning brain of a multi-model AI orchestrator. Break the TASK into a small
 plan of steps, each done by one specialist agent. Another component picks which AI model
 runs each step; you pick the agent and write its instructions.
@@ -39,7 +47,9 @@ RULES:
 - For important code, designs or PCB/CAD output, add a review step by the "reviewer" agent with differentFrom set to the author step id, so a different model checks it.
 - needsWorkspace=true only for steps that must edit files on disk.
 - synthesize=true when several outputs must be merged into one final answer.
-
+- If a WORKSPACE MAP is given, split coding work along its communities so steps that run in parallel own different files; name the files each step owns in its prompt, and make steps that touch a "most connected" abstraction run after the others (dependsOn).
+- If RELEVANT PAST RUNS are given, reuse their decisions and avoid their mistakes; mention what matters in the step prompts.
+${context ? `\n${context}\n` : ""}
 Classifier hint: main kind "${c.kind}", also ${c.alsoKinds.join(", ") || "none"}, complexity ${c.complexity}.
 
 Reply with ONLY a JSON object, no prose:

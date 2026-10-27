@@ -5,3 +5,4 @@ data/
 orchestrator.config.yaml
 *.log
 workspaces/
+graphify-out

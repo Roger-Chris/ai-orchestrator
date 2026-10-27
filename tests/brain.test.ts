@@ -138,6 +138,7 @@ describe("config & API helpers", () => {
     const g = new GeminiProvider(parseConfig({ providers: { gemini: { command: "agy" } } }).providers.gemini);
     expect(g.buildAgyArgs({ prompt: "x", permission: "read" })).not.toContain("--dangerously-skip-permissions");
     const edit = g.buildAgyArgs({ prompt: "x", permission: "edit", deep: true, timeoutMs: 90_000 });
+    expect(edit[0]).toBe("-p=");
     expect(edit).toEqual(expect.arrayContaining(["--input-format", "stream-json", "--dangerously-skip-permissions", "--effort", "high"]));
     expect(edit.slice(edit.indexOf("--print-timeout"), edit.indexOf("--print-timeout") + 2)).toEqual(["--print-timeout", "2m"]);
   });

@@ -36,7 +36,27 @@ export class Store implements CooldownStore, FeedbackSource {
         failed INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (day, provider, node)
       );
+      CREATE VIRTUAL TABLE IF NOT EXISTS memories USING fts5(
+        run_id UNINDEXED, task, kind UNINDEXED, summary, ts UNINDEXED
+      );
     `);
+  }
+
+  addMemory(m: { runId: string; task: string; kind: string; summary: string; ts: number }) {
+    this.db.prepare("DELETE FROM memories WHERE run_id = ?").run(m.runId);
+    this.db.prepare("INSERT INTO memories (run_id, task, kind, summary, ts) VALUES (?, ?, ?, ?, ?)").run(m.runId, m.task, m.kind, m.summary, m.ts);
+  }
+
+  /** Full-text search over past runs, best match first. Any word may match. */
+  searchMemory(text: string, limit: number, excludeRunId?: string): { runId: string; task: string; kind: string; summary: string; ts: number }[] {
+    const words = [...new Set(text.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? [])].slice(0, 24);
+    if (!words.length || limit <= 0) return [];
+    const query = words.map((w) => `"${w}"`).join(" OR ");
+    return (
+      this.db
+        .prepare("SELECT run_id, task, kind, summary, ts FROM memories WHERE memories MATCH ? AND run_id != ? ORDER BY bm25(memories) LIMIT ?")
+        .all(query, excludeRunId ?? "", limit) as any[]
+    ).map((r) => ({ runId: r.run_id, task: r.task, kind: r.kind, summary: r.summary, ts: Number(r.ts) }));
   }
 
   saveRun(run: RunRecord) {
@@ -84,7 +104,7 @@ export class Store implements CooldownStore, FeedbackSource {
 
   /** Marks interrupted runs as failed after a restart. */
   failStaleRuns() {
-    for (const r of this.db.prepare("SELECT record FROM runs WHERE status IN ('queued','planning','running')").all() as { record: string }[]) {
+    for (const r of this.db.prepare("SELECT record FROM runs WHERE status IN ('queued','planning','running','awaiting_approval')").all() as { record: string }[]) {
       const run = JSON.parse(r.record) as RunRecord;
       run.status = "failed";
       run.error = "interrupted (server restarted)";

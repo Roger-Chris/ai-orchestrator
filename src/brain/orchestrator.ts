@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Agent } from "../agents/loader.js";
 import type { Cluster } from "../cluster/cluster.js";
 import type { Config } from "../config.js";
+import type { WorkspaceMap } from "../context/graphify.js";
+import type { Memory } from "../memory/memory.js";
 import type { Store } from "../store/db.js";
 import type {
+  DesignDecision,
+  Permission,
   Plan,
   PlanStep,
   ProviderId,
@@ -18,6 +23,7 @@ import type {
 } from "../types.js";
 import { DEEP_KINDS } from "./capabilities.js";
 import { classify } from "./classifier.js";
+import { type PriorRound, designSlug, elephantPrompt, goldfishPrompt, implementationTask, pickGoldfish } from "./design.js";
 import { buildPlannerPrompt, extractJson, normalizePlan, singleStepPlan, synthesisPrompt } from "./planner.js";
 import type { Router } from "./router.js";
 
@@ -31,11 +37,21 @@ interface Live {
   seq: number;
   abort: AbortController;
   done: Promise<RunRecord>;
+  /** Memory + workspace map for planning, gathered once per run. */
+  context?: Promise<string | undefined>;
+}
+
+export interface OrchestratorExtras {
+  memory?: Memory;
+  /** Code map of a working folder (Graphify), for planning. */
+  workspace?: (cwd: string) => Promise<WorkspaceMap | undefined>;
 }
 
 export class Orchestrator {
   private live = new Map<string, Live>();
   private bus = new EventEmitter();
+  /** Runs paused for your design approval, keyed by run id. */
+  private decisions = new Map<string, (d: DesignDecision) => void>();
 
   constructor(
     private config: Config,
@@ -43,6 +59,7 @@ export class Orchestrator {
     private cluster: Cluster,
     private router: Router,
     public agents: Map<string, Agent>,
+    private extras: OrchestratorExtras = {},
   ) {
     this.bus.setMaxListeners(200);
   }
@@ -114,25 +131,31 @@ export class Orchestrator {
       run.classification = c;
       this.emit(l, "run.classified", c);
 
+      const mode = opts.mode ?? "auto";
+      let task = run.task;
+      if (mode === "design") {
+        const { doc, notes } = await this.designPhase(l);
+        task = implementationTask(run.task, truncate(doc, MAX_DEP_CHARS * 4), notes);
+      }
+
       run.status = "planning";
       this.save(l);
-      const mode = opts.mode ?? "auto";
-      const plan =
+      let plan =
         mode === "direct" || opts.agent || (mode === "auto" && c.complexity === "simple")
-          ? singleStepPlan(run.task, c, this.agents, opts.agent)
-          : await this.plan(l);
+          ? singleStepPlan(task, c, this.agents, opts.agent)
+          : await this.plan(l, task);
+      if (mode === "design") plan = prefixIds(plan, "impl-");
       if (opts.provider) for (const s of plan.steps) s.provider = opts.provider;
-      run.plan = plan;
-      run.steps = plan.steps.map((s) => ({ id: s.id, title: s.title, kind: s.kind, agent: s.agent, status: "pending", attempts: [] }));
-      this.emit(l, "plan.created", plan);
+      this.addSteps(l, plan);
 
       run.status = "running";
       this.save(l);
-      await this.runGraph(l, plan);
+      await this.runGraph(l);
       if (l.abort.signal.aborted) throw new Error("cancelled");
 
-      const done = run.steps.filter((s) => s.status === "done");
-      if (!done.length) throw new Error(run.steps.find((s) => s.error)?.error ?? "no step succeeded");
+      const ids = new Set(plan.steps.map((s) => s.id));
+      const done = run.steps.filter((s) => ids.has(s.id) && s.status === "done");
+      if (!done.length) throw new Error(run.steps.find((s) => ids.has(s.id) && s.error)?.error ?? "no step succeeded");
 
       if (plan.synthesize && done.length > 1) {
         run.result = await this.synthesize(l, done);
@@ -143,10 +166,13 @@ export class Orchestrator {
         const final = leaves.length ? leaves : done;
         run.result = final.map((s) => (final.length > 1 ? `## ${s.title}\n\n${s.output}` : s.output)).join("\n\n");
       }
+      if (run.design?.savedTo) run.result += `\n\n---\nApproved design: \`${run.design.savedTo}\``;
       run.status = "done";
       run.finishedAt = Date.now();
       this.save(l);
       this.emit(l, "run.completed", { result: run.result });
+      // Local memory is written before the first await; the NotebookLM upload finishes in the background.
+      this.extras.memory?.remember(run, (msg) => console.warn(msg)).catch((e) => console.warn(`memory: ${(e as Error).message}`));
     } catch (e) {
       run.status = l.abort.signal.aborted ? "cancelled" : "failed";
       run.error = (e as Error).message;
@@ -157,13 +183,170 @@ export class Orchestrator {
     return run;
   }
 
+  /** Related past runs and a code map of the working folder, for the planner and the design author. */
+  private context(l: Live): Promise<string | undefined> {
+    l.context ??= (async () => {
+      const cwd = resolve(l.run.options.cwd ?? process.cwd());
+      const [memory, map] = await Promise.all([
+        this.extras.memory?.recall(l.run.task, l.run.id).catch(() => undefined),
+        this.extras.workspace?.(cwd).catch(() => undefined),
+      ]);
+      const parts: string[] = [];
+      const notes: string[] = [];
+      if (memory) {
+        parts.push(`RELEVANT PAST RUNS (your memory):\n${memory}`);
+        notes.push("recalled related past runs");
+      }
+      if (map) {
+        parts.push(`WORKSPACE MAP of ${cwd}:\n${map.text}`);
+        notes.push(`workspace map: ${map.nodes} symbols in ${map.communities} communities`);
+      }
+      this.emit(l, "step.progress", { note: notes.join(" · ") || "no related memory or code map" }, "context");
+      return parts.length ? parts.join("\n\n") : undefined;
+    })();
+    return l.context;
+  }
+
+  /** Appends steps to the run (design rounds and the build each add some) and announces the whole plan. */
+  private addSteps(l: Live, plan: Plan) {
+    const prev = l.run.plan?.steps ?? [];
+    l.run.plan = { goal: plan.goal, synthesize: plan.synthesize, steps: [...prev, ...plan.steps] };
+    l.run.steps.push(...plan.steps.map((s): StepRecord => ({ id: s.id, title: s.title, kind: s.kind, agent: s.agent, status: "pending", attempts: [] })));
+    this.emit(l, "plan.created", l.run.plan);
+  }
+
+  /**
+   * Elephant-Goldfish: the author drafts (Claude when available), fresh reviewers on other
+   * models get only the document, then the run waits for you. Revisions loop; approval returns.
+   */
+  private async designPhase(l: Live): Promise<{ doc: string; notes?: string }> {
+    const { run } = l;
+    let prior: PriorRound | undefined;
+    for (let round = 1; ; round++) {
+      run.status = "running";
+      this.save(l);
+      const available = new Set((await this.cluster.candidates()).map((c) => c.provider));
+      const draftId = `design-${round}`;
+      this.addSteps(l, {
+        goal: run.task.slice(0, 200),
+        synthesize: false,
+        steps: [
+          {
+            id: draftId,
+            title: round === 1 ? "Elephant: draft the design" : `Elephant: revise the design (round ${round})`,
+            kind: "system_design",
+            agent: this.agents.has("architect") ? "architect" : undefined,
+            prompt: elephantPrompt(run.task, prior, await this.context(l)),
+            dependsOn: [],
+            provider: available.has("claude") ? "claude" : undefined,
+            // Runs here so it can read the codebase it is designing for.
+            needsWorkspace: true,
+            readOnly: true,
+          },
+        ],
+      });
+      await this.runGraph(l);
+      if (l.abort.signal.aborted) throw new Error("cancelled");
+      const draft = run.steps.find((s) => s.id === draftId)!;
+      if (draft.status !== "done" || !draft.output) throw new Error(`design draft failed: ${draft.error ?? "no output"}`);
+
+      const reviewers = pickGoldfish(available, draft.provider);
+      const reviewIds = reviewers.map((p) => `review-${round}-${p}`);
+      this.addSteps(l, {
+        goal: run.task.slice(0, 200),
+        synthesize: false,
+        steps: reviewers.map((p, i) => ({
+          id: reviewIds[i],
+          title: `Goldfish review (${p})`,
+          kind: "code_review",
+          agent: this.agents.has("reviewer") ? "reviewer" : undefined,
+          prompt: goldfishPrompt(),
+          dependsOn: [draftId],
+          provider: p,
+          readOnly: true,
+        })),
+      });
+      await this.runGraph(l);
+      if (l.abort.signal.aborted) throw new Error("cancelled");
+      const reviews = reviewIds.map((id) => run.steps.find((s) => s.id === id)!);
+
+      run.design = { round, draftStepId: draftId, reviewStepIds: reviewIds };
+      run.status = "awaiting_approval";
+      this.save(l);
+      // Listen before announcing, so a decision made straight from the event isn't lost.
+      const pending = this.waitForDecision(l);
+      this.emit(l, "design.review_ready", {
+        round,
+        draftStepId: draftId,
+        reviews: reviews.map((r) => ({ stepId: r.id, provider: r.provider, ok: r.status === "done", verdict: verdictOf(r.output) })),
+      });
+
+      const decision = await pending;
+      if (decision.action === "approve") {
+        run.design.savedTo = this.saveDesign(l, draft.output);
+        run.status = "running";
+        this.save(l);
+        this.emit(l, "design.approved", { notes: decision.notes, savedTo: run.design.savedTo });
+        return { doc: draft.output, notes: decision.notes };
+      }
+      this.emit(l, "design.revising", { feedback: decision.feedback });
+      prior = {
+        draft: draft.output,
+        reviews: reviews.filter((r) => r.output).map((r) => ({ provider: r.provider, output: r.output! })),
+        feedback: decision.feedback,
+      };
+    }
+  }
+
+  private waitForDecision(l: Live): Promise<DesignDecision> {
+    return new Promise((resolveDecision, reject) => {
+      const onAbort = () => {
+        this.decisions.delete(l.run.id);
+        reject(new Error("cancelled"));
+      };
+      if (l.abort.signal.aborted) return onAbort();
+      l.abort.signal.addEventListener("abort", onAbort, { once: true });
+      this.decisions.set(l.run.id, (d) => {
+        l.abort.signal.removeEventListener("abort", onAbort);
+        this.decisions.delete(l.run.id);
+        resolveDecision(d);
+      });
+    });
+  }
+
+  /** Approve or send back a design that is waiting for you. False when nothing is waiting. */
+  decide(id: string, decision: DesignDecision): boolean {
+    const resolveDecision = this.decisions.get(id);
+    if (!resolveDecision) return false;
+    resolveDecision(decision);
+    return true;
+  }
+
+  /** Writes the approved design to docs/designs/ (EGM's convention) when the run may edit files. */
+  private saveDesign(l: Live, doc: string): string | undefined {
+    const permission = l.run.options.permission ?? this.config.brain.defaultPermission;
+    if (permission === "read") return undefined;
+    try {
+      const dir = resolve(l.run.options.cwd ?? process.cwd(), "docs", "designs");
+      mkdirSync(dir, { recursive: true });
+      const slug = designSlug(l.run.task);
+      let path = resolve(dir, `${slug}.md`);
+      for (let n = 2; existsSync(path); n++) path = resolve(dir, `${slug}-${n}.md`);
+      writeFileSync(path, doc.endsWith("\n") ? doc : `${doc}\n`);
+      return path;
+    } catch (e) {
+      this.emit(l, "step.progress", { note: `could not save the design: ${(e as Error).message}` }, l.run.design?.draftStepId);
+      return undefined;
+    }
+  }
+
   /** Asks the planner model for a step graph; falls back to one step on any problem. */
-  private async plan(l: Live): Promise<Plan> {
+  private async plan(l: Live, task: string): Promise<Plan> {
     const { run } = l;
     const c = run.classification!;
     const candidates = await this.cluster.candidates();
     const available = [...new Set(candidates.map((x) => x.provider))];
-    const prompt = buildPlannerPrompt(run.task, c, this.agents, this.router.caps, this.config.brain.maxPlanSteps, available);
+    const prompt = buildPlannerPrompt(task, c, this.agents, this.router.caps, this.config.brain.maxPlanSteps, available, await this.context(l));
     const order: ProviderId[] = [this.config.brain.planner, "claude", "codex", "gemini"];
     for (const provider of [...new Set(order)]) {
       const target = candidates.filter((x) => x.provider === provider).sort((a, b) => Number(b.local) - Number(a.local) || a.load - b.load)[0];
@@ -179,18 +362,18 @@ export class Orchestrator {
       this.store.recordUsage(provider, target.node, res.ok, res.durationMs);
       if (!res.ok) continue;
       try {
-        return normalizePlan(extractJson(res.text), run.task, c, this.agents, this.config.brain.maxPlanSteps);
+        return normalizePlan(extractJson(res.text), task, c, this.agents, this.config.brain.maxPlanSteps);
       } catch {
         /* malformed plan: try the next planner */
       }
     }
-    return singleStepPlan(run.task, c, this.agents);
+    return singleStepPlan(task, c, this.agents);
   }
 
-  /** Runs steps as soon as their dependencies finish, up to maxParallelSteps at once. */
-  private async runGraph(l: Live, plan: Plan): Promise<void> {
+  /** Runs pending steps as soon as their dependencies finish, up to maxParallelSteps at once. */
+  private async runGraph(l: Live): Promise<void> {
     const byId = new Map(l.run.steps.map((s) => [s.id, s]));
-    const specs = new Map(plan.steps.map((s) => [s.id, s]));
+    const specs = new Map(l.run.plan!.steps.map((s) => [s.id, s]));
     const running = new Map<string, Promise<void>>();
 
     while (!l.abort.signal.aborted) {
@@ -228,7 +411,9 @@ export class Orchestrator {
     const exclude = this.config.brain.crossReview
       ? (spec.differentFrom ?? []).map((d) => byId.get(d)?.provider).filter((p): p is ProviderId => !!p)
       : [];
-    const permission = l.run.options.permission ?? agent?.permission ?? this.config.brain.defaultPermission;
+    // The run's access level is the ceiling; an agent's own setting can only lower it.
+    const allowed = spec.readOnly ? "read" : (l.run.options.permission ?? this.config.brain.defaultPermission);
+    const permission = agent?.permission ? lowerPermission(allowed, agent.permission) : allowed;
     // Steps that change files must run here, where the workspace is.
     const needsWorkspace = !!spec.needsWorkspace || permission !== "read";
     const ranked = this.router.rank(
@@ -328,6 +513,24 @@ export class Orchestrator {
     // Synthesis failed everywhere: hand back the raw step outputs rather than nothing.
     return done.map((s) => `## ${s.title}\n\n${s.output}`).join("\n\n");
   }
+}
+
+/** Renames a plan's step ids (and references to them) so they can't collide with earlier steps. */
+function prefixIds(plan: Plan, prefix: string): Plan {
+  const p = (id: string) => `${prefix}${id}`;
+  return {
+    ...plan,
+    steps: plan.steps.map((s) => ({ ...s, id: p(s.id), dependsOn: s.dependsOn.map(p), differentFrom: s.differentFrom?.map(p) })),
+  };
+}
+
+const PERMISSION_RANK: Record<Permission, number> = { read: 0, edit: 1, full: 2 };
+function lowerPermission(a: Permission, b: Permission): Permission {
+  return PERMISSION_RANK[a] <= PERMISSION_RANK[b] ? a : b;
+}
+
+function verdictOf(review?: string): string | undefined {
+  return review?.match(/VERDICT:\s*(APPROVE WITH CHANGES|APPROVE|REWORK)/i)?.[1].toUpperCase();
 }
 
 function truncate(s: string, n: number): string {

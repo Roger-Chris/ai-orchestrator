@@ -187,7 +187,7 @@ function handle(ev) {
       break;
     }
     case "step.progress":
-      log(stepCard(ev.stepId, ev.stepId === "plan" ? "Planning" : ""), d.note);
+      log(stepCard(ev.stepId, ev.stepId === "plan" ? "Planning" : ev.stepId === "context" ? "Memory & code map" : ""), d.note);
       break;
     case "step.fallback":
       log(stepCard(ev.stepId), `↻ falling back to ${d.to} @ ${d.node}`);
@@ -217,7 +217,21 @@ function handle(ev) {
       log(el, `✗ ${d.error}`);
       break;
     }
+    case "design.review_ready": {
+      const reviews = d.reviews.map((r) => `${LABEL[r.provider] || r.provider || "?"}: ${r.ok ? r.verdict || "reviewed" : "failed"}`).join(" · ");
+      $("#approvalMeta").textContent = `Round ${d.round}. Read the draft and the reviews above. ${reviews || "No reviewer was available."}`;
+      $("#approvalNotes").value = "";
+      $("#approval").classList.remove("hidden");
+      $("#runMeta").textContent = "waiting for your approval";
+      break;
+    }
+    case "design.approved":
+    case "design.revising":
+      $("#approval").classList.add("hidden");
+      $("#runMeta").textContent = ev.type === "design.approved" ? `design approved${d.savedTo ? ` · saved to ${d.savedTo}` : ""}` : "revising the design";
+      break;
     case "run.completed":
+      $("#approval").classList.add("hidden");
       $("#resultWrap").classList.remove("hidden");
       $("#result").innerHTML = md(d.result || "");
       $("#result").dataset.raw = d.result || "";
@@ -226,6 +240,7 @@ function handle(ev) {
       loadNodes();
       break;
     case "run.failed":
+      $("#approval").classList.add("hidden");
       $("#resultWrap").classList.remove("hidden");
       $("#result").innerHTML = `<p><strong>Run failed:</strong> ${esc(d.error)}</p>`;
       $("#cancelBtn").classList.add("hidden");
@@ -241,6 +256,7 @@ async function openRun(id) {
   $("#steps").innerHTML = "";
   $("#runView").classList.remove("hidden");
   $("#resultWrap").classList.add("hidden");
+  $("#approval").classList.add("hidden");
   $("#cancelBtn").classList.remove("hidden");
   document.querySelectorAll("#history li").forEach((li) => li.classList.toggle("active", li.dataset.id === id));
   const run = await api(`/api/runs/${id}`);
@@ -279,6 +295,18 @@ async function openRun(id) {
 $("#cancelBtn").addEventListener("click", async () => {
   if (currentRun) await api(`/api/runs/${currentRun}/cancel`, { method: "POST" });
 });
+async function decide(action) {
+  const text = $("#approvalNotes").value.trim();
+  if (action === "revise" && !text) return $("#approvalNotes").focus();
+  const body = action === "approve" ? { notes: text } : { feedback: text };
+  try {
+    await api(`/api/runs/${currentRun}/${action}`, { method: "POST", body: JSON.stringify(body) });
+  } catch (e) {
+    alert(e.message);
+  }
+}
+$("#approveBtn").addEventListener("click", () => decide("approve"));
+$("#reviseBtn").addEventListener("click", () => decide("revise"));
 $("#copyBtn").addEventListener("click", () => navigator.clipboard.writeText($("#result").dataset.raw || $("#result").innerText));
 
 // ---------- usage

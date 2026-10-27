@@ -25,6 +25,9 @@ It drives the official CLIs (`claude`, `codex`, `gemini`), which log in with you
 - **Routes by kind of work.** System design, UI/UX, coding, debugging, review, reasoning/logic, math, research, writing, long documents, images/PDFs, **PCB design**, **3D/CAD models** and data analysis each have a capability score per model ([src/brain/capabilities.ts](src/brain/capabilities.ts)). Research goes to Perplexity, giant inputs to Gemini, agentic coding and architecture to Claude, hard math and logic to ChatGPT, and so on. You can override any score in config.
 - **Plans big tasks.** A planner splits "design a board, its enclosure and the app" into specialist steps (`pcb-designer`, `cad-modeler`, `ui-ux-designer`, `researcher`, `reviewer`…) and runs independent steps in parallel.
 - **Cross-model review.** A reviewer step never runs on the model that wrote the work.
+- **Design first (Elephant-Goldfish).** In Design mode, Claude (the "elephant", with the whole task and codebase) drafts a design document. Fresh Gemini and ChatGPT sessions (the "goldfish") review only the document, so they catch what the author took for granted. The run then waits for you: approve (with notes on which findings to address), send it back for a revision round, or cancel. Nothing is built before you approve; the approved design is saved to `docs/designs/` when the run may edit files. Based on Google's [Elephant-Goldfish Model](https://github.com/google/elephant-goldfish-model).
+- **Memory.** Every finished run is remembered (task, approved design, result). Before planning, related past runs are handed to the planner. Kept locally in SQLite; optionally mirrored to a NotebookLM notebook, which the brain can also ask about new tasks.
+- **Code maps (Graphify).** For a git working folder, the planner gets a [Graphify](https://github.com/Graphify-Labs/graphify) map of the code: which files form each community and which abstractions everything depends on. It uses it to give parallel steps different files, so they can run side by side (and, once workers can edit, on different devices). Built offline with `graphify update`, no model calls, refreshed when HEAD moves.
 - **Survives usage limits.** When a subscription says "limit reached", the step falls back to the next-best model or device, and that subscription cools down until its reset time.
 - **Learns.** 👍/👎 on any step shifts future routing for that kind of work.
 - **Uses all your devices.** Every device runs the same app. They find each other on your tailnet, advertise which subscriptions they have logged in, and take steps from each other.
@@ -74,14 +77,16 @@ Submit work on any device. Steps run wherever the best free subscription is, and
 - **Auto:** simple tasks go straight to the best model, complex ones get planned.
 - **Plan:** always split the task into steps.
 - **Direct:** one model, optionally pinned.
+- **Design first:** Elephant-Goldfish design, your approval, then the build.
 
-Access controls what agents may do in the chosen folder: read-only, edit files, or full.
+Access controls what agents may do in the chosen folder: read-only (the default), edit files, or full. It is a ceiling: an agent's own `permission` can lower it, never raise it.
 
 **CLI**
 
 ```bash
 npm run orc -- run "Research the best LiPo charger ICs under $2, then design the charging circuit as SKiDL" -v
 npm run orc -- run "Refactor src/utils for readability and run the tests" --agent coder --permission edit --cwd ../my-app
+npm run orc -- run "Add offline sync to the notes app" --mode design --permission edit --cwd ../notes  # asks you to approve
 npm run orc -- nodes      # devices and which subscriptions each has ready
 npm run orc -- agents
 ```
@@ -110,16 +115,20 @@ See [orchestrator.config.example.yaml](orchestrator.config.example.yaml). Common
 - `providers.<name>.maxConcurrent`: keep this low for tight plans like ChatGPT Go.
 - `routing.overrides`: e.g. `{ pcb_design: { codex: 9 } }`.
 - `brain.defaultPermission`: `read` is the safe default.
+- `memory.notebooklm`: mirror memory to NotebookLM. Install `uv tool install "notebooklm-py[browser]"`, run `notebooklm login`, create a notebook (`notebooklm create "AI Orchestrator memory" --json`) and put its id in `memory.notebooklm.notebook`. notebooklm-py is unofficial and uses undocumented Google APIs, so it can break; local memory keeps working regardless.
+- `context.graphify`: `auto` uses Graphify when installed (`uv tool install graphifyy`); `off` disables code maps. Add `graphify-out/` to your project's `.gitignore`.
 
 ## Project layout
 
 ```
 src/
-  brain/       classifier, capability matrix, router, planner, orchestrator (DAG executor)
+  brain/       classifier, capability matrix, router, planner, design mode, orchestrator (DAG executor)
   providers/   claude / codex / gemini CLI adapters, perplexity API, pool with throttling + cooldowns
   cluster/     tailscale discovery, peer health, remote step execution (NDJSON stream)
   server/      REST + SSE API, OpenAI-compatible /v1, device-to-device /node/*
-  store/       SQLite (node:sqlite): runs, events, ratings, cooldowns, usage
+  store/       SQLite (node:sqlite): runs, events, ratings, cooldowns, usage, memory (FTS5)
+  memory/      long-term memory of runs, optional NotebookLM mirror
+  context/     Graphify code maps for planning
 agents/        specialist agents (YAML)
 public/        web UI (no build step)
 tests/         unit + end-to-end tests with fake providers, including a two-device HTTP test

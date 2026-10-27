@@ -27,7 +27,7 @@ export interface AppDeps {
 const Provider = z.enum(PROVIDER_IDS as [ProviderId, ...ProviderId[]]);
 const RunBody = z.object({
   task: z.string().min(1).max(200_000),
-  mode: z.enum(["auto", "direct", "plan"]).optional(),
+  mode: z.enum(["auto", "direct", "plan", "design"]).optional(),
   provider: Provider.optional(),
   agent: z.string().optional(),
   cwd: z.string().optional(),
@@ -118,6 +118,7 @@ export function createApp(d: AppDeps) {
   });
   app.get("/api/agents", (c) => c.json([...d.orchestrator.agents.values()]));
   app.get("/api/capabilities", (c) => c.json(d.router.caps));
+  app.get("/api/memory", (c) => c.json(d.store.searchMemory(c.req.query("q") ?? "", Number(c.req.query("limit") ?? 10))));
   app.get("/api/usage", (c) => c.json(d.store.usage(Number(c.req.query("days") ?? 7))));
 
   // ---- runs
@@ -131,6 +132,17 @@ export function createApp(d: AppDeps) {
     return run ? c.json(run) : c.json({ error: "not found" }, 404);
   });
   app.post("/api/runs/:id/cancel", (c) => c.json({ ok: d.orchestrator.cancel(c.req.param("id")) }));
+  // Design mode: the run waits here until you approve the design or send it back.
+  app.post("/api/runs/:id/approve", async (c) => {
+    const { notes } = z.object({ notes: z.string().max(20_000).optional() }).parse(await c.req.json().catch(() => ({})));
+    const ok = d.orchestrator.decide(c.req.param("id"), { action: "approve", notes: notes?.trim() || undefined });
+    return ok ? c.json({ ok }) : c.json({ error: "this run is not waiting for design approval" }, 409);
+  });
+  app.post("/api/runs/:id/revise", async (c) => {
+    const { feedback } = z.object({ feedback: z.string().min(1).max(20_000) }).parse(await c.req.json());
+    const ok = d.orchestrator.decide(c.req.param("id"), { action: "revise", feedback });
+    return ok ? c.json({ ok }) : c.json({ error: "this run is not waiting for design approval" }, 409);
+  });
   app.post("/api/runs/:id/steps/:step/rate", async (c) => {
     const { rating } = z.object({ rating: z.union([z.literal(1), z.literal(-1)]) }).parse(await c.req.json());
     const run = d.orchestrator.get(c.req.param("id"));

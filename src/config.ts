@@ -72,6 +72,33 @@ const ConfigSchema = z.object({
       overrides: z.record(z.string(), z.record(z.string(), z.number().min(0).max(10))).prefault({}),
     })
     .prefault({}),
+  /** What the brain remembers between runs. Past runs relevant to a new task are fed to the planner. */
+  memory: z
+    .object({
+      enabled: z.boolean().default(true),
+      /** Past runs to recall per task. */
+      recall: z.number().int().min(0).max(10).default(3),
+      /** Optional sync to a NotebookLM notebook via the unofficial `notebooklm` CLI (notebooklm-py). */
+      notebooklm: z
+        .object({
+          enabled: z.boolean().default(false),
+          /** Notebook id (partial ids work). Create one with `notebooklm create "AI Orchestrator memory"`. */
+          notebook: z.string().optional(),
+          command: z.string().default("notebooklm"),
+          /** Also ask the notebook about each new planned task (slower: one NotebookLM chat call). */
+          ask: z.boolean().default(true),
+        })
+        .prefault({}),
+    })
+    .prefault({}),
+  /** Code map of the working folder for planning, built offline by Graphify (`graphify update`). */
+  context: z
+    .object({
+      graphify: z.enum(["auto", "off"]).default("auto"),
+      graphifyCommand: z.string().default("graphify"),
+      graphifyTimeoutSeconds: z.number().default(180),
+    })
+    .prefault({}),
   cluster: z
     .object({
       enabled: z.boolean().default(true),

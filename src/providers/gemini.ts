@@ -83,7 +83,8 @@ export class GeminiProvider implements Provider {
 
   /** Prompt goes on stdin as one stream-json message, so long prompts avoid the Windows command-line limit. */
   buildAgyArgs(req: ProviderRequest): string[] {
-    const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json"];
+    // -p takes a value; an empty one keeps headless mode while the real prompt comes from stdin.
+    const args = ["-p=", "--input-format", "stream-json", "--output-format", "stream-json"];
     // agy has no per-tool "edit only" mode: edit/full auto-approve, read leaves tool calls unapproved.
     if (req.permission === "edit" || req.permission === "full") args.push("--dangerously-skip-permissions");
     const model = req.model ?? this.cfg.model;

@@ -40,6 +40,7 @@
                 <option value="auto">Auto (brain decides)</option>
                 <option value="plan">Always plan &amp; split</option>
                 <option value="direct">Direct (one model)</option>
+                <option value="design">Design first (Elephant-Goldfish)</option>
               </select>
             </label>
             <label>Model
@@ -71,6 +72,15 @@
             <button id="cancelBtn" class="ghost">Cancel</button>
           </div>
           <div id="steps" class="steps"></div>
+          <div id="approval" class="approval hidden">
+            <h3>The design is ready for your decision</h3>
+            <p id="approvalMeta" class="muted small"></p>
+            <textarea id="approvalNotes" rows="3" placeholder="Which review findings to address, or what to change"></textarea>
+            <div class="approval-actions">
+              <button id="approveBtn" class="primary">Approve &amp; build</button>
+              <button id="reviseBtn" class="ghost">Send back for revision</button>
+            </div>
+          </div>
           <div id="resultWrap" class="result hidden">
             <div class="result-h"><h3>Result</h3><button id="copyBtn" class="ghost small">Copy</button></div>
             <div id="result" class="md"></div>
