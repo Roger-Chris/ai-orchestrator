@@ -236,12 +236,16 @@ describe("phone notifications", () => {
     const [h, c, sig] = assertion.split(".");
     expect(JSON.parse(Buffer.from(c, "base64url").toString()).scope).toBe("https://www.googleapis.com/auth/firebase.messaging");
     expect(createVerify("RSA-SHA256").update(`${h}.${c}`).verify(publicKey, Buffer.from(sig, "base64url"))).toBe(true);
-    // The message is data-only and high priority, with the tap target in body (Expo's convention).
+    // A notification message on the app's channel, high priority, with the tap target in data.
     expect(calls[1].url).toBe("https://fcm.googleapis.com/v1/projects/my-proj/messages:send");
     expect(calls[1].auth).toBe("Bearer ya29.test");
     const msg = JSON.parse(calls[1].body).message;
-    expect(msg).toMatchObject({ token: "device-token-123", android: { priority: "high" }, data: { title: "Done", message: "Name a planet", channelId: "orchestrator" } });
-    expect(JSON.parse(msg.data.body).url).toBe("/#/t/t1?run=r1");
+    expect(msg).toMatchObject({
+      token: "device-token-123",
+      notification: { title: "Done", body: "Name a planet" },
+      android: { priority: "high", notification: { channel_id: "orchestrator" } },
+      data: { url: "/#/t/t1?run=r1" },
+    });
     // A token the phone no longer has is dropped.
     const s = system({ claude: () => ({ text: "x" }) });
     const n = new Notifier(s.store, s.dataDir, async () => {}, fcm);

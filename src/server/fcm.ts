@@ -57,8 +57,9 @@ export class Fcm {
   }
 
   /**
-   * A data-only, high-priority message: the app's notification library shows it even when the
-   * app is closed, and `url` comes back when it is tapped (Expo reads custom data from `body`).
+   * A notification message (shown by Android even when the app is closed) on the app's channel,
+   * with `url` in the data so tapping it opens the right conversation. Data-only messages were
+   * silently dropped on Xiaomi/HyperOS in testing; notification messages arrive reliably.
    */
   async send(deviceToken: string, p: { title: string; body: string; url: string; tag: string }): Promise<void> {
     const res = await this.http(`https://fcm.googleapis.com/v1/projects/${this.sa.project_id}/messages:send`, {
@@ -67,8 +68,9 @@ export class Fcm {
       body: JSON.stringify({
         message: {
           token: deviceToken,
-          android: { priority: "high", ttl: "3600s" },
-          data: { channelId: "orchestrator", title: p.title, message: p.body, body: JSON.stringify({ url: p.url, tag: p.tag }) },
+          notification: { title: p.title, body: p.body },
+          android: { priority: "high", ttl: "3600s", notification: { channel_id: "orchestrator", tag: p.tag } },
+          data: { url: p.url, tag: p.tag },
         },
       }),
     });
