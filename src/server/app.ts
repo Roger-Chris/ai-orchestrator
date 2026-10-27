@@ -13,6 +13,7 @@ import type { ProviderPool } from "../providers/registry.js";
 import type { Store } from "../store/db.js";
 import { PROVIDER_IDS, type ProviderId, type RunEvent, type RunOptions } from "../types.js";
 import { buildHome, buildInsights, localDay } from "./home.js";
+import type { GmailReader } from "../integrations/gmail.js";
 import type { Notifier } from "./push.js";
 
 export interface AppDeps {
@@ -26,6 +27,8 @@ export interface AppDeps {
   publicDir: string;
   /** Phone notifications; absent in tests. */
   notifier?: Notifier;
+  /** Today's tasks from your mail; absent in tests that don't need it. */
+  gmail?: GmailReader;
 }
 
 const Provider = z.enum(PROVIDER_IDS as [ProviderId, ...ProviderId[]]);
@@ -177,6 +180,11 @@ export function createApp(d: AppDeps) {
   app.post("/api/tasks/:id/done", async (c) => {
     const { done } = z.object({ done: z.boolean().default(true) }).parse(await c.req.json().catch(() => ({})));
     return d.store.setTaskDone(c.req.param("id"), done) ? c.json({ ok: true }) : c.json({ error: "not found" }, 404);
+  });
+  app.get("/api/gmail", (c) => c.json(d.gmail?.status() ?? { configured: false, connected: false }));
+  app.post("/api/gmail/check", async (c) => {
+    if (!d.gmail?.status().connected) return c.json({ error: "Gmail is not connected: run `orc gmail connect` on the hub" }, 409);
+    return c.json(await d.gmail.check());
   });
   app.delete("/api/tasks/:id", (c) => {
     d.store.deleteTask(c.req.param("id"));

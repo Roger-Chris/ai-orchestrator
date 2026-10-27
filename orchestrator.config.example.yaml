@@ -78,6 +78,12 @@ routing:
   #   ui_ux: { gemini: 9.5 }
   overrides: {}
 
+gmail:                       # today's tasks from your mail; off until `orc gmail connect` (README: Gmail)
+  clientFile: gmail-client.json
+  pollMinutes: 15
+  query: "in:inbox newer_than:2d -category:promotions -category:social -category:forums"
+  provider: auto             # model that reads the mail: auto | claude | gemini | codex
+
 cluster:
   enabled: true
   tailscale: true            # find other devices running the orchestrator on your tailnet

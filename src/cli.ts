@@ -12,6 +12,7 @@ import { Orchestrator } from "./brain/orchestrator.js";
 import { Router } from "./brain/router.js";
 import { Cluster } from "./cluster/cluster.js";
 import { workspaceMap } from "./context/graphify.js";
+import { GmailReader } from "./integrations/gmail.js";
 import { Memory } from "./memory/memory.js";
 import { tailnetDevices, tailscaleIPv4 } from "./cluster/tailscale.js";
 import { type Config, loadConfig } from "./config.js";
@@ -19,6 +20,7 @@ import { probeVersion } from "./providers/base.js";
 import { ProviderPool } from "./providers/registry.js";
 import { createApp } from "./server/app.js";
 import { Fcm } from "./server/fcm.js";
+import { localDay } from "./server/home.js";
 import { Notifier } from "./server/push.js";
 import { Store } from "./store/db.js";
 import type { Permission, ProviderId, RunEvent, RunMode } from "./types.js";
@@ -38,7 +40,14 @@ export function buildSystem(config: Config) {
     workspace: (cwd) => workspaceMap(cwd, config),
     onAttention: notifier.attention,
   });
-  return { store, pool, cluster, router, orchestrator, agents, memory, notifier };
+  const gmail = new GmailReader(store, pool, {
+    clientFile: resolve(config.gmail.clientFile),
+    dataDir: resolve(config.dataDir),
+    query: config.gmail.query,
+    provider: config.gmail.provider,
+    node: config.node.name,
+  });
+  return { store, pool, cluster, router, orchestrator, agents, memory, notifier, gmail };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */
@@ -77,6 +86,7 @@ async function cmdServe(config: Config) {
   const hosts = await bindHosts(config);
   for (const hostname of hosts) serve({ fetch: app.fetch, port: config.server.port, hostname });
   sys.cluster.start();
+  sys.gmail.start(config.gmail.pollMinutes);
 
   const status = await sys.pool.status();
   console.log(`\n  AI Orchestrator · device "${config.node.name}"`);
@@ -187,9 +197,43 @@ async function cmdDoctor(config: Config, live: boolean) {
   const graphify = await probeVersion(config.context.graphifyCommand);
   console.log(`\n${graphify ? "✓" : "✗"} graphify   ${graphify ?? "not installed (optional: uv tool install graphifyy). Gives the planner a code map."}`);
   console.log(`· android    notifications ${sys.notifier.fcm ? "on (Firebase key loaded)" : "off (no fcm-service-account.json)"}`);
+  const mail = sys.gmail.status();
+  console.log(`· gmail      ${mail.connected ? `connected as ${mail.email}` : mail.configured ? "not connected (run `orc gmail connect`)" : `off (no ${config.gmail.clientFile}; see Gmail in the README)`}`);
   console.log(`· memory     local${config.memory.enabled ? "" : " (disabled)"} · NotebookLM: ${await sys.memory.notebookStatus()}`);
   if (!live) console.log("\nRun `orc doctor --live` to send a tiny test prompt to each logged-in model.");
   sys.store.close();
+}
+
+/** Connect, check, inspect or disconnect the Gmail reader. */
+async function cmdGmail(config: Config, sub = "status") {
+  const sys = buildSystem(config);
+  try {
+    if (sub === "connect") {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      const pasted = new Promise<string>((r) => rl.once("line", r));
+      try {
+        const email = await sys.gmail.connect({ print: (s) => console.log(s), pasted });
+        console.log(`
+✓ Gmail connected as ${email}. Checking your mail now…`);
+      } finally {
+        rl.close();
+      }
+      sub = "check";
+    }
+    if (sub === "check") {
+      const r = await sys.gmail.check();
+      console.log(`Read ${r.scanned} new email(s), added ${r.added} task(s).`);
+      for (const t of sys.store.tasksFor(localDay()).filter((t) => t.source === "gmail")) console.log(`  ${(t.time ?? "today").padEnd(10)} ${t.title}${t.detail ? `  (${t.detail})` : ""}`);
+    } else if (sub === "disconnect") {
+      await sys.gmail.disconnect();
+      console.log("Gmail disconnected and access revoked.");
+    } else {
+      const s = sys.gmail.status();
+      console.log(s.connected ? `Connected as ${s.email}.` : s.configured ? "Not connected: run `orc gmail connect`." : `No OAuth client at ${config.gmail.clientFile}: see Gmail in the README.`);
+    }
+  } finally {
+    sys.store.close();
+  }
 }
 
 async function cmdNodes(config: Config) {
@@ -327,8 +371,10 @@ async function main() {
       return;
     case "mcp":
       return cmdMcp(config);
+    case "gmail":
+      return cmdGmail(config, rest[0]);
     default:
-      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|init|mcp>`);
+      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|check|status|disconnect]|init|mcp>`);
       process.exitCode = 1;
   }
 }

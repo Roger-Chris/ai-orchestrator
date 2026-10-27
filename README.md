@@ -169,6 +169,19 @@ Or copy `app-release.apk` to the phone and open it (allow installing from your f
 
 Without Firebase the app works the same, except that you see what needs you when you open it rather than as a notification. On Xiaomi/Redmi phones, also allow **Autostart** for the app (Settings → Apps → Orchestrator) so notifications arrive while it is closed.
 
+### Gmail: today's tasks on the home screen
+
+The hub can read your Gmail (read-only) every 15 minutes and put what you have to do on **Today** in the app: appointments, bills due, deliveries, replies someone is waiting for. One of your models (Claude, then Gemini, then ChatGPT, whichever is ready) reads the new mail and picks out the tasks. The hub keeps only the tasks and the ids of emails it has read, never the mail itself.
+
+It uses your own Google OAuth client, so it is a one-time setup of about 10 minutes:
+
+1. In [Google Cloud console](https://console.cloud.google.com), pick a project (the Firebase one is fine). **APIs & Services → Library → Gmail API → Enable.**
+2. **Google Auth Platform → Get started**: any app name, your email, audience **External**. Under **Audience**, add your Gmail address as a test user, then click **Publish app** (otherwise Google ends the sign-in after 7 days). You don't need verification for your own use; at sign-in Google says the app is unverified: **Advanced → Go to … (unsafe)**.
+3. **Clients → Create client → Desktop app → Create → Download JSON.** Save it on the hub as `gmail-client.json` in the orchestrator folder. It is in `.gitignore`.
+4. On the hub: `npm run orc -- gmail connect`. Open the link it prints (on any device), allow read-only access, and if the last page says it can't connect (the hub is another machine), paste that page's address into the terminal. It then checks your mail once and lists the tasks it found.
+
+`orc gmail check` checks now, `orc gmail disconnect` revokes access. The app shows the status under **Settings → Gmail**, and a failed check shows up under **Needs a look** on Home. Settings live under `gmail:` in the config.
+
 **CLI**
 
 ```bash
@@ -217,6 +230,7 @@ src/
   store/       SQLite (node:sqlite): runs, events, ratings, cooldowns, usage, memory (FTS5)
   memory/      long-term memory of runs, optional NotebookLM mirror
   context/     Graphify code maps for planning
+  integrations/gmail.ts  today's tasks from Gmail (read-only OAuth, tasks picked out by your models)
   server/push.ts  phone notifications (Web Push)
 agents/        specialist agents (YAML)
 web/           the app: React + Vite, installable (manifest, service worker); built to web/dist by npm start
@@ -228,6 +242,7 @@ tests/         unit + end-to-end tests with fake providers, including two-device
 - Without `server.token` the server only listens on loopback. With a token, non-loopback requests need `Authorization: Bearer <token>`.
 - Agents run real CLIs. `edit` and `full` let them change files and run commands in the folder you choose. Use `read` unless you mean it.
 - The subscription CLIs keep their own logins. This app never reads or stores your passwords or tokens.
+- Gmail access is read-only. The refresh token lives in `data/gmail-token.json`; new emails (sender, subject, up to 1,500 characters of text) are sent to the model CLI that reads them, the same as any prompt you send it.
 
 ## Development
 

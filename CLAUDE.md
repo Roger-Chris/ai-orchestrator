@@ -8,7 +8,7 @@ A brain that routes work across the owner's Claude, ChatGPT (Go), Gemini (Google
 - `web/`: React + Vite web app (PWA), built to `web/dist` by `npm start`.
 - `mobile/`: Expo (SDK 58) React Native Android app, installed from an APK, not the Play Store. It has its own `AGENTS.md`: read it before touching Expo APIs.
 - `agents/`: specialist agent YAML files.
-- `tests/`: vitest with fake providers. `npm test` must stay green (61 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
+- `tests/`: vitest with fake providers. `npm test` must stay green (64 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
 
 ## Running the hub
 
@@ -22,6 +22,7 @@ npm start                  # builds the web app, serves on :4317 (loopback + thi
 The permanent hub is a **Linux machine** (8 GB RAM, hard disk, no GPU) that also runs the AI_Assistant brain (`../AI_Assistant`, brain on 127.0.0.1:8000). There the hub is a systemd user service: `deploy/linux/install.sh` (safe to re-run; makes a small-machine config if none exists), `deploy/linux/update.sh`, and `journalctl --user -u orchestrator-hub -f`. The unit runs `tsx src/cli.ts serve` directly, not `npm start`: the web app is built by the installer, not on every boot. The Windows laptop is for development and is a worker. The Mac mini joins later as a coding device (`acceptBranchWork: true`).
 
 Secrets that are not in git, on purpose:
+- `gmail-client.json`: Google OAuth client for the Gmail reader (README: Gmail); the sign-in itself is in `data/gmail-token.json`.
 - `.env`: `ORC_TOKEN` (every device and the phone app use the same one) and optional `PERPLEXITY_API_KEY`.
 - `fcm-service-account.json`: Firebase private key (project `orchestrator-b6a5d`) so the hub can send phone notifications. On a new machine, generate a new one: Firebase console → Project settings → Service accounts → Generate new private key, saved in the repo root under that name. Delete old keys there.
 - `data/`: run history, memory, push subscriptions. Copy it to keep history; otherwise it starts empty and the phone app must tap Settings → Notifications → Turn on again.
@@ -47,7 +48,8 @@ Hard-won details:
 ## Home screen
 
 - The app opens on tabs: Home, Chats, Insights, Devices (`mobile/src/app/(tabs)/`). Home reads `GET /api/home` (`src/server/home.ts`): today's tasks, open decisions, running work, "needs a look" and recent runs. Insights reads `GET /api/insights`.
-- Today's tasks come from the `tasks` table via `POST /api/tasks` (`{title, time?, day?, source: gmail|whatsapp|manual, detail?, id?}`; re-sending the same `id` replaces it). Nothing fills it automatically yet: Gmail and WhatsApp readers are still to be built, and `sources` in `/api/home` is hard-coded to false until they are.
+- Today's tasks come from the `tasks` table via `POST /api/tasks` (`{title, time?, day?, source: gmail|whatsapp|manual, detail?, id?}`; re-sending the same `id` replaces it). The Gmail reader (`src/integrations/gmail.ts`) fills it; WhatsApp is not built yet.
+- Gmail: the owner's own OAuth client (`gmail-client.json`, not in git) and a refresh token in `data/gmail-token.json` from `orc gmail connect` (works headless: paste the redirect address). The reader polls every `gmail.pollMinutes`, sends new mail in batches of 10 to the first ready of Claude/Gemini/ChatGPT for JSON tasks, and marks mail seen (`gmail_seen`) only after a batch parses, so failures retry.
 
 ## Phone notifications (FCM)
 
@@ -58,4 +60,4 @@ Hard-won details:
 ## Conventions
 
 - Plain, specific comments; small modules; no new dependencies without a reason.
-- Never commit `.env`, `fcm-service-account.json` or `data/`.
+- Never commit `.env`, `fcm-service-account.json`, `gmail-client.json` or `data/`.

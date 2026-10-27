@@ -121,6 +121,18 @@ const ConfigSchema = z.object({
       graphifyTimeoutSeconds: z.number().default(180),
     })
     .prefault({}),
+  /** Picks today's tasks out of your Gmail (read-only). Off until you run `orc gmail connect`. */
+  gmail: z
+    .object({
+      /** OAuth client (Desktop app) downloaded from Google Cloud. */
+      clientFile: z.string().default("gmail-client.json"),
+      pollMinutes: z.number().min(2).default(15),
+      /** Gmail search for mail worth reading. */
+      query: z.string().default("in:inbox newer_than:2d -category:promotions -category:social -category:forums"),
+      /** Model that reads the mail: auto uses the first ready of Claude, Gemini, ChatGPT. */
+      provider: z.enum(["auto", "claude", "codex", "gemini"]).default("auto"),
+    })
+    .prefault({}),
   cluster: z
     .object({
       enabled: z.boolean().default(true),

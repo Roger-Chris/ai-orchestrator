@@ -11,7 +11,9 @@ import { Cluster } from "../src/cluster/cluster.js";
 import { parseConfig } from "../src/config.js";
 import type { Provider } from "../src/providers/base.js";
 import { ProviderPool } from "../src/providers/registry.js";
+import { GmailReader, parseTasks } from "../src/integrations/gmail.js";
 import { createApp } from "../src/server/app.js";
+import { localDay } from "../src/server/home.js";
 import { Fcm } from "../src/server/fcm.js";
 import { Notifier, payloadFor } from "../src/server/push.js";
 import { Store } from "../src/store/db.js";
@@ -219,6 +221,72 @@ describe("home screen", () => {
     expect(week.days[6]).toMatchObject({ runs: 2, failed: 1 });
     expect(week).toMatchObject({ runs: 2, done: 0, failed: 1 });
     s.orchestrator.cancel(asking.id);
+  });
+});
+
+describe("gmail reader", () => {
+  const today = localDay();
+  const b64 = (s: string) => Buffer.from(s).toString("base64url");
+  /** A fake Google: token endpoint, a two-message inbox, and the messages themselves. */
+  function fakeGoogle() {
+    const calls: string[] = [];
+    const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+    const http = (async (input: string | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.startsWith("https://oauth2.googleapis.com/token")) return json({ access_token: "at", expires_in: 3600 });
+      if (url.includes("/messages?")) return json({ messages: [{ id: "m1" }, { id: "m2" }] });
+      if (url.includes("/messages/m1")) {
+        return json({ id: "m1", payload: { headers: [{ name: "From", value: "Clinic <c@x>" }, { name: "Subject", value: "Appointment" }], mimeType: "multipart/alternative", parts: [{ mimeType: "text/plain", body: { data: b64("Your dentist appointment is today at 13:30.") } }] } });
+      }
+      if (url.includes("/messages/m2")) return json({ id: "m2", payload: { headers: [{ name: "Subject", value: "Sale" }], mimeType: "text/html", body: { data: b64("<p>50% off <b>everything</b></p>") } } });
+      return json({ error: { message: "unexpected" } }, 404);
+    }) as typeof fetch;
+    return { http, calls };
+  }
+
+  function setup(answer: () => string) {
+    const s = system({ claude: (req) => ({ text: req.prompt.includes("EMAIL 1") ? answer() : "?" }) });
+    const clientFile = join(s.dataDir, "gmail-client.json");
+    writeFileSync(clientFile, JSON.stringify({ installed: { client_id: "cid", client_secret: "secret" } }));
+    writeFileSync(join(s.dataDir, "gmail-token.json"), JSON.stringify({ refresh_token: "rt", email: "me@gmail.com" }));
+    const google = fakeGoogle();
+    const gmail = new GmailReader(s.store, s.pool, { clientFile, dataDir: s.dataDir, query: "in:inbox", provider: "auto", node: "hub" }, google.http);
+    return { s, gmail, google };
+  }
+
+  it("turns new mail into today's tasks once, and shows Gmail as a source", async () => {
+    const { s, gmail, google } = setup(() => `Sure:\n{"tasks":[{"email":1,"title":"Dentist appointment","day":"${today}","time":"13:30","detail":"Clinic"}]}`);
+    expect(await gmail.check()).toEqual({ scanned: 2, added: 1 });
+    expect(s.store.tasksFor(today)).toMatchObject([{ id: "gmail:m1:0", title: "Dentist appointment", time: "13:30", source: "gmail", detail: "Clinic" }]);
+    expect(s.prompts[0]).toContain("Your dentist appointment is today at 13:30.");
+    expect(s.prompts[0]).toContain("50% off everything"); // HTML-only mail is read as text
+
+    // Second pass: both emails were seen, so the model is not asked again.
+    expect(await gmail.check()).toEqual({ scanned: 0, added: 0 });
+    expect(s.prompts).toHaveLength(1);
+    expect(google.calls.filter((u) => u.startsWith("https://oauth2")).length).toBe(1); // access token reused
+
+    const app = createApp({ ...s, gmail, publicDir: "web/dist" });
+    const home = await (await app.request("/api/home", { headers: { Authorization: "Bearer secret-token" } })).json();
+    expect(home.sources.gmail).toBe(true);
+    expect((await (await app.request("/api/gmail", { headers: { Authorization: "Bearer secret-token" } })).json()).email).toBe("me@gmail.com");
+  });
+
+  it("a bad answer keeps the mail for next time and shows up under needs a look", async () => {
+    const { s, gmail } = setup(() => "I could not read these.");
+    await expect(gmail.check()).rejects.toThrow(/could not read tasks/);
+    expect(s.store.db.prepare("SELECT COUNT(*) AS n FROM gmail_seen").get()).toEqual({ n: 0 });
+    const app = createApp({ ...s, gmail, publicDir: "web/dist" });
+    const home = await (await app.request("/api/home", { headers: { Authorization: "Bearer secret-token" } })).json();
+    expect(home.attention).toContainEqual(expect.objectContaining({ title: "Gmail check failed" }));
+  });
+
+  it("drops past, unknown and empty tasks from the model's answer", () => {
+    const mails = [{ id: "a", from: "", subject: "", date: "", body: "" }];
+    const text = `{"tasks":[{"email":1,"title":"Old","day":"2000-01-01"},{"email":5,"title":"Ghost"},{"email":1,"title":" "},{"email":1,"title":"Reply to Priya","time":"null"}]}`;
+    expect(parseTasks(text, mails, today)).toEqual([{ id: "gmail:a:3", day: today, time: undefined, title: "Reply to Priya", detail: undefined }]);
+    expect(parseTasks("no json here", mails, today)).toBeUndefined();
   });
 });
 

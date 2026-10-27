@@ -1,6 +1,7 @@
 import type { Cluster } from "../cluster/cluster.js";
 import type { Orchestrator } from "../brain/orchestrator.js";
 import type { ProviderPool } from "../providers/registry.js";
+import type { GmailReader } from "../integrations/gmail.js";
 import type { Store } from "../store/db.js";
 import type { Attention, Decision, Home, Insights, ProviderId, Running } from "../types.js";
 
@@ -16,7 +17,7 @@ const short = (s: string, n = 90) => {
 
 const clock = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
-export async function buildHome(d: { store: Store; orchestrator: Orchestrator; pool: ProviderPool; cluster: Cluster }): Promise<Home> {
+export async function buildHome(d: { store: Store; orchestrator: Orchestrator; pool: ProviderPool; cluster: Cluster; gmail?: GmailReader }): Promise<Home> {
   const decisions: Decision[] = [];
   const running: Running[] = [];
   for (const a of d.orchestrator.active()) {
@@ -57,6 +58,8 @@ export async function buildHome(d: { store: Store; orchestrator: Orchestrator; p
     if (p.coolingDownUntil) attention.push({ level: "warn", title: `${PROVIDER_NAME[p.id]} hit its limit`, detail: `Back at ${clock(p.coolingDownUntil)}; other models take its work until then` });
     else if (p.installed && !p.authenticated && usedThisWeek.has(p.id)) attention.push({ level: "warn", title: `${PROVIDER_NAME[p.id]} is signed out`, detail: p.detail ?? "Sign in again on the hub" });
   }
+  const mail = d.gmail?.status();
+  if (mail?.connected && mail.lastError) attention.push({ level: "warn", title: "Gmail check failed", detail: mail.lastError });
   const peers = d.cluster.list();
   for (const p of peers.filter((p) => !p.online)) {
     attention.push({ level: "warn", title: `${p.name} is offline`, detail: p.lastSeen ? `Last seen ${clock(p.lastSeen)}` : "Not reachable over Tailscale" });
@@ -68,7 +71,7 @@ export async function buildHome(d: { store: Store; orchestrator: Orchestrator; p
     devices: 1 + peers.filter((p) => p.online).length,
     day,
     tasks: d.store.tasksFor(day),
-    sources: { gmail: false, whatsapp: false },
+    sources: { gmail: !!mail?.connected, whatsapp: false },
     decisions,
     running,
     attention,

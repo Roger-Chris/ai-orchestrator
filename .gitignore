@@ -7,3 +7,4 @@ orchestrator.config.yaml
 workspaces/
 graphify-out
 fcm-service-account.json
+gmail-client.json

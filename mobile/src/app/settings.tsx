@@ -28,6 +28,26 @@ export default function Settings() {
   const [busy, setBusy] = useState("");
 
   const [restricted, setRestricted] = useState(false);
+  const [gmail, setGmail] = useState<Awaited<ReturnType<typeof Api.gmail>>>();
+  const [gmailMsg, setGmailMsg] = useState("");
+
+  useEffect(() => {
+    Api.gmail().then(setGmail).catch(() => {});
+  }, []);
+
+  const checkGmail = async () => {
+    setBusy("gmail");
+    setGmailMsg("");
+    try {
+      const r = await Api.gmailCheck();
+      setGmailMsg(r.scanned ? `Read ${r.scanned} new email(s), added ${r.added} task(s).` : "No new email since the last check.");
+    } catch (e) {
+      setGmailMsg((e as Error).message);
+    } finally {
+      setBusy("");
+      Api.gmail().then(setGmail).catch(() => {});
+    }
+  };
 
   // Re-check when you come back from Android's settings screens.
   useEffect(() => {
@@ -68,6 +88,30 @@ export default function Settings() {
         <Row>
           <Button title="Change hub or token" onPress={() => router.push("/connect")} />
         </Row>
+      </Card>
+
+      <Card>
+        <Text style={h2}>Gmail</Text>
+        {gmail?.connected ? (
+          <>
+            <Text style={{ color: c.text }}>Connected as {gmail.email}</Text>
+            <Muted small>
+              {gmail.lastCheck ? `Last checked ${new Date(gmail.lastCheck).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "Not checked yet"}
+              {gmail.lastAdded ? `, ${gmail.lastAdded} task(s) added` : ""}. New mail is read every few minutes and tasks go to Today on Home.
+            </Muted>
+            {!!gmail.lastError && <Text style={{ color: c.err }}>{gmail.lastError}</Text>}
+            <Row>
+              <Button title="Check now" busy={busy === "gmail"} onPress={() => void checkGmail()} />
+            </Row>
+          </>
+        ) : (
+          <Muted small>
+            {gmail?.configured
+              ? "Not connected. On the hub, run: npm run orc -- gmail connect"
+              : "Not set up. Put your Google OAuth client in the hub's folder as gmail-client.json, then run: npm run orc -- gmail connect (the README has the steps)."}
+          </Muted>
+        )}
+        {!!gmailMsg && <Text style={{ color: c.text }}>{gmailMsg}</Text>}
       </Card>
 
       <Card>
