@@ -22,6 +22,8 @@ const config: ExpoConfig = {
       monochromeImage: "./assets/android-icon-monochrome.png",
     },
     ...(firebase ? { googleServicesFile: "./google-services.json" } : {}),
+    // Lets the app show Android's "always run in background?" dialog, so notifications arrive while it's closed.
+    permissions: ["android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"],
     predictiveBackGestureEnabled: false,
   },
   plugins: [

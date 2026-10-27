@@ -1,10 +1,25 @@
 import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { ScrollView, Text, View } from "react-native";
+import { Alert, AppState, Platform, ScrollView, Text, View } from "react-native";
 import { Button, Card, Chip, Dot, Muted, Row } from "../components/ui";
 import { Api, connection, type NodeInfo } from "../lib/api";
+import { askBatteryExemption, batteryRestricted, isXiaomi, openAppSettings, openAutostart } from "../lib/background";
 import { enablePush, pushBuiltIn } from "../lib/push";
 import { LABEL, useColors } from "../lib/theme";
+
+/** Xiaomi's Autostart can't be requested by an app: explain, then open the screen where it lives. */
+function promptAutostart(): Promise<void> {
+  return new Promise((done) =>
+    Alert.alert(
+      "One more switch on Xiaomi",
+      "Xiaomi blocks notifications for apps that aren't allowed to autostart. On the next screen, find Orchestrator and turn Autostart on, then come back.",
+      [
+        { text: "Later", style: "cancel", onPress: () => done() },
+        { text: "Open Autostart", onPress: () => openAutostart().finally(done) },
+      ],
+    ),
+  );
+}
 
 export default function Settings() {
   const c = useColors();
@@ -14,11 +29,32 @@ export default function Settings() {
   const [pushMsg, setPushMsg] = useState("");
   const [busy, setBusy] = useState("");
 
+  const [restricted, setRestricted] = useState(false);
+
   const loadNodes = useCallback((refresh = false) => Api.nodes(refresh).then(setNodes).catch(() => {}), []);
   useEffect(() => {
     void loadNodes();
     Api.usage().then(setUsage).catch(() => {});
   }, [loadNodes]);
+
+  // Re-check when you come back from Android's settings screens.
+  useEffect(() => {
+    const check = () => batteryRestricted().then(setRestricted);
+    void check();
+    const sub = AppState.addEventListener("change", (s) => s === "active" && void check());
+    return () => sub.remove();
+  }, []);
+
+  /** Notifications on, then the background permissions they depend on, one prompt at a time. */
+  const turnOn = async () => {
+    const msg = await enablePush();
+    if (Platform.OS === "android" && msg.startsWith("Notifications are on")) {
+      if (await batteryRestricted()) await askBatteryExemption();
+      if (isXiaomi) await promptAutostart();
+      setRestricted(await batteryRestricted());
+    }
+    return msg;
+  };
 
   const run = async (key: string, fn: () => Promise<string>) => {
     setBusy(key);
@@ -47,10 +83,32 @@ export default function Settings() {
         <Muted small>Get a notification when an agent asks you something, a step is paused for you, a design needs approval, or a run finishes.</Muted>
         {!pushBuiltIn && <Muted small>This build has no Firebase config, so it can't receive notifications yet. The README explains the 5-minute setup.</Muted>}
         <Row>
-          <Button kind="primary" title="Turn on" busy={busy === "on"} disabled={!pushBuiltIn} onPress={() => run("on", enablePush)} />
+          <Button kind="primary" title="Turn on" busy={busy === "on"} disabled={!pushBuiltIn} onPress={() => run("on", turnOn)} />
           <Button title="Send a test" busy={busy === "test"} disabled={!pushBuiltIn} onPress={() => run("test", async () => `Sent to ${(await Api.pushTest()).sent} device(s).`)} />
         </Row>
         {!!pushMsg && <Text style={{ color: c.text }}>{pushMsg}</Text>}
+        {Platform.OS === "android" && (
+          <View style={{ gap: 8, borderTopWidth: 1, borderTopColor: c.border, paddingTop: 10 }}>
+            <Text style={{ color: c.text, fontWeight: "600" }}>Background delivery</Text>
+            <Row style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
+              <Row style={{ flex: 1, flexWrap: "nowrap" }}>
+                <Dot color={restricted ? c.warn : c.ok} />
+                <Text style={{ color: c.text, flex: 1 }}>{restricted ? "Battery saver may stop the app" : "Allowed to run in background"}</Text>
+              </Row>
+              {restricted && <Button small title="Allow" onPress={() => void askBatteryExemption()} />}
+            </Row>
+            {isXiaomi && (
+              <Row style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
+                <Row style={{ flex: 1, flexWrap: "nowrap" }}>
+                  <Dot color={c.muted} />
+                  <Text style={{ color: c.text, flex: 1 }}>Xiaomi Autostart (turn on for Orchestrator)</Text>
+                </Row>
+                <Button small title="Open" onPress={() => void openAutostart()} />
+              </Row>
+            )}
+            <Button small title="All app permissions" onPress={() => void openAppSettings()} />
+          </View>
+        )}
       </Card>
 
       <Card>

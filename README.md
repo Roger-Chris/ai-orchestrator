@@ -126,6 +126,16 @@ cd android && ./gradlew assembleRelease
 adb install -r app/build/outputs/apk/release/app-release.apk
 ```
 
+On Windows, the C++ part of the build fails with *Filename longer than 260 characters* when the repo sits in a long folder path. Build from a copy at a short path instead (the files are copied locally; nothing is downloaded again):
+
+```powershell
+robocopy "<repo>\mobile" C:\orcm /E /XD "<repo>\mobile\android" "<repo>\mobile\.expo"
+cd C:\orcm; npx expo prebuild --platform android --clean
+cd android; .\gradlew assembleRelease "-PreactNativeArchitectures=arm64-v8a"
+```
+
+`arm64-v8a` builds only for 64-bit ARM phones (practically all phones from the last several years), which is much faster.
+
 Or copy `app-release.apk` to the phone and open it (allow installing from your file manager). On first launch, enter the hub's Tailscale address (for example `http://my-pc:4317`) and the token.
 
 **Notifications (optional, about 5 minutes).** Android apps outside the Play Store still receive notifications through Firebase Cloud Messaging, so this needs a free Firebase project:
