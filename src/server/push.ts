@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import webpush from "web-push";
 import type { Store } from "../store/db.js";
+import { type Fcm, FcmError } from "./fcm.js";
 import type { RunEventType, RunRecord, StepRecord } from "../types.js";
 
 /** Push services want a contact for the sender; any https URL or mailto: works. */
@@ -26,6 +27,8 @@ export class Notifier {
     private store: Store,
     dataDir: string,
     private send: (sub: webpush.PushSubscription, payload: string) => Promise<unknown> = (sub, payload) => webpush.sendNotification(sub, payload, { TTL: 3600 }),
+    /** The Android app's channel; absent until a Firebase service-account key is configured. */
+    readonly fcm?: Pick<Fcm, "send">,
   ) {
     const file = join(dataDir, "vapid.json");
     let keys: { publicKey: string; privateKey: string };
@@ -46,16 +49,25 @@ export class Notifier {
     this.store.removePushSub(endpoint);
   }
 
+  /** The Android app registers its FCM device token here. */
+  subscribeFcm(token: string) {
+    this.store.addPushSub(`fcm:${token}`, { type: "fcm", token });
+  }
+
   async notify(p: PushPayload): Promise<number> {
     let sent = 0;
     for (const { endpoint, sub } of this.store.pushSubs()) {
       try {
-        await this.send(sub, JSON.stringify(p));
+        if (sub.type === "fcm") {
+          if (!this.fcm) continue;
+          await this.fcm.send(sub.token, p);
+        } else await this.send(sub, JSON.stringify(p));
         sent++;
       } catch (e) {
         // Gone or no longer valid: the phone unsubscribed or the app was removed.
         const code = (e as { statusCode?: number }).statusCode;
-        if (code === 404 || code === 410) this.store.removePushSub(endpoint);
+        if (code === 404 || code === 410 || (e instanceof FcmError && e.gone)) this.store.removePushSub(endpoint);
+        else console.warn(`notification not sent: ${(e as Error).message}`);
       }
     }
     return sent;

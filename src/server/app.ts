@@ -228,6 +228,13 @@ export function createApp(d: AppDeps) {
     d.notifier.subscribe(PushSubBody.parse(await c.req.json()) as never);
     return c.json({ ok: true });
   });
+  app.get("/api/push/fcm", (c) => c.json({ enabled: !!d.notifier?.fcm }));
+  app.post("/api/push/fcm", async (c) => {
+    if (!d.notifier?.fcm) return c.json({ error: "the hub has no Firebase key (server.fcmServiceAccount)" }, 404);
+    const { token } = z.object({ token: z.string().min(20).max(4096) }).parse(await c.req.json());
+    d.notifier.subscribeFcm(token);
+    return c.json({ ok: true });
+  });
   app.post("/api/push/unsubscribe", async (c) => {
     const { endpoint } = z.object({ endpoint: z.string() }).parse(await c.req.json());
     d.notifier?.unsubscribe(endpoint);

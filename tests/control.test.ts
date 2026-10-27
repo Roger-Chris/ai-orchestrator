@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { createVerify, generateKeyPairSync } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -11,6 +12,7 @@ import { parseConfig } from "../src/config.js";
 import type { Provider } from "../src/providers/base.js";
 import { ProviderPool } from "../src/providers/registry.js";
 import { createApp } from "../src/server/app.js";
+import { Fcm } from "../src/server/fcm.js";
 import { Notifier, payloadFor } from "../src/server/push.js";
 import { Store } from "../src/store/db.js";
 import type { ProviderId, ProviderRequest, ProviderResult, RunEvent, RunEventType } from "../src/types.js";
@@ -214,6 +216,40 @@ describe("phone notifications", () => {
     expect(JSON.parse(sent[0]).title).toBe("t");
     // Keys survive restarts.
     expect(new Notifier(s.store, s.dataDir).publicKey).toBe(n.publicKey);
+  });
+
+  it("sends to the Android app through FCM with a signed service-account token", async () => {
+    const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const keyFile = join(mkdtempSync(join(tmpdir(), "orc-fcm-")), "sa.json");
+    writeFileSync(keyFile, JSON.stringify({ project_id: "my-proj", client_email: "bot@my-proj.iam.gserviceaccount.com", private_key: privateKey.export({ type: "pkcs8", format: "pem" }) }));
+    const calls: { url: string; body: string; auth?: string }[] = [];
+    const http = (async (url: string, init: RequestInit) => {
+      calls.push({ url, body: String(init.body), auth: (init.headers as Record<string, string>).Authorization });
+      if (url.includes("oauth2")) return new Response(JSON.stringify({ access_token: "ya29.test", expires_in: 3600 }));
+      if (String(init.body).includes("dead-token")) return new Response(JSON.stringify({ error: { status: "NOT_FOUND", details: [{ errorCode: "UNREGISTERED" }] } }), { status: 404 });
+      return new Response("{}");
+    }) as typeof fetch;
+    const fcm = new Fcm(keyFile, http);
+    await fcm.send("device-token-123", { title: "Done", body: "Name a planet", url: "/#/t/t1?run=r1", tag: "r1" });
+    // The OAuth assertion is a JWT signed with the key.
+    const assertion = new URLSearchParams(calls[0].body).get("assertion")!;
+    const [h, c, sig] = assertion.split(".");
+    expect(JSON.parse(Buffer.from(c, "base64url").toString()).scope).toBe("https://www.googleapis.com/auth/firebase.messaging");
+    expect(createVerify("RSA-SHA256").update(`${h}.${c}`).verify(publicKey, Buffer.from(sig, "base64url"))).toBe(true);
+    // The message is data-only and high priority, with the tap target in body (Expo's convention).
+    expect(calls[1].url).toBe("https://fcm.googleapis.com/v1/projects/my-proj/messages:send");
+    expect(calls[1].auth).toBe("Bearer ya29.test");
+    const msg = JSON.parse(calls[1].body).message;
+    expect(msg).toMatchObject({ token: "device-token-123", android: { priority: "high" }, data: { title: "Done", message: "Name a planet", channelId: "orchestrator" } });
+    expect(JSON.parse(msg.data.body).url).toBe("/#/t/t1?run=r1");
+    // A token the phone no longer has is dropped.
+    const s = system({ claude: () => ({ text: "x" }) });
+    const n = new Notifier(s.store, s.dataDir, async () => {}, fcm);
+    n.subscribeFcm("dead-token-xxxxxxxxxxxxxxxx");
+    n.subscribeFcm("live-token-xxxxxxxxxxxxxxxx");
+    expect(await n.notify({ title: "t", body: "b", url: "/", tag: "x" })).toBe(1);
+    expect(s.store.pushSubs().map((x) => x.endpoint)).toEqual(["fcm:live-token-xxxxxxxxxxxxxxxx"]);
+    expect(calls.filter((x) => x.url.includes("oauth2"))).toHaveLength(1); // the access token is reused
   });
 
   it("words the notification for each kind of event", () => {

@@ -37,6 +37,11 @@ const ConfigSchema = z.object({
       port: z.number().int().default(4317),
       /** Shared secret for the API and for device-to-device calls. Required for anything but loopback. */
       token: z.string().optional(),
+      /**
+       * Firebase service-account key (JSON) for notifications to the Android app.
+       * Defaults to ./fcm-service-account.json when that file exists.
+       */
+      fcmServiceAccount: z.string().optional(),
     })
     .prefault({}),
   dataDir: z.string().default("./data"),

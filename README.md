@@ -112,6 +112,30 @@ Access controls what agents may do in the chosen folder on the hub: read-only (t
 
 Requests that come through `tailscale serve` always need the token, even though the proxy runs on the PC itself.
 
+### The Android app
+
+[mobile/](mobile) is a native Android app (React Native with Expo) that does everything the web app does: conversations, answering agents, Continue/Edit/Redo/Stop, design approval, merging branches, devices and usage. You install it from an APK file; it is not on the Play Store. It talks to the hub over Tailscale with the same `ORC_TOKEN`, which it keeps in Android's encrypted storage.
+
+**Build and install** (on a PC with Android Studio's SDK, plugged into the phone with USB debugging on):
+
+```bash
+cd mobile
+npm install
+npx expo prebuild --platform android --clean
+cd android && ./gradlew assembleRelease
+adb install -r app/build/outputs/apk/release/app-release.apk
+```
+
+Or copy `app-release.apk` to the phone and open it (allow installing from your file manager). On first launch, enter the hub's Tailscale address (for example `http://my-pc:4317`) and the token.
+
+**Notifications (optional, about 5 minutes).** Android apps outside the Play Store still receive notifications through Firebase Cloud Messaging, so this needs a free Firebase project:
+
+1. In the [Firebase console](https://console.firebase.google.com) create a project, then **Add app → Android** with package name `dev.rogerchris.orchestrator`. Download `google-services.json` into `mobile/`.
+2. In the project's **Settings → Service accounts**, click **Generate new private key**. Save the file on the hub as `fcm-service-account.json` in the orchestrator folder (or point `server.fcmServiceAccount` at it) and restart the hub. Keep it private; it is in `.gitignore`.
+3. Rebuild and reinstall the app (the build includes Firebase only when `google-services.json` is there), then in the app: **Settings → Notifications → Turn on**, then **Send a test**.
+
+Without Firebase the app works the same, except that you see what needs you when you open it rather than as a notification. On Xiaomi/Redmi phones, also allow **Autostart** for the app (Settings → Apps → Orchestrator) so notifications arrive while it is closed.
+
 **CLI**
 
 ```bash

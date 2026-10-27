@@ -6,3 +6,4 @@ orchestrator.config.yaml
 *.log
 workspaces/
 graphify-out
+fcm-service-account.json

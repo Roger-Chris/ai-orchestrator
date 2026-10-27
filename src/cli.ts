@@ -18,6 +18,7 @@ import { type Config, loadConfig } from "./config.js";
 import { probeVersion } from "./providers/base.js";
 import { ProviderPool } from "./providers/registry.js";
 import { createApp } from "./server/app.js";
+import { Fcm } from "./server/fcm.js";
 import { Notifier } from "./server/push.js";
 import { Store } from "./store/db.js";
 import type { Permission, ProviderId, RunEvent, RunMode } from "./types.js";
@@ -31,13 +32,25 @@ export function buildSystem(config: Config) {
   const router = new Router(buildCapabilities(config.routing.overrides), { localBias: config.cluster.localBias, learn: config.brain.learnFromFeedback }, store);
   const agents = loadAgents([resolve(ROOT, "agents"), resolve(process.cwd(), "agents")]);
   const memory = new Memory(config, store);
-  const notifier = new Notifier(store, resolve(config.dataDir));
+  const notifier = new Notifier(store, resolve(config.dataDir), undefined, loadFcm(config));
   const orchestrator = new Orchestrator(config, store, cluster, router, agents, {
     memory,
     workspace: (cwd) => workspaceMap(cwd, config),
     onAttention: notifier.attention,
   });
   return { store, pool, cluster, router, orchestrator, agents, memory, notifier };
+}
+
+/** The Android app's notifications, when a Firebase service-account key is set up. */
+function loadFcm(config: Config): Fcm | undefined {
+  const file = resolve(config.server.fcmServiceAccount ?? process.env.FCM_SERVICE_ACCOUNT ?? "fcm-service-account.json");
+  if (!existsSync(file)) return undefined;
+  try {
+    return new Fcm(file);
+  } catch (e) {
+    console.warn(`! Android notifications are off: ${(e as Error).message}`);
+    return undefined;
+  }
 }
 
 async function bindHosts(config: Config): Promise<string[]> {
@@ -173,6 +186,7 @@ async function cmdDoctor(config: Config, live: boolean) {
   console.log(`· branches   this device ${config.node.acceptBranchWork ? "takes" : "does not take"} coding steps on git branches from other devices (node.acceptBranchWork)`);
   const graphify = await probeVersion(config.context.graphifyCommand);
   console.log(`\n${graphify ? "✓" : "✗"} graphify   ${graphify ?? "not installed (optional: uv tool install graphifyy). Gives the planner a code map."}`);
+  console.log(`· android    notifications ${sys.notifier.fcm ? "on (Firebase key loaded)" : "off (no fcm-service-account.json)"}`);
   console.log(`· memory     local${config.memory.enabled ? "" : " (disabled)"} · NotebookLM: ${await sys.memory.notebookStatus()}`);
   if (!live) console.log("\nRun `orc doctor --live` to send a tiny test prompt to each logged-in model.");
   sys.store.close();
