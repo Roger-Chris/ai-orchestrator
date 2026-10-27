@@ -22,7 +22,8 @@ const chunk = (type, data) => {
   return Buffer.concat([len, td, c]);
 };
 
-function icon(size) {
+/** badge: just the white mark on transparent, for Android's one-colour status-bar icon. */
+function icon(size, badge = false) {
   const s = size / 512;
   const px = Buffer.alloc((size * 4 + 1) * size);
   // Coverage of each shape, 4x4 supersampled for smooth edges.
@@ -48,8 +49,13 @@ function icon(size) {
             if (onDiamond(X, Y) || inDot(X, Y)) fg++;
           }
         }
-      const a = bg / 16, f = bg ? fg / bg : 0;
       const o = y * (size * 4 + 1) + 1 + x * 4;
+      if (badge) {
+        px.fill(255, o, o + 3);
+        px[o + 3] = Math.round((fg / 16) * 255);
+        continue;
+      }
+      const a = bg / 16, f = bg ? fg / bg : 0;
       px[o] = Math.round(0x4f + (255 - 0x4f) * f);
       px[o + 1] = Math.round(0x46 + (255 - 0x46) * f);
       px[o + 2] = Math.round(0xe5 + (255 - 0xe5) * f);
@@ -66,4 +72,5 @@ function icon(size) {
 
 const dir = new URL("../public/", import.meta.url);
 for (const size of [192, 512]) writeFileSync(new URL(`icon-${size}.png`, dir), icon(size));
-console.log("wrote icon-192.png and icon-512.png");
+writeFileSync(new URL("badge-96.png", dir), icon(96, true));
+console.log("wrote icon-192.png, icon-512.png and badge-96.png");

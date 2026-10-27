@@ -1,5 +1,5 @@
 // Service worker: makes the app installable, opens offline to the app shell, shows notifications.
-const SHELL = "orc-shell-v1";
+const SHELL = "orc-shell-v2";
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(SHELL).then((c) => c.addAll(["/", "/manifest.webmanifest", "/icon.svg", "/icon-192.png"])));
@@ -37,7 +37,7 @@ self.addEventListener("push", (e) => {
   } catch {
     /* not JSON: show the defaults */
   }
-  e.waitUntil(self.registration.showNotification(p.title, { body: p.body, tag: p.tag, icon: "/icon-192.png", badge: "/icon-192.png", data: { url: p.url } }));
+  e.waitUntil(self.registration.showNotification(p.title, { body: p.body, tag: p.tag, icon: "/icon-192.png", badge: "/badge-96.png", data: { url: p.url } }));
 });
 
 self.addEventListener("notificationclick", (e) => {
