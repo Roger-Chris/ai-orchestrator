@@ -8,7 +8,10 @@ import type { Config } from "../config.js";
 import type { WorkspaceMap } from "../context/graphify.js";
 import type { Memory } from "../memory/memory.js";
 import type { Store } from "../store/db.js";
+import { git } from "../cluster/branchwork.js";
 import type {
+  BranchJob,
+  TestRun,
   DesignDecision,
   Permission,
   Plan,
@@ -39,6 +42,8 @@ interface Live {
   done: Promise<RunRecord>;
   /** Memory + workspace map for planning, gathered once per run. */
   context?: Promise<string | undefined>;
+  /** Set when the run works on git branches: where devices clone from and branch off. */
+  branchCtx?: { repoUrl: string; base: string; cwd: string };
 }
 
 export interface OrchestratorExtras {
@@ -130,6 +135,7 @@ export class Orchestrator {
       const c = classify(run.task);
       run.classification = c;
       this.emit(l, "run.classified", c);
+      if (opts.branches) await this.prepareBranches(l);
 
       const mode = opts.mode ?? "auto";
       let task = run.task;
@@ -167,6 +173,12 @@ export class Orchestrator {
         run.result = final.map((s) => (final.length > 1 ? `## ${s.title}\n\n${s.output}` : s.output)).join("\n\n");
       }
       if (run.design?.savedTo) run.result += `\n\n---\nApproved design: \`${run.design.savedTo}\``;
+      const branches = run.steps.filter((s) => s.branch?.pushed);
+      if (branches.length) {
+        run.result += `\n\n---\n## Branches to review and merge\n${branches
+          .map((s) => `- \`${s.branch!.name}\` — ${s.title} (${s.provider} @ ${s.branch!.node}): ${s.branch!.changedFiles.length} file(s), tests ${testLabel(s.branch!.tests)}`)
+          .join("\n")}`;
+      }
       run.status = "done";
       run.finishedAt = Date.now();
       this.save(l);
@@ -181,6 +193,92 @@ export class Orchestrator {
       this.emit(l, "run.failed", { error: run.error });
     }
     return run;
+  }
+
+  /**
+   * Branch work starts from a commit every device can fetch: HEAD of your folder. If HEAD
+   * is not on the remote yet, it is pushed as orc/<run>/base (your own branches are untouched).
+   */
+  private async prepareBranches(l: Live) {
+    const opts = l.run.options;
+    const cwd = resolve(opts.cwd ?? process.cwd());
+    const remote = this.config.branches.remote;
+    if ((opts.permission ?? this.config.brain.defaultPermission) === "read") throw new Error("Branch work changes code: choose Edit files or Full access.");
+    const url = await git(["remote", "get-url", remote], cwd);
+    if (!url.ok || !url.out) throw new Error(`Branch work needs a git folder with a "${remote}" remote the other devices can reach; ${cwd} has none.`);
+    const head = await git(["rev-parse", "HEAD"], cwd);
+    if (!head.ok) throw new Error(`${cwd} has no commits yet; commit first so the devices have something to branch from.`);
+    const note = (n: string) => this.emit(l, "step.progress", { note: n }, "branches");
+    if ((await git(["status", "--porcelain", "--untracked-files=no"], cwd)).out) note("uncommitted changes in your folder are not included; devices work from the last commit");
+    await git(["fetch", remote], cwd);
+    const onRemote = (await git(["branch", "-r", "--contains", head.out], cwd)).out.split("\n").some((b) => b.trim().startsWith(`${remote}/`));
+    if (!onRemote) {
+      const ref = `orc/${l.run.id}/base`;
+      const push = await git(["push", remote, `HEAD:refs/heads/${ref}`], cwd);
+      if (!push.ok) throw new Error(`could not push the base commit for the devices (${ref}): ${push.err.slice(-400)}`);
+      note(`your latest commit is not on ${remote} yet; pushed it as ${ref} for the devices`);
+    }
+    l.branchCtx = { repoUrl: url.out, base: head.out, cwd };
+    note(`devices branch from ${head.out.slice(0, 8)} of ${url.out}`);
+  }
+
+  /** One attempt at a coding step on its own branch, on the chosen device. */
+  private async branchAttempt(l: Live, spec: PlanStep, rec: StepRecord, byId: Map<string, StepRecord>, cand: { node: string; provider: ProviderId }, prompt: string, agent: Agent | undefined): Promise<ProviderResult> {
+    const ctx = l.branchCtx!;
+    const deps = spec.dependsOn.map((d) => byId.get(d)?.branch).filter((b): b is NonNullable<StepRecord["branch"]> => !!b?.pushed);
+    const job: BranchJob = {
+      repoUrl: ctx.repoUrl,
+      base: ctx.base,
+      branch: `orc/${l.run.id}-${spec.id}`,
+      mergeBranches: deps.map((b) => b.name),
+      title: spec.title,
+      provider: cand.provider,
+      prompt,
+      system: agent?.system,
+      deep: agent?.deep || DEEP_KINDS.includes(spec.kind),
+      files: spec.files,
+      testCommand: this.config.branches.testCommand,
+      timeoutMs: this.config.brain.stepTimeoutMinutes * 60_000,
+    };
+    const br = await this.cluster.runBranch(cand.node, job, {
+      signal: l.abort.signal,
+      onDelta: (text) => this.emit(l, "step.delta", { text }, spec.id),
+      onProgress: (note) => this.emit(l, "step.progress", { note }, spec.id),
+    });
+    const agentRes = br.agent;
+    if (!br.ok) {
+      return { ok: false, text: "", provider: cand.provider, durationMs: br.durationMs, error: br.error, rateLimited: agentRes?.rateLimited, retryAt: agentRes?.retryAt };
+    }
+    rec.branch = { name: br.branch, base: br.base, commit: br.commit, node: cand.node, changedFiles: br.changedFiles, diffStat: br.diffStat, diff: br.diff, tests: br.tests, pushed: br.pushed };
+    const summary = br.pushed
+      ? `Branch \`${br.branch}\` on ${cand.node}: ${br.changedFiles.length} file(s) changed, tests ${testLabel(br.tests)}.\n\n\`\`\`\n${br.diffStat}\n\`\`\`\n\n\`\`\`diff\n${br.diff}\n\`\`\``
+      : "No files changed, so no branch was pushed.";
+    return { ...(agentRes ?? { provider: cand.provider, durationMs: br.durationMs }), ok: true, text: `${agentRes?.text ?? ""}\n\n${summary}`.trim() };
+  }
+
+  /** Merges a step's branch into the branch checked out in your folder. Conflicts are aborted, never left behind. */
+  async mergeBranch(runId: string, stepId: string): Promise<{ ok: boolean; error?: string }> {
+    const run = this.get(runId);
+    const rec = run?.steps.find((s) => s.id === stepId);
+    if (!run || !rec?.branch?.pushed) return { ok: false, error: "that step has no branch" };
+    if (!["done", "failed", "cancelled"].includes(run.status)) return { ok: false, error: "wait for the run to finish before merging" };
+    if (rec.branch.merged) return { ok: true };
+    const cwd = resolve(run.options.cwd ?? process.cwd());
+    const remote = this.config.branches.remote;
+    const name = rec.branch.name;
+    const fetch = await git(["fetch", remote, `+refs/heads/${name}:refs/remotes/${remote}/${name}`], cwd);
+    let error = fetch.ok ? undefined : `fetch failed: ${fetch.err.slice(-400)}`;
+    if (!error) {
+      const m = await git(["merge", "--no-ff", "--no-edit", "-m", `Merge ${name}: ${rec.title}`, `${remote}/${name}`], cwd);
+      if (!m.ok) {
+        await git(["merge", "--abort"], cwd);
+        error = `merge stopped (nothing changed): ${(m.out || m.err).slice(-600)}`;
+      }
+    }
+    rec.branch.merged = !error;
+    rec.branch.mergeError = error;
+    this.store.saveRun(run);
+    return error ? { ok: false, error } : { ok: true };
   }
 
   /** Related past runs and a code map of the working folder, for the planner and the design author. */
@@ -414,12 +512,15 @@ export class Orchestrator {
     // The run's access level is the ceiling; an agent's own setting can only lower it.
     const allowed = spec.readOnly ? "read" : (l.run.options.permission ?? this.config.brain.defaultPermission);
     const permission = agent?.permission ? lowerPermission(allowed, agent.permission) : allowed;
-    // Steps that change files must run here, where the workspace is.
-    const needsWorkspace = !!spec.needsWorkspace || permission !== "read";
+    // Steps that change files run here, where the workspace is, unless the run works on
+    // branches: then any device that accepts branch work can take them.
+    const onBranch = !!l.branchCtx && permission !== "read";
+    const needsWorkspace = !onBranch && (!!spec.needsWorkspace || permission !== "read");
     const ranked = this.router.rank(
       {
         kind: spec.kind,
         needsWorkspace,
+        branchWork: onBranch,
         needsWeb: spec.kind === "research",
         prefer: agent?.prefer,
         exclude,
@@ -434,7 +535,7 @@ export class Orchestrator {
 
     if (!ranked.length) {
       rec.status = "failed";
-      rec.error = `no available model can run a ${spec.kind} step${needsWorkspace ? " that edits files on this device" : ""}${exclude.length ? ` (excluding ${exclude.join(", ")})` : ""}`;
+      rec.error = `no available model can run a ${spec.kind} step${needsWorkspace ? " that edits files on this device" : onBranch ? " on a branch (no device with node.acceptBranchWork and a coding model)" : ""}${exclude.length ? ` (excluding ${exclude.join(", ")})` : ""}`;
       rec.finishedAt = Date.now();
       this.emit(l, "step.failed", { error: rec.error }, spec.id);
       return;
@@ -447,7 +548,9 @@ export class Orchestrator {
       rec.provider = cand.provider;
       rec.node = cand.node;
       this.emit(l, "step.progress", { note: `running on ${cand.provider} @ ${cand.node} (${cand.why})` }, spec.id);
-      const res: ProviderResult = await this.cluster.run(cand.node, cand.provider, {
+      const res: ProviderResult = onBranch
+        ? await this.branchAttempt(l, spec, rec, byId, cand, prompt, agent)
+        : await this.cluster.run(cand.node, cand.provider, {
         prompt,
         system: agent?.system,
         deep: agent?.deep || DEEP_KINDS.includes(spec.kind),
@@ -522,6 +625,10 @@ function prefixIds(plan: Plan, prefix: string): Plan {
     ...plan,
     steps: plan.steps.map((s) => ({ ...s, id: p(s.id), dependsOn: s.dependsOn.map(p), differentFrom: s.differentFrom?.map(p) })),
   };
+}
+
+function testLabel(t?: TestRun): string {
+  return !t ? "not run" : t.ok ? "passed" : "FAILED";
 }
 
 const PERMISSION_RANK: Record<Permission, number> = { read: 0, edit: 1, full: 2 };

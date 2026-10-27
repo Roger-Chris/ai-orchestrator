@@ -13,6 +13,7 @@ const StepSchema = z.object({
   differentFrom: z.array(z.string()).optional(),
   provider: z.string().optional(),
   needsWorkspace: z.boolean().optional(),
+  files: z.array(z.string()).optional(),
 });
 const PlanSchema = z.object({
   goal: z.string().default(""),
@@ -47,13 +48,13 @@ RULES:
 - For important code, designs or PCB/CAD output, add a review step by the "reviewer" agent with differentFrom set to the author step id, so a different model checks it.
 - needsWorkspace=true only for steps that must edit files on disk.
 - synthesize=true when several outputs must be merged into one final answer.
-- If a WORKSPACE MAP is given, split coding work along its communities so steps that run in parallel own different files; name the files each step owns in its prompt, and make steps that touch a "most connected" abstraction run after the others (dependsOn).
+- If a WORKSPACE MAP is given, split coding work along its communities so steps that run in parallel own different files: list each coding step's files in "files" (paths from the map, or new files it creates). Coding steps may run on different devices on separate git branches that are merged afterwards, so overlapping files cause merge conflicts. Make a step that changes a "most connected" abstraction run first and the steps that use it depend on it.
 - If RELEVANT PAST RUNS are given, reuse their decisions and avoid their mistakes; mention what matters in the step prompts.
 ${context ? `\n${context}\n` : ""}
 Classifier hint: main kind "${c.kind}", also ${c.alsoKinds.join(", ") || "none"}, complexity ${c.complexity}.
 
 Reply with ONLY a JSON object, no prose:
-{"goal":"...","synthesize":true,"steps":[{"id":"s1","title":"...","agent":"<agent name>","prompt":"...","dependsOn":[],"differentFrom":[],"needsWorkspace":false}]}
+{"goal":"...","synthesize":true,"steps":[{"id":"s1","title":"...","agent":"<agent name>","prompt":"...","dependsOn":[],"differentFrom":[],"needsWorkspace":false,"files":[]}]}
 
 TASK:
 ${task}`;
@@ -106,6 +107,7 @@ export function normalizePlan(raw: unknown, task: string, c: Classification, age
       differentFrom: earlier(s.differentFrom),
       provider: (PROVIDER_IDS as string[]).includes(s.provider ?? "") ? (s.provider as ProviderId) : undefined,
       needsWorkspace: s.needsWorkspace,
+      files: s.files?.length ? s.files.slice(0, 60) : undefined,
     });
     seen.add(id);
     idMap.set(s.id, id);

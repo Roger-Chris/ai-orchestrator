@@ -90,6 +90,8 @@ export interface PlanStep {
   needsWorkspace?: boolean;
   /** Always read-only, whatever the run's access level (design and review steps). */
   readOnly?: boolean;
+  /** Files this step owns (from the Graphify code map), so parallel branches don't collide. */
+  files?: string[];
 }
 
 export interface Plan {
@@ -110,6 +112,67 @@ export interface RunOptions {
   permission?: Permission;
   /** Restrict to these devices (node names); default any. */
   nodes?: string[];
+  /**
+   * Coding steps work on their own git branches, on any device that accepts branch work,
+   * and push them for you to review and merge. Needs edit access and a git folder with a remote.
+   */
+  branches?: boolean;
+}
+
+/** A coding step sent to a device to do on its own branch. */
+export interface BranchJob {
+  repoUrl: string;
+  /** Commit to branch from. */
+  base: string;
+  branch: string;
+  /** Branches of steps this one depends on, merged in before work starts. */
+  mergeBranches?: string[];
+  title: string;
+  provider: ProviderId;
+  prompt: string;
+  system?: string;
+  model?: string;
+  deep?: boolean;
+  files?: string[];
+  /** "auto" detects from the project; "" runs no tests. */
+  testCommand: string;
+  timeoutMs?: number;
+}
+
+export interface TestRun {
+  command: string;
+  ok: boolean;
+  output: string;
+}
+
+export interface BranchResult {
+  ok: boolean;
+  branch: string;
+  base: string;
+  commit?: string;
+  changedFiles: string[];
+  diffStat: string;
+  diff: string;
+  tests?: TestRun;
+  pushed: boolean;
+  agent?: ProviderResult;
+  error?: string;
+  durationMs: number;
+}
+
+/** What the run view shows for a step that worked on a branch. */
+export interface StepBranch {
+  name: string;
+  base: string;
+  commit?: string;
+  node: string;
+  changedFiles: string[];
+  diffStat: string;
+  diff: string;
+  tests?: TestRun;
+  pushed: boolean;
+  merged?: boolean;
+  mergeError?: string;
 }
 
 export type RunStatus = "queued" | "planning" | "running" | "awaiting_approval" | "done" | "failed" | "cancelled";
@@ -157,6 +220,7 @@ export interface StepRecord {
   status: "pending" | "running" | "done" | "failed" | "skipped";
   output?: string;
   error?: string;
+  branch?: StepBranch;
   attempts: StepAttempt[];
   startedAt?: number;
   finishedAt?: number;

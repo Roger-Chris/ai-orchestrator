@@ -121,6 +121,15 @@ main { min-width: 0; }
 .rate { display: flex; gap: 6px; align-items: center; }
 .rate button.on { border-color: var(--accent); background: var(--surface-2); }
 
+.controls label.check { flex-direction: row; align-items: center; gap: 6px; white-space: nowrap; }
+.branch-list { display: grid; gap: 8px; }
+.branch { border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: grid; gap: 6px; }
+.branch-h { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: center; }
+.branch code { overflow-wrap: anywhere; }
+.branch .ok { color: var(--ok); }
+.branch .bad { color: var(--err); }
+.branch pre { background: var(--surface-2); padding: 8px; border-radius: 6px; overflow-x: auto; font-family: var(--mono); font-size: 12px; max-height: 420px; }
+#branchesWrap { margin-bottom: 12px; }
 .approval { background: var(--surface); border: 1px solid var(--accent); border-radius: var(--radius); padding: 14px; margin-bottom: 12px; display: grid; gap: 8px; }
 .approval h3 { margin: 0; }
 .approval textarea { width: 100%; box-sizing: border-box; }

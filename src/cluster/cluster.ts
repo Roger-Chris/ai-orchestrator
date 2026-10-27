@@ -1,7 +1,9 @@
 import type { Config } from "../config.js";
 import type { Candidate } from "../brain/router.js";
 import type { ProviderPool } from "../providers/registry.js";
-import type { ProviderId, ProviderRequest, ProviderResult } from "../types.js";
+import { resolve } from "node:path";
+import type { BranchJob, BranchResult, ProviderId, ProviderRequest, ProviderResult } from "../types.js";
+import { runBranchJob } from "./branchwork.js";
 import { tailnetDevices } from "./tailscale.js";
 
 export const VERSION = "0.1.0";
@@ -18,6 +20,8 @@ export interface NodeInfo {
   name: string;
   version: string;
   providers: NodeProviderInfo[];
+  /** Takes coding steps on git branches (node.acceptBranchWork). */
+  branchWork?: boolean;
 }
 
 export interface PeerState extends NodeInfo {
@@ -30,6 +34,14 @@ export interface PeerState extends NodeInfo {
 
 /** Wire format for POST /node/exec (one JSON object per line). */
 export type ExecLine = { type: "delta"; text: string } | { type: "progress"; note: string } | { type: "result"; result: ProviderResult };
+/** Wire format for POST /node/branch-job. */
+export type BranchLine = { type: "delta"; text: string } | { type: "progress"; note: string } | { type: "result"; result: BranchResult };
+
+export interface StreamHandlers {
+  signal?: AbortSignal;
+  onDelta?: (text: string) => void;
+  onProgress?: (note: string) => void;
+}
 
 /**
  * Every device runs the same server. Each one advertises which subscriptions
@@ -54,6 +66,7 @@ export class Cluster {
     return {
       name: this.name,
       version: VERSION,
+      branchWork: this.config.node.acceptBranchWork,
       providers: status.map((s) => ({
         id: s.id,
         ready: s.installed && s.authenticated && !s.coolingDownUntil,
@@ -112,11 +125,12 @@ export class Cluster {
   async candidates(): Promise<Candidate[]> {
     const out: Candidate[] = [];
     const local = await this.pool.available();
-    for (const p of local) out.push({ node: this.name, provider: p, local: true, load: this.pool.load(p) });
+    // The device you submit from can always do branch work: you asked it to.
+    for (const p of local) out.push({ node: this.name, provider: p, local: true, load: this.pool.load(p), branchWork: true });
     for (const peer of this.peers.values()) {
       if (!peer.online) continue;
       for (const p of peer.providers) {
-        if (p.ready) out.push({ node: peer.name, provider: p.id, local: false, load: p.load });
+        if (p.ready) out.push({ node: peer.name, provider: p.id, local: false, load: p.load, branchWork: !!peer.branchWork });
       }
     }
     return out;
@@ -135,6 +149,70 @@ export class Cluster {
     } finally {
       if (slot) slot.load = Math.max(0, slot.load - 0.5);
     }
+  }
+
+  /** Runs a coding step on its own git branch, on this device or a peer. */
+  async runBranch(node: string, job: BranchJob, h: StreamHandlers = {}): Promise<BranchResult> {
+    const failed = (error: string): BranchResult => ({ ok: false, branch: job.branch, base: job.base, changedFiles: [], diffStat: "", diff: "", pushed: false, durationMs: 0, error });
+    if (node === this.name) {
+      return runBranchJob(job, {
+        pool: this.pool,
+        workRoot: resolve(this.config.node.workRoot),
+        nodeName: this.name,
+        testTimeoutMs: this.config.branches.testTimeoutMinutes * 60_000,
+        fixAttempts: this.config.branches.fixAttempts,
+        ...h,
+      });
+    }
+    const peer = this.peers.get(node);
+    if (!peer?.online) return failed(`device ${node} is offline`);
+    if (!peer.branchWork) return failed(`device ${node} does not accept branch work (node.acceptBranchWork)`);
+    const slot = peer.providers.find((p) => p.id === job.provider);
+    if (slot) slot.load += 0.5;
+    try {
+      const r = await this.stream<BranchResult>(peer, "/node/branch-job", job, h);
+      return "error" in r && !("branch" in r) ? failed(r.error) : (r as BranchResult);
+    } finally {
+      if (slot) slot.load = Math.max(0, slot.load - 0.5);
+    }
+  }
+
+  /** POSTs to a peer and reads its NDJSON stream of deltas, progress notes and one result. */
+  private async stream<T>(peer: PeerState, path: string, body: unknown, h: StreamHandlers): Promise<T | { error: string }> {
+    let res: Response;
+    try {
+      res = await fetch(`${peer.url}${path}`, {
+        method: "POST",
+        headers: { ...this.headers(), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: h.signal,
+      });
+    } catch (e) {
+      peer.online = false;
+      return { error: `device ${peer.name}: ${(e as Error).message}` };
+    }
+    if (!res.ok || !res.body) return { error: `device ${peer.name}: HTTP ${res.status}` };
+    let result: T | undefined;
+    const decoder = new TextDecoder();
+    let buf = "";
+    try {
+      for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+        buf += decoder.decode(chunk, { stream: true });
+        let i: number;
+        while ((i = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, i).trim();
+          buf = buf.slice(i + 1);
+          if (!line) continue;
+          const msg = JSON.parse(line) as { type: string; text?: string; note?: string; result?: T };
+          if (msg.type === "delta") h.onDelta?.(msg.text!);
+          else if (msg.type === "progress") h.onProgress?.(msg.note!);
+          else if (msg.type === "result") result = msg.result;
+        }
+      }
+    } catch (e) {
+      return { error: `device ${peer.name} stream: ${(e as Error).message}` };
+    }
+    return result ?? { error: `device ${peer.name} sent no result` };
   }
 
   private async runRemote(peer: PeerState, provider: ProviderId, req: ProviderRequest): Promise<ProviderResult> {

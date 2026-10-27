@@ -117,6 +117,11 @@ $("#composer").addEventListener("submit", async (e) => {
   e.preventDefault();
   const body = { task: $("#task").value.trim(), mode: $("#mode").value };
   for (const k of ["provider", "agent", "permission", "cwd"]) if ($(`#${k}`).value.trim()) body[k] = $(`#${k}`).value.trim();
+  // Branch work writes code (on branches, never in your folder), so it needs edit access.
+  if ($("#branches").checked) {
+    body.branches = true;
+    if (!body.permission) body.permission = "edit";
+  }
   if (!body.task) return;
   $("#runBtn").disabled = true;
   try {
@@ -186,9 +191,14 @@ function handle(ev) {
       el.dataset.text = "";
       break;
     }
-    case "step.progress":
-      log(stepCard(ev.stepId, ev.stepId === "plan" ? "Planning" : ev.stepId === "context" ? "Memory & code map" : ""), d.note);
+    case "step.progress": {
+      const note = { context: "Memory & code map", branches: "Git branches" }[ev.stepId];
+      const el = stepCard(ev.stepId, ev.stepId === "plan" ? "Planning" : note || "");
+      log(el, d.note);
+      // These are notes, not steps: nothing will ever "complete" them.
+      if (note) setBadge(el, "done");
       break;
+    }
     case "step.fallback":
       log(stepCard(ev.stepId), `↻ falling back to ${d.to} @ ${d.node}`);
       setBadge(stepCard(ev.stepId), "running", d.to, d.node);
@@ -231,6 +241,7 @@ function handle(ev) {
       $("#runMeta").textContent = ev.type === "design.approved" ? `design approved${d.savedTo ? ` · saved to ${d.savedTo}` : ""}` : "revising the design";
       break;
     case "run.completed":
+      loadBranches(ev.runId);
       $("#approval").classList.add("hidden");
       $("#resultWrap").classList.remove("hidden");
       $("#result").innerHTML = md(d.result || "");
@@ -240,6 +251,7 @@ function handle(ev) {
       loadNodes();
       break;
     case "run.failed":
+      loadBranches(ev.runId);
       $("#approval").classList.add("hidden");
       $("#resultWrap").classList.remove("hidden");
       $("#result").innerHTML = `<p><strong>Run failed:</strong> ${esc(d.error)}</p>`;
@@ -257,6 +269,7 @@ async function openRun(id) {
   $("#runView").classList.remove("hidden");
   $("#resultWrap").classList.add("hidden");
   $("#approval").classList.add("hidden");
+  $("#branchesWrap").classList.add("hidden");
   $("#cancelBtn").classList.remove("hidden");
   document.querySelectorAll("#history li").forEach((li) => li.classList.toggle("active", li.dataset.id === id));
   const run = await api(`/api/runs/${id}`);
@@ -295,6 +308,48 @@ async function openRun(id) {
 $("#cancelBtn").addEventListener("click", async () => {
   if (currentRun) await api(`/api/runs/${currentRun}/cancel`, { method: "POST" });
 });
+// ---------- branches (review and merge on this device)
+async function loadBranches(runId) {
+  const run = await api(`/api/runs/${runId}`).catch(() => null);
+  if (!run || currentRun !== runId) return;
+  const steps = run.steps.filter((s) => s.branch?.pushed);
+  $("#branchesWrap").classList.toggle("hidden", !steps.length);
+  $("#branchList").innerHTML = steps
+    .map((s) => {
+      const b = s.branch;
+      const tests = !b.tests ? `<span class="muted">tests not run</span>` : b.tests.ok ? `<span class="ok">tests passed</span>` : `<span class="bad">tests failed</span>`;
+      const state = b.merged ? `<span class="ok">merged</span>` : b.mergeError ? `<span class="bad">${esc(b.mergeError)}</span>` : "";
+      return `<div class="branch" data-step="${esc(s.id)}">
+        <div class="branch-h"><strong>${esc(s.title)}</strong><span class="badge p-${esc(s.provider)}">${esc(LABEL[s.provider] || s.provider)} @ ${esc(b.node)}</span></div>
+        <div class="small"><code>${esc(b.name)}</code> · ${b.changedFiles.length} file(s) · ${tests}</div>
+        <details><summary class="small">Changes</summary><pre>${esc(b.diffStat)}</pre><pre>${esc(b.diff)}</pre>${b.tests && !b.tests.ok ? `<pre>${esc(b.tests.output)}</pre>` : ""}</details>
+        <div class="approval-actions"><button class="primary small merge" ${b.merged ? "disabled" : ""}>${b.merged ? "Merged" : "Merge"}</button><span class="small state">${state}</span></div>
+      </div>`;
+    })
+    .join("");
+}
+async function mergeStep(el) {
+  const btn = el.querySelector(".merge");
+  btn.disabled = true;
+  try {
+    await api(`/api/runs/${currentRun}/steps/${el.dataset.step}/merge`, { method: "POST" });
+  } catch (e) {
+    el.querySelector(".state").textContent = e.message;
+  }
+  await loadBranches(currentRun);
+}
+$("#branchList").addEventListener("click", (e) => {
+  const el = e.target.closest(".merge") && e.target.closest(".branch");
+  if (el) mergeStep(el);
+});
+$("#mergeAllBtn").addEventListener("click", async () => {
+  // In plan order, so a branch that builds on another merges after it.
+  for (const el of [...document.querySelectorAll("#branchList .branch")]) {
+    if (el.querySelector(".merge").disabled || el.querySelector(".bad")) continue;
+    await mergeStep(document.querySelector(`#branchList .branch[data-step="${CSS.escape(el.dataset.step)}"]`));
+  }
+});
+
 async function decide(action) {
   const text = $("#approvalNotes").value.trim();
   if (action === "revise" && !text) return $("#approvalNotes").focus();

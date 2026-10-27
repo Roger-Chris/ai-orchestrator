@@ -5,7 +5,7 @@ import { Hono, type Context, type Next } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { stream, streamSSE } from "hono/streaming";
 import { z } from "zod";
-import type { Cluster, ExecLine } from "../cluster/cluster.js";
+import type { BranchLine, Cluster, ExecLine } from "../cluster/cluster.js";
 import type { Config } from "../config.js";
 import type { Orchestrator } from "../brain/orchestrator.js";
 import type { Router } from "../brain/router.js";
@@ -33,6 +33,7 @@ const RunBody = z.object({
   cwd: z.string().optional(),
   permission: z.enum(["read", "edit", "full"]).optional(),
   nodes: z.array(z.string()).optional(),
+  branches: z.boolean().optional(),
 });
 const ExecBody = z.object({
   provider: Provider,
@@ -41,6 +42,22 @@ const ExecBody = z.object({
   model: z.string().optional(),
   deep: z.boolean().optional(),
   permission: z.enum(["read", "edit", "full"]).optional(),
+  timeoutMs: z.number().optional(),
+});
+const BranchJobBody = z.object({
+  repoUrl: z.string().min(1),
+  base: z.string().regex(/^[0-9a-f]{7,64}$/i),
+  // Workers only ever write to the orchestrator's own branch namespace.
+  branch: z.string().regex(/^orc\/[\w./-]+$/).refine((b) => !b.includes("..")),
+  mergeBranches: z.array(z.string().regex(/^orc\/[\w./-]+$/)).optional(),
+  title: z.string().min(1).max(300),
+  provider: Provider,
+  prompt: z.string().min(1),
+  system: z.string().optional(),
+  model: z.string().optional(),
+  deep: z.boolean().optional(),
+  files: z.array(z.string()).optional(),
+  testCommand: z.string(),
   timeoutMs: z.number().optional(),
 });
 const ChatBody = z.object({
@@ -132,6 +149,11 @@ export function createApp(d: AppDeps) {
     return run ? c.json(run) : c.json({ error: "not found" }, 404);
   });
   app.post("/api/runs/:id/cancel", (c) => c.json({ ok: d.orchestrator.cancel(c.req.param("id")) }));
+  // Branch work: merge a step's branch into the branch checked out in the run's folder.
+  app.post("/api/runs/:id/steps/:step/merge", async (c) => {
+    const r = await d.orchestrator.mergeBranch(c.req.param("id"), c.req.param("step"));
+    return r.ok ? c.json(r) : c.json(r, 409);
+  });
   // Design mode: the run waits here until you approve the design or send it back.
   app.post("/api/runs/:id/approve", async (c) => {
     const { notes } = z.object({ notes: z.string().max(20_000).optional() }).parse(await c.req.json().catch(() => ({})));
@@ -214,6 +236,25 @@ export function createApp(d: AppDeps) {
         onProgress: (note) => void write({ type: "progress", note }),
       });
       d.store.recordUsage(body.provider, d.cluster.name, result.ok, result.durationMs);
+      await write({ type: "result", result });
+    });
+  });
+
+  /** A coding step to do on its own git branch: clone/fetch, edit, test, commit, push. */
+  app.post("/node/branch-job", async (c) => {
+    if (!d.config.node.acceptBranchWork) return c.json({ error: `device ${d.cluster.name} does not accept branch work (set node.acceptBranchWork: true)` }, 403);
+    const job = BranchJobBody.parse(await c.req.json());
+    c.header("Content-Type", "application/x-ndjson");
+    return stream(c, async (s) => {
+      const abort = new AbortController();
+      s.onAbort(() => abort.abort());
+      const write = (line: BranchLine) => s.write(JSON.stringify(line) + "\n");
+      const result = await d.cluster.runBranch(d.cluster.name, job, {
+        signal: abort.signal,
+        onDelta: (text) => void write({ type: "delta", text }),
+        onProgress: (note) => void write({ type: "progress", note }),
+      });
+      if (result.agent) d.store.recordUsage(job.provider, d.cluster.name, result.agent.ok, result.agent.durationMs);
       await write({ type: "result", result });
     });
   });

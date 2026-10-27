@@ -8,11 +8,15 @@ export interface Candidate {
   local: boolean;
   /** 0 = idle, 1 = at its concurrency limit, >1 = queued. */
   load: number;
+  /** Device takes coding steps on git branches. */
+  branchWork?: boolean;
 }
 
 export interface RouteRequest {
   kind: TaskKind;
   needsWorkspace?: boolean;
+  /** Step edits code on its own git branch: any device that accepts branch work will do. */
+  branchWork?: boolean;
   needsWeb?: boolean;
   /** Agent's preferred providers, best first. */
   prefer?: ProviderId[];
@@ -47,7 +51,8 @@ export class Router {
       if (req.pin && c.provider !== req.pin) continue;
       if (req.exclude?.includes(c.provider) && !req.pin) continue;
       if (req.nodes?.length && !req.nodes.includes(c.node)) continue;
-      if (req.needsWorkspace && (!c.local || !AGENTIC[c.provider])) continue;
+      if (req.branchWork && (!c.branchWork || !AGENTIC[c.provider])) continue;
+      if (!req.branchWork && req.needsWorkspace && (!c.local || !AGENTIC[c.provider])) continue;
 
       const base = this.caps[req.kind][c.provider];
       const fb = stats[c.provider];

@@ -127,7 +127,7 @@ async function askDesign(orc: Orchestrator, id: string) {
 }
 
 async function cmdRun(config: Config, task: string, v: Record<string, unknown>) {
-  if (!task) throw new Error('usage: orc run "<task>" [--mode auto|direct|plan|design] [--provider p] [--agent name] [--cwd dir] [--permission read|edit|full]');
+  if (!task) throw new Error('usage: orc run "<task>" [--mode auto|direct|plan|design] [--provider p] [--agent name] [--cwd dir] [--permission read|edit|full] [--branches]');
   const sys = buildSystem(config);
   if (config.cluster.enabled) await sys.cluster.refresh();
   const run = sys.orchestrator.submit(task, {
@@ -136,6 +136,7 @@ async function cmdRun(config: Config, task: string, v: Record<string, unknown>) 
     agent: v.agent as string | undefined,
     cwd: v.cwd as string | undefined,
     permission: v.permission as Permission | undefined,
+    branches: !!v.branches,
   });
   sys.orchestrator.subscribe(run.id, (ev) => {
     printEvent(ev, !!v.verbose);
@@ -161,6 +162,7 @@ async function cmdDoctor(config: Config, live: boolean) {
   const devices = await tailnetDevices();
   console.log(devices.length ? `\nTailscale: ${devices.length} device(s) on your tailnet` : "\nTailscale: not running or logged out (multi-device discovery disabled)");
   for (const d of devices) console.log(`  ${d.self ? "*" : " "} ${d.hostName.padEnd(20)} ${d.ips[0] ?? ""} ${d.online ? "online" : "offline"} ${d.os ?? ""}`);
+  console.log(`· branches   this device ${config.node.acceptBranchWork ? "takes" : "does not take"} coding steps on git branches from other devices (node.acceptBranchWork)`);
   const graphify = await probeVersion(config.context.graphifyCommand);
   console.log(`\n${graphify ? "✓" : "✗"} graphify   ${graphify ?? "not installed (optional: uv tool install graphifyy). Gives the planner a code map."}`);
   console.log(`· memory     local${config.memory.enabled ? "" : " (disabled)"} · NotebookLM: ${await sys.memory.notebookStatus()}`);
@@ -278,6 +280,7 @@ async function main() {
       agent: { type: "string" },
       cwd: { type: "string" },
       permission: { type: "string" },
+      branches: { type: "boolean" },
       verbose: { type: "boolean", short: "v" },
       live: { type: "boolean" },
     },

@@ -23,6 +23,11 @@ const ConfigSchema = z.object({
       name: z.string().default(hostname().toLowerCase()),
       /** Directory remote steps run in when this device is a worker. */
       workRoot: z.string().default("./workspaces"),
+      /**
+       * Let other devices send this one coding steps to do on their own git branch: it clones the
+       * repo, lets a model edit, runs the tests and pushes. Needs push access to your repos (gh auth login).
+       */
+      acceptBranchWork: z.boolean().default(false),
     })
     .prefault({}),
   server: z
@@ -70,6 +75,18 @@ const ConfigSchema = z.object({
   routing: z
     .object({
       overrides: z.record(z.string(), z.record(z.string(), z.number().min(0).max(10))).prefault({}),
+    })
+    .prefault({}),
+  /** Coding on branches across devices (run option `branches`). */
+  branches: z
+    .object({
+      /** Remote the branches are pushed to. */
+      remote: z.string().default("origin"),
+      /** "auto" detects (npm test, cargo test, pytest…); "" skips tests; anything else is run as a shell command. */
+      testCommand: z.string().default("auto"),
+      testTimeoutMinutes: z.number().default(15),
+      /** When tests fail, give the model this many chances to fix them before pushing anyway. */
+      fixAttempts: z.number().int().min(0).max(3).default(1),
     })
     .prefault({}),
   /** What the brain remembers between runs. Past runs relevant to a new task are fed to the planner. */

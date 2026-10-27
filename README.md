@@ -69,7 +69,18 @@ On Windows the orchestrator automatically uses the Codex desktop app's bundled C
 3. Keep `server.host: tailscale` (the default in the example config). The server then listens only on loopback and the device's Tailscale IP, never on your LAN or the internet.
 4. Run `npm start` on each device. Each one discovers the others through `tailscale status` within about 20 seconds. You can also list peers explicitly under `cluster.peers`.
 
-Submit work on any device. Steps run wherever the best free subscription is, and the UI shows which device ran what (`Claude @ laptop`). Steps that **edit files** always stay on the device you submitted from, because that's where the workspace is. Steps sent to other devices run read-only. You can open the UI from your phone at `http://<device>.<tailnet>.ts.net:4317` and paste the token once (🔑).
+Submit work on any device. Steps run wherever the best free subscription is, and the UI shows which device ran what (`Claude @ laptop`). Without branch work, steps that **edit files** stay on the device you submitted from, and steps sent to other devices run read-only. You can open the UI from your phone at `http://<device>.<tailnet>.ts.net:4317` and paste the token once (🔑).
+
+### Coding on branches across devices
+
+Tick **Branches across devices** (or pass `--branches`) to let other devices write code too:
+
+1. Your laptop checks that the working folder is a git repo with a remote, and makes sure its latest commit is on the remote. If it isn't, it pushes it as `orc/<run>/base`. Your own branches are never pushed or changed. Uncommitted changes are not included.
+2. The planner uses the Graphify code map to give each coding step its own files, and orders steps so the ones that change shared code go first.
+3. Each coding step goes to a device with `node.acceptBranchWork: true` and a coding model (Claude, ChatGPT or Gemini) that is free. That device clones the repo into its `workRoot` (and later just fetches), creates `orc/<run>-<step>` from the base, merges in the branches of steps this one depends on, lets the model edit, and runs the tests (`branches.testCommand`, auto-detected by default). If the tests fail, the model gets `branches.fixAttempts` tries to fix them. Then it commits and pushes the branch.
+4. The run view lists the branches with their device, model, changed files, diff and test result. **Merge** (or **Merge all with passing tests**) merges them into the branch you have checked out in the working folder. A conflict stops the merge and leaves your folder unchanged. Merges stay local until you push.
+
+On each worker: set `node.acceptBranchWork: true`, make sure `git` can push to your repos (`gh auth login` or an SSH key), and install your project's toolchain (Node, Python…) so the tests can run there.
 
 ## Using it
 

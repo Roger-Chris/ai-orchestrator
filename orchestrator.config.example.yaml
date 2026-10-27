@@ -4,8 +4,12 @@
 node:
   # How this device appears to the others. Defaults to the machine's hostname.
   # name: desktop
-  # Remote steps sent to this device run (read-only) in this folder.
+  # Remote steps sent to this device run (read-only) in this folder; branch work clones repos here.
   workRoot: ./workspaces
+  # Worker devices (e.g. the Linux box, the Mac): set true to take coding steps on their own git
+  # branches. They clone your repo, edit, run the tests and push orc/* branches, so this device
+  # needs push access to your repos (`gh auth login` or an SSH key). Leave false on the laptop.
+  acceptBranchWork: false
 
 server:
   # auto      → loopback only, unless a token is set (then all interfaces)
@@ -49,6 +53,12 @@ providers:
     model: sonar-pro
     deepModel: sonar-deep-research
     maxConcurrent: 2
+
+branches:                    # coding on git branches across devices ("Branches across devices" / --branches)
+  remote: origin
+  testCommand: auto          # auto-detects npm/pnpm/yarn test, cargo test, go test, pytest; "" = no tests
+  testTimeoutMinutes: 15
+  fixAttempts: 1             # if tests fail, the model gets this many tries to fix them before the branch is pushed
 
 memory:
   enabled: true              # every finished run is remembered locally and recalled for related tasks

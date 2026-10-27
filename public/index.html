@@ -56,6 +56,9 @@
                 <option value="full">Full (run anything)</option>
               </select>
             </label>
+            <label class="check" title="Coding steps work on their own git branches on any device that accepts branch work, run the tests and push; you review and merge here.">
+              <input type="checkbox" id="branches" /> Branches across devices
+            </label>
             <label class="grow">Folder
               <input id="cwd" placeholder="Working folder on this device (default: server folder)" />
             </label>
@@ -80,6 +83,11 @@
               <button id="approveBtn" class="primary">Approve &amp; build</button>
               <button id="reviseBtn" class="ghost">Send back for revision</button>
             </div>
+          </div>
+          <div id="branchesWrap" class="result hidden">
+            <div class="result-h"><h3>Branches to review</h3><button id="mergeAllBtn" class="ghost small">Merge all with passing tests</button></div>
+            <p class="muted small">Merging runs git in the run's folder, into the branch you have checked out there. If there is a conflict, the merge is stopped and nothing changes.</p>
+            <div id="branchList" class="branch-list"></div>
           </div>
           <div id="resultWrap" class="result hidden">
             <div class="result-h"><h3>Result</h3><button id="copyBtn" class="ghost small">Copy</button></div>
