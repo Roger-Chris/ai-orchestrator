@@ -47,7 +47,7 @@ export default function RootLayout() {
           contentStyle: { backgroundColor: c.bg },
         }}
       >
-        <Stack.Screen name="index" options={{ title: "Orchestrator" }} />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="connect" options={{ title: "Connect to your hub" }} />
         <Stack.Screen name="settings" options={{ title: "Settings" }} />
         <Stack.Screen name="t/[id]" options={{ title: "Conversation" }} />

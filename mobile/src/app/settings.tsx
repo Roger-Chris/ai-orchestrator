@@ -1,11 +1,11 @@
 import { router } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, AppState, Platform, ScrollView, Text, View } from "react-native";
-import { Button, Card, Chip, Dot, Muted, Row } from "../components/ui";
-import { Api, connection, type NodeInfo } from "../lib/api";
+import { Button, Card, Dot, Muted, Row } from "../components/ui";
+import { Api, connection } from "../lib/api";
 import { askBatteryExemption, batteryRestricted, isXiaomi, openAppSettings, openAutostart } from "../lib/background";
 import { enablePush, pushBuiltIn } from "../lib/push";
-import { LABEL, useColors } from "../lib/theme";
+import { useColors } from "../lib/theme";
 
 /** Xiaomi's Autostart can't be requested by an app: explain, then open the screen where it lives. */
 function promptAutostart(): Promise<void> {
@@ -24,18 +24,10 @@ function promptAutostart(): Promise<void> {
 export default function Settings() {
   const c = useColors();
   const conn = connection();
-  const [nodes, setNodes] = useState<{ self: NodeInfo; peers: NodeInfo[] }>();
-  const [usage, setUsage] = useState<Awaited<ReturnType<typeof Api.usage>>>([]);
   const [pushMsg, setPushMsg] = useState("");
   const [busy, setBusy] = useState("");
 
   const [restricted, setRestricted] = useState(false);
-
-  const loadNodes = useCallback((refresh = false) => Api.nodes(refresh).then(setNodes).catch(() => {}), []);
-  useEffect(() => {
-    void loadNodes();
-    Api.usage().then(setUsage).catch(() => {});
-  }, [loadNodes]);
 
   // Re-check when you come back from Android's settings screens.
   useEffect(() => {
@@ -111,52 +103,6 @@ export default function Settings() {
         )}
       </Card>
 
-      <Card>
-        <Row style={{ justifyContent: "space-between" }}>
-          <Text style={h2}>Devices & models</Text>
-          <Button small title="Refresh" onPress={() => loadNodes(true)} />
-        </Row>
-        {nodes &&
-          [nodes.self, ...nodes.peers].map((n, i) => (
-            <View key={n.name} style={{ gap: 6, borderTopWidth: 1, borderTopColor: c.border, paddingTop: 8 }}>
-              <Row style={{ justifyContent: "space-between" }}>
-                <Text style={{ color: c.text, fontWeight: "600" }}>{n.name}</Text>
-                <Muted small>
-                  {i === 0 ? "hub" : n.online === false ? "offline" : `via ${n.via}`}
-                  {n.branchWork ? " · takes branch work" : ""}
-                </Muted>
-              </Row>
-              <Row>
-                {n.providers.map((p) => (
-                  <View key={p.id} style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-                    <Dot size={8} color={p.ready ? c.ok : p.coolingDownUntil ? c.warn : c.err} />
-                    <Chip text={`${LABEL[p.id] ?? p.id}${p.load > 0 ? ` ${Math.round(p.load * 100)}%` : ""}`} />
-                  </View>
-                ))}
-              </Row>
-            </View>
-          ))}
-        {nodes && !nodes.peers.length && <Muted small>No other devices yet.</Muted>}
-      </Card>
-
-      <Card>
-        <Text style={h2}>Usage, last 7 days</Text>
-        {usage.length ? (
-          usage.map((r) => (
-            <Row key={`${r.day}${r.provider}${r.node}`} style={{ justifyContent: "space-between" }}>
-              <Muted small>{r.day}</Muted>
-              <Text style={{ color: c.text }}>
-                {LABEL[r.provider] ?? r.provider} @ {r.node}
-              </Text>
-              <Muted small>
-                {r.calls} calls{r.failed ? `, ${r.failed} failed` : ""}
-              </Muted>
-            </Row>
-          ))
-        ) : (
-          <Muted small>No calls yet.</Muted>
-        )}
-      </Card>
     </ScrollView>
   );
 }

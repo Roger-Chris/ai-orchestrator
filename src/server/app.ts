@@ -12,6 +12,7 @@ import type { Router } from "../brain/router.js";
 import type { ProviderPool } from "../providers/registry.js";
 import type { Store } from "../store/db.js";
 import { PROVIDER_IDS, type ProviderId, type RunEvent, type RunOptions } from "../types.js";
+import { buildHome, buildInsights, localDay } from "./home.js";
 import type { Notifier } from "./push.js";
 
 export interface AppDeps {
@@ -71,6 +72,15 @@ const BranchJobBody = z.object({
   files: z.array(z.string()).optional(),
   testCommand: z.string(),
   timeoutMs: z.number().optional(),
+});
+const TaskBody = z.object({
+  /** Lets a reader re-send the same message's task without duplicating it. */
+  id: z.string().regex(/^[\w.:-]{1,120}$/).optional(),
+  day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  time: z.string().max(40).optional(),
+  title: z.string().min(1).max(300),
+  source: z.enum(["gmail", "whatsapp", "manual"]).default("manual"),
+  detail: z.string().max(200).optional(),
 });
 const ChatBody = z.object({
   model: z.string().default("orchestrator"),
@@ -153,8 +163,28 @@ export function createApp(d: AppDeps) {
   app.get("/api/memory", (c) => c.json(d.store.searchMemory(c.req.query("q") ?? "", Number(c.req.query("limit") ?? 10))));
   app.get("/api/usage", (c) => c.json(d.store.usage(Number(c.req.query("days") ?? 7))));
 
+  // ---- home screen
+  app.get("/api/home", async (c) => c.json(await buildHome(d)));
+  app.get("/api/insights", (c) => c.json(buildInsights(d.store, Math.min(90, Math.max(1, Number(c.req.query("days") ?? 7))))));
+  // Today's tasks. Mail and message readers add them here; so can you.
+  app.get("/api/tasks", (c) => c.json(d.store.tasksFor(c.req.query("day") ?? localDay())));
+  app.post("/api/tasks", async (c) => {
+    const t = TaskBody.parse(await c.req.json());
+    const task = { id: t.id ?? randomUUID().slice(0, 8), day: t.day ?? localDay(), time: t.time, title: t.title, source: t.source, detail: t.detail };
+    d.store.addTask(task);
+    return c.json({ ...task, done: false }, 201);
+  });
+  app.post("/api/tasks/:id/done", async (c) => {
+    const { done } = z.object({ done: z.boolean().default(true) }).parse(await c.req.json().catch(() => ({})));
+    return d.store.setTaskDone(c.req.param("id"), done) ? c.json({ ok: true }) : c.json({ error: "not found" }, 404);
+  });
+  app.delete("/api/tasks/:id", (c) => {
+    d.store.deleteTask(c.req.param("id"));
+    return c.json({ ok: true });
+  });
+
   // ---- runs
-  app.get("/api/runs", (c) => c.json(d.store.listRuns(Number(c.req.query("limit") ?? 50))));
+  app.get("/api/runs",(c) => c.json(d.store.listRuns(Number(c.req.query("limit") ?? 50))));
   app.post("/api/runs", async (c) => {
     const { task, ...options } = RunBody.parse(await c.req.json());
     return c.json(d.orchestrator.submit(task, options), 201);

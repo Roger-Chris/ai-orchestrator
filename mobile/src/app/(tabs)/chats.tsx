@@ -1,9 +1,9 @@
-import { Link, Stack, router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
-import { Button, Dot, ErrorText, Muted } from "../components/ui";
-import { type ActiveRun, Api, type Thread, Unauthorized } from "../lib/api";
-import { useColors } from "../lib/theme";
+import { Button, Dot, ErrorText, Muted } from "../../components/ui";
+import { type ActiveRun, Api, type Thread, Unauthorized } from "../../lib/api";
+import { useColors } from "../../lib/theme";
 
 function ago(ts: number): string {
   const s = Math.round((Date.now() - ts) / 1000);
@@ -13,7 +13,7 @@ function ago(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
-/** Your conversations, with the ones that need you on top. */
+/** All your conversations, newest first; a dot shows the ones that are busy or waiting for you. */
 export default function Conversations() {
   const c = useColors();
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -46,30 +46,9 @@ export default function Conversations() {
   );
 
   const status = new Map(active.map((r) => [r.threadId, r.status]));
-  const needsYou = active.filter((r) => r.status === "waiting" || r.status === "awaiting_approval");
 
   return (
     <View style={{ flex: 1 }}>
-      <Stack.Screen
-        options={{
-          headerRight: () => (
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              <Button small title="Settings" onPress={() => router.push("/settings")} />
-              <Button small kind="primary" title="New" onPress={() => router.push("/t/new")} />
-            </View>
-          ),
-        }}
-      />
-      {needsYou.length > 0 && (
-        <View style={{ backgroundColor: c.warnSoft, borderBottomColor: c.warn, borderBottomWidth: 1, padding: 12, gap: 4 }}>
-          <Text style={{ color: c.text, fontWeight: "700" }}>{needsYou.length === 1 ? "An agent needs you" : `${needsYou.length} runs need you`}</Text>
-          {needsYou.slice(0, 3).map((r) => (
-            <Link key={r.id} href={r.threadId ? `/t/${r.threadId}` : "/"} style={{ color: c.accent, paddingVertical: 4 }}>
-              {r.task.slice(0, 70)}
-            </Link>
-          ))}
-        </View>
-      )}
       <FlatList
         data={threads}
         keyExtractor={(t) => t.id}

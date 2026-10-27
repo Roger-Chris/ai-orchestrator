@@ -136,6 +136,79 @@ export interface Thread {
   updatedAt: number;
 }
 
+/** Something you have to do on a given day, picked out of your mail or messages (or added by hand). */
+export interface DayTask {
+  id: string;
+  /** Local date, YYYY-MM-DD. */
+  day: string;
+  /** "10:00", "by 5 pm"; absent when it is just "today". */
+  time?: string;
+  title: string;
+  source: "gmail" | "whatsapp" | "manual";
+  /** Where it came from, e.g. "Arun" or "clinic confirmation". */
+  detail?: string;
+  done: boolean;
+}
+
+// ---- the home screen (GET /api/home, GET /api/insights)
+
+/** Something the brain is waiting on you for. */
+export interface Decision {
+  kind: "question" | "checkpoint" | "design";
+  runId: string;
+  threadId?: string;
+  stepId?: string;
+  /** Who is asking: the agent or step title. */
+  from: string;
+  /** The question, or what is waiting for review. */
+  text: string;
+  since: number;
+}
+
+export interface Running {
+  runId: string;
+  threadId?: string;
+  task: string;
+  stepsDone: number;
+  stepsTotal: number;
+  /** What it is doing right now, e.g. "Claude · Write the OpenSCAD model". */
+  now?: string;
+}
+
+/** Something wrong you might want to act on. */
+export interface Attention {
+  level: "error" | "warn";
+  title: string;
+  detail: string;
+  /** Present for a failed run, so the app can open or retry it. */
+  runId?: string;
+  threadId?: string;
+  task?: string;
+}
+
+export interface Home {
+  node: string;
+  devices: number;
+  day: string;
+  tasks: DayTask[];
+  /** Which task sources are connected (none yet: tasks are added through /api/tasks). */
+  sources: { gmail: boolean; whatsapp: boolean };
+  decisions: Decision[];
+  running: Running[];
+  attention: Attention[];
+  recent: { runId: string; threadId?: string; task: string; status: string; at: number }[];
+}
+
+export interface Insights {
+  days: { day: string; runs: number; done: number; failed: number }[];
+  runs: number;
+  done: number;
+  failed: number;
+  /** Median time from start to finish of runs that completed, ms. */
+  medianMs?: number;
+  providers: { provider: string; calls: number; failed: number; avgMs: number }[];
+}
+
 /** A coding step sent to a device to do on its own branch. */
 export interface BranchJob {
   repoUrl: string;

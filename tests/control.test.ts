@@ -188,6 +188,40 @@ describe("conversations", () => {
   });
 });
 
+describe("home screen", () => {
+  it("shows today's tasks, open questions, failures and this week's numbers", async () => {
+    const s = system({ claude: (req) => (req.prompt.includes("paint") ? { text: "<ask>Which colour?</ask>" } : { ok: false, error: "boom" }) });
+    const app = createApp({ ...s, publicDir: "web/dist" });
+    const auth = { Authorization: "Bearer secret-token", "Content-Type": "application/json" };
+    const post = (path: string, body: unknown) => app.request(path, { method: "POST", headers: auth, body: JSON.stringify(body) });
+
+    expect((await post("/api/tasks", { title: "Pay electricity bill", time: "by 5 pm", source: "gmail", detail: "due today" })).status).toBe(201);
+    const late = await (await post("/api/tasks", { title: "Call Arun", time: "10:00", source: "whatsapp", id: "wa:123" })).json();
+    await post("/api/tasks", { title: "Call Arun", time: "10:00", source: "whatsapp", id: "wa:123" }); // same message again: no duplicate
+    expect((await post("/api/tasks", { title: "x", source: "fax" })).status).toBe(400);
+
+    const failed = s.orchestrator.submit("broken thing", { mode: "direct" });
+    await s.orchestrator.wait(failed.id);
+    const asking = s.orchestrator.submit("paint it", { mode: "direct", ask: true });
+    await new Promise<void>((res) => on(s, asking.id, "step.question", () => res()));
+
+    const home = await (await app.request("/api/home", { headers: auth })).json();
+    expect(home.tasks.map((t: { title: string }) => t.title)).toEqual(["Call Arun", "Pay electricity bill"]);
+    expect(home.decisions).toMatchObject([{ kind: "question", runId: asking.id, stepId: "s1", text: "Which colour?" }]);
+    expect(home.attention[0]).toMatchObject({ level: "error", runId: failed.id, task: "broken thing" });
+    expect(home.recent[0].runId).toBe(failed.id);
+
+    expect((await post(`/api/tasks/${late.id}/done`, {})).status).toBe(200);
+    expect((await (await app.request("/api/tasks", { headers: auth })).json()).find((t: { id: string }) => t.id === "wa:123").done).toBe(true);
+
+    const week = await (await app.request("/api/insights", { headers: auth })).json();
+    expect(week.days).toHaveLength(7);
+    expect(week.days[6]).toMatchObject({ runs: 2, failed: 1 });
+    expect(week).toMatchObject({ runs: 2, done: 0, failed: 1 });
+    s.orchestrator.cancel(asking.id);
+  });
+});
+
 describe("access through tailscale serve", () => {
   it("requests forwarded by a local proxy need the token even though they arrive from loopback", async () => {
     const s = system({ claude: () => ({ text: "x" }) });

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { CooldownStore } from "../providers/registry.js";
 import type { FeedbackSource } from "../brain/router.js";
-import type { ProviderId, RunEvent, RunRecord, TaskKind, Thread } from "../types.js";
+import type { DayTask, ProviderId, RunEvent, RunRecord, TaskKind, Thread } from "../types.js";
 
 /** SQLite persistence: run history, event log, ratings, cooldowns and usage. */
 export class Store implements CooldownStore, FeedbackSource {
@@ -43,7 +43,58 @@ export class Store implements CooldownStore, FeedbackSource {
         id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS push_subs (endpoint TEXT PRIMARY KEY, sub TEXT NOT NULL, created_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY, day TEXT NOT NULL, time TEXT, title TEXT NOT NULL,
+        source TEXT NOT NULL, detail TEXT, done INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS tasks_day ON tasks(day);
     `);
+  }
+
+  addTask(t: Omit<DayTask, "done">) {
+    this.db
+      .prepare("INSERT OR REPLACE INTO tasks (id, day, time, title, source, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(t.id, t.day, t.time ?? null, t.title, t.source, t.detail ?? null, Date.now());
+  }
+
+  /** A day's tasks: timed ones in time order, then the rest in the order they came in. */
+  tasksFor(day: string): DayTask[] {
+    return (this.db.prepare("SELECT * FROM tasks WHERE day = ? ORDER BY time IS NULL, time, created_at").all(day) as any[]).map((r) => ({
+      id: r.id,
+      day: r.day,
+      time: r.time ?? undefined,
+      title: r.title,
+      source: r.source,
+      detail: r.detail ?? undefined,
+      done: !!r.done,
+    }));
+  }
+
+  setTaskDone(id: string, done: boolean): boolean {
+    return this.db.prepare("UPDATE tasks SET done = ? WHERE id = ?").run(done ? 1 : 0, id).changes > 0;
+  }
+
+  deleteTask(id: string) {
+    this.db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+  }
+
+  /** Runs started since `since`, newest first, with what the home screen and insights need. */
+  runsSince(since: number, limit = 500): { id: string; threadId?: string; task: string; status: string; error?: string; createdAt: number; finishedAt?: number }[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT id, task, status, created_at, finished_at, json_extract(record, '$.threadId') AS thread_id, json_extract(record, '$.error') AS error FROM runs WHERE created_at >= ? ORDER BY created_at DESC LIMIT ?",
+        )
+        .all(since, limit) as any[]
+    ).map((r) => ({
+      id: r.id,
+      threadId: r.thread_id ?? undefined,
+      task: r.task,
+      status: r.status,
+      error: r.error ?? undefined,
+      createdAt: r.created_at,
+      finishedAt: r.finished_at ?? undefined,
+    }));
   }
 
   createThread(t: Thread) {

@@ -1,7 +1,7 @@
 import * as SecureStore from "expo-secure-store";
-import type { ReviewDecision, RunEvent, RunOptions, RunRecord, Thread } from "../../../src/types";
+import type { Home, Insights, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
 
-export type { RunEvent, RunOptions, RunRecord, StepRecord, Thread } from "../../../src/types";
+export type { Attention, DayTask, Decision, Home, Insights, RunEvent, RunOptions, RunRecord, Running, StepRecord, Thread } from "../../../src/types";
 
 /** Where the hub is and how to get in. Kept in Android's encrypted storage. */
 export interface Connection {
@@ -75,6 +75,9 @@ export interface Agent {
 export type ActiveRun = Pick<RunRecord, "id" | "threadId" | "task" | "status" | "createdAt">;
 
 export const Api = {
+  home: () => api<Home>("/api/home"),
+  insights: (days = 7) => api<Insights>(`/api/insights?days=${days}`),
+  taskDone: (id: string, done: boolean) => api(`/api/tasks/${encodeURIComponent(id)}/done`, { body: { done } }),
   health: () => api<{ ok: boolean; node: string }>("/api/health", { timeoutMs: 8000 }),
   threads: () => api<Thread[]>("/api/threads"),
   thread: (id: string) => api<{ thread: Thread; runs: RunRecord[] }>(`/api/threads/${id}`),
