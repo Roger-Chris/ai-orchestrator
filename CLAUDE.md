@@ -8,7 +8,7 @@ A brain that routes work across the owner's Claude, ChatGPT (Go), Gemini (Google
 - `web/`: React + Vite web app (PWA), built to `web/dist` by `npm start`.
 - `mobile/`: Expo (SDK 58) React Native Android app, installed from an APK, not the Play Store. It has its own `AGENTS.md`: read it before touching Expo APIs.
 - `agents/`: specialist agent YAML files.
-- `tests/`: vitest with fake providers. `npm test` must stay green (72 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
+- `tests/`: vitest with fake providers. `npm test` must stay green (73 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
 
 ## Running the hub
 
@@ -51,6 +51,10 @@ Hard-won details:
 - Today's tasks come from the `tasks` table via `POST /api/tasks` (`{title, time?, day?, source: gmail|whatsapp|manual, detail?, id?}`; re-sending the same `id` replaces it). The Gmail reader (`src/integrations/gmail.ts`) fills it; WhatsApp is not built yet.
 - Today is normally filled from the AI_Assistant brain (`src/integrations/assistant.ts`, `assistant:` config, `BRAIN_TOKEN` in `.env`): every `pollMinutes` it copies the brain's tasks due today, overdue and finished-today as `brain:<id>` rows (`upsertTask`/`pruneTasks`), and `POST /api/tasks/brain:<id>/done` calls the brain's `/tasks/<id>/done` (or `/confirm` to reopen) first. The brain is localhost-only, so this runs on the Linux hub. Its `GET /tasks` includes `source` (email/whatsapp/manual) since AI_Assistant added it for this.
 - Gmail: the owner's own OAuth client (`gmail-client.json`, not in git) and a refresh token in `data/gmail-token.json` from `orc gmail connect` (works headless: paste the redirect address). The reader polls every `gmail.pollMinutes`, sends new mail in batches of 10 to the first ready of Claude/Gemini/ChatGPT for JSON tasks, and marks mail seen (`gmail_seen`) only after a batch parses, so failures retry.
+
+## Agents know the setup
+
+- Every step (except coding on branches) and the final synthesis get a live briefing as system instructions, ahead of the agent's own (`src/brain/setup.ts`, `extras.setup` built in `cli.ts`): owner (`profile.name`/`about`, else `OWNER_NAME`), devices and their ready models (cluster + `tailscale status`, cached 60 s), today's tasks, runs waiting on the owner, connected services. Without it, questions like "which devices are online?" got generic how-tos. A failing briefing is skipped, never fatal.
 
 ## Groq and other OpenAI-compatible APIs
 

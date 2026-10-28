@@ -73,6 +73,8 @@ export interface OrchestratorExtras {
   workspace?: (cwd: string) => Promise<WorkspaceMap | undefined>;
   /** Something needs you (a question, a checkpoint, a design) or a run ended: e.g. send a phone notification. */
   onAttention?: (run: RunRecord, step: StepRecord | undefined, type: RunEventType) => void | Promise<void>;
+  /** A live briefing on the owner's setup (devices, models, today's tasks), given to every agent. */
+  setup?: () => Promise<string | undefined>;
 }
 
 export class Orchestrator {
@@ -508,6 +510,15 @@ export class Orchestrator {
     return res.ok ? refineClassification(c, res.text) : c;
   }
 
+  /** The setup briefing, or nothing if it can't be built: a missing briefing must never stop a run. */
+  private async briefing(): Promise<string | undefined> {
+    try {
+      return await this.extras.setup?.();
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Asks the planner model for a step graph; falls back to one step on any problem. */
   private async plan(l: Live, task: string): Promise<Plan> {
     const { run } = l;
@@ -621,6 +632,10 @@ export class Orchestrator {
     // Your answers to its questions and your redo instructions, carried into the next round.
     let followUp = "";
 
+    // Agents answer from the owner's actual setup, not generic advice; coding on branches doesn't need it.
+    const brief = onBranch ? undefined : await this.briefing();
+    const system = [brief, agent?.system].filter(Boolean).join("\n\n---\n\n") || undefined;
+
     try {
       for (let round = 0; round < MAX_ROUNDS; round++) {
         let res: ProviderResult | undefined;
@@ -637,7 +652,7 @@ export class Orchestrator {
             ? await this.branchAttempt(l, spec, rec, byId, cand, full, agent, ctrl.signal)
             : await this.cluster.run(cand.node, cand.provider, {
                 prompt: full,
-                system: agent?.system,
+                system,
                 deep: agent?.deep || DEEP_KINDS.includes(spec.kind),
                 cwd: cand.local ? resolve(opts.cwd ?? process.cwd()) : undefined,
                 permission: cand.local ? permission : "read",
@@ -817,10 +832,12 @@ export class Orchestrator {
     );
     const ranked = this.router.rank({ kind: "writing", prefer: [this.config.brain.planner] }, await this.cluster.candidates());
     const id = "synthesis";
+    const system = await this.briefing();
     for (const cand of ranked.slice(0, MAX_ATTEMPTS)) {
       this.emit(l, "step.started", { title: "Synthesize final answer", kind: "writing", ranking: [cand] }, id);
       const res = await this.cluster.run(cand.node, cand.provider, {
         prompt,
+        system,
         permission: "read",
         timeoutMs: this.config.brain.stepTimeoutMinutes * 60_000,
         signal: l.abort.signal,

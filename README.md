@@ -172,6 +172,10 @@ Or copy `app-release.apk` to the phone and open it (allow installing from your f
 
 Without Firebase the app works the same, except that you see what needs you when you open it rather than as a notification. On Xiaomi/Redmi phones, also allow **Autostart** for the app (Settings → Apps → Orchestrator) so notifications arrive while it is closed.
 
+### Answers about your setup
+
+Every agent gets a short live briefing before your question: who it works for (`profile.name`, or `OWNER_NAME` in `.env`, plus an optional `profile.about`), your devices and which are online, the models each has ready, today's tasks, anything waiting on you, and what is connected. So "which of my devices are online?" or "what's on today?" is answered from your actual setup, not with general instructions.
+
 ### Today's tasks from the AI_Assistant brain (recommended)
 
 If the [AI_Assistant](https://github.com/Roger-Chris/AI_Assistant) brain runs on the same machine as the hub, it already reads your Gmail (and WhatsApp, when its bridge is on) and turns messages into tasks. Put its `BRAIN_TOKEN` (from `AI_Assistant/.env`) into the hub's `.env` and restart the hub: every 2 minutes it copies the brain's tasks due today, the overdue ones and today's finished ones onto **Today**, and ticking one off in the app marks it done in the brain. `orc doctor` shows whether it can reach the brain; if it can't, Home says so under **Needs a look**. With this on there is no need for the Gmail reader below.

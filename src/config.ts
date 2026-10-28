@@ -139,6 +139,15 @@ const ConfigSchema = z.object({
       graphifyTimeoutSeconds: z.number().default(180),
     })
     .prefault({}),
+  /** Who the agents work for: put in every agent's briefing so answers are about you, not generic. */
+  profile: z
+    .object({
+      /** Defaults to OWNER_NAME from .env. */
+      name: z.string().optional(),
+      /** A line or two: what you do, what you're working on, how you like answers. */
+      about: z.string().optional(),
+    })
+    .prefault({}),
   /**
    * The AI_Assistant brain (../AI_Assistant) on this machine: it reads Gmail and WhatsApp and
    * extracts tasks; today's go to the home screen. On when BRAIN_TOKEN is set.
@@ -200,6 +209,7 @@ export function parseConfig(raw: unknown): Config {
   if (!cfg.server.token) cfg.server.token = process.env.ORC_TOKEN || undefined;
   // Without a key Perplexity stays listed but reports itself as not logged in.
   if (!cfg.providers.perplexity.apiKey) cfg.providers.perplexity.apiKey = process.env.PERPLEXITY_API_KEY || undefined;
+  if (!cfg.profile.name) cfg.profile.name = process.env.OWNER_NAME || undefined;
   if (!cfg.assistant.token) cfg.assistant.token = process.env.BRAIN_TOKEN || undefined;
   if (!cfg.providers.groq.apiKey) cfg.providers.groq.apiKey = process.env.GROQ_API_KEY || undefined;
   if (!cfg.providers.groq.apiKeys.length) cfg.providers.groq.apiKeys = (process.env.GROQ_API_KEYS ?? "").split(",").map((k) => k.trim()).filter(Boolean);

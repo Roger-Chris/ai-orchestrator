@@ -7,6 +7,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { loadAgents } from "../src/agents/loader.js";
 import { buildCapabilities } from "../src/brain/capabilities.js";
 import { Orchestrator, parseQuestion } from "../src/brain/orchestrator.js";
+import { describeSetup } from "../src/brain/setup.js";
 import { Router } from "../src/brain/router.js";
 import { Cluster } from "../src/cluster/cluster.js";
 import { parseConfig } from "../src/config.js";
@@ -290,6 +291,32 @@ describe("gmail reader", () => {
     const text = `{"tasks":[{"email":1,"title":"Old","day":"2000-01-01"},{"email":5,"title":"Ghost"},{"email":1,"title":" "},{"email":1,"title":"Reply to Priya","time":"null"}]}`;
     expect(parseTasks(text, mails, today)).toEqual([{ id: "gmail:a:3", day: today, time: undefined, title: "Reply to Priya", detail: undefined }]);
     expect(parseTasks("no json here", mails, today)).toBeUndefined();
+  });
+});
+
+describe("setup briefing", () => {
+  it("gives every agent the owner's live setup, and a broken briefing never stops a run", async () => {
+    const systems: (string | undefined)[] = [];
+    const s = system({ groq: (req) => (systems.push(req.system), { text: "answered" }) });
+    s.store.addTask({ id: "t1", day: localDay(), time: "18:00", title: "Send Priya the deck", source: "whatsapp" });
+    s.cluster.peers.set("laptop", { name: "laptop", version: "x", url: "http://laptop", via: "tailscale", online: true, branchWork: true, providers: [{ id: "claude", ready: true, load: 0 } as never] });
+    const make = (setup: () => Promise<string | undefined>) =>
+      new Orchestrator(s.config, s.store, s.cluster, s.router, loadAgents(["agents"]), { setup });
+    const orc = make(() =>
+      describeSetup({ profile: { name: "Roger" }, cluster: s.cluster, pool: s.pool, store: s.store, active: () => [], services: () => ["WhatsApp: off"] }),
+    );
+    const run = await orc.runToCompletion("which of my devices are online?", { mode: "direct", agent: "generalist" });
+    expect(run.result).toBe("answered");
+    const sys = systems[0]!;
+    expect(sys).toContain("Roger's personal AI Orchestrator");
+    expect(sys).toMatch(/- hub \(this hub\): online; models ready: Groq/);
+    expect(sys).toContain("- laptop: online; models ready: Claude; takes coding work on git branches");
+    expect(sys).toContain("18:00: Send Priya the deck");
+    expect(sys).toContain("- WhatsApp: off");
+    expect(sys).toContain("Ask nothing back"); // the agent's own instructions still follow the briefing
+
+    const broken = make(() => Promise.reject(new Error("tailscale exploded")));
+    expect((await broken.runToCompletion("hello", { mode: "direct", agent: "generalist" })).status).toBe("done");
   });
 });
 

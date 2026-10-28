@@ -9,6 +9,7 @@ import { serve } from "@hono/node-server";
 import { loadAgents } from "./agents/loader.js";
 import { buildCapabilities } from "./brain/capabilities.js";
 import { Orchestrator } from "./brain/orchestrator.js";
+import { describeSetup } from "./brain/setup.js";
 import { Router } from "./brain/router.js";
 import { Cluster } from "./cluster/cluster.js";
 import { workspaceMap } from "./context/graphify.js";
@@ -40,6 +41,25 @@ export function buildSystem(config: Config) {
     memory,
     workspace: (cwd) => workspaceMap(cwd, config),
     onAttention: notifier.attention,
+    // Built fresh for every step, so agents see the setup as it is right now.
+    setup: () =>
+      describeSetup({
+        profile: config.profile,
+        cluster,
+        pool,
+        store,
+        active: () => orchestrator.active(),
+        services: () => {
+          const brain = assistant?.status();
+          const mail = gmail.status();
+          return [
+            assistant ? `AI_Assistant brain (reads their Gmail and extracts tasks): ${brain?.ok ? "connected" : `not reachable${brain?.lastError ? ` (${brain.lastError})` : ""}`}` : "AI_Assistant brain: not connected to this hub",
+            `Gmail reader in the hub: ${mail.connected ? `connected as ${mail.email}` : "off (Gmail tasks come from the brain)"}`,
+            `Phone notifications: ${notifier.fcm ? "on (Android app via Firebase)" : "web push only"}`,
+            "WhatsApp: off",
+          ];
+        },
+      }),
   });
   const gmail = new GmailReader(store, pool, {
     clientFile: resolve(config.gmail.clientFile),
