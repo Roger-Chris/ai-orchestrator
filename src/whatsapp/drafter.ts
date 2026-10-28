@@ -3,10 +3,12 @@ import { dirname, join } from "node:path";
 import type { ProviderPool } from "../providers/registry.js";
 import type { PushPayload } from "../server/push.js";
 import type { Store } from "../store/db.js";
-import type { ProviderId, ReplyDraft } from "../types.js";
+import type { ProviderId, ReplyDraft, ReplyOption } from "../types.js";
 import { fixAddress } from "./address.js";
 import type { StyleBook } from "./learn.js";
-import { buildPool, poolPrompt } from "./pool.js";
+import { parseJson } from "./local.js";
+import { buildPool, type ContextPool, poolPrompt } from "./pool.js";
+import { mimic } from "./spelling.js";
 import { spoken, type WaMessage, type WaStore } from "./store.js";
 
 /**
@@ -38,6 +40,28 @@ export function cleanDraft(text: string): string | undefined {
   return !t || /^skip\.?$/i.test(t) ? undefined : t;
 }
 
+/**
+ * The model's options, each made to sound like you: your term of address for them (direct chats)
+ * and your spellings, casing and full stops. A plain-text answer becomes a single option.
+ */
+export function replyOptions(answer: string, p: ContextPool): ReplyOption[] {
+  const parsed = parseJson<{ options?: unknown }>(answer);
+  const raw: { label: string; text: string }[] = Array.isArray(parsed?.options)
+    ? parsed.options.filter((o: any) => typeof o?.text === "string").map((o: any) => ({ label: typeof o.label === "string" && o.label.trim() ? o.label.trim().slice(0, 24) : "Reply", text: o.text }))
+    : parsed
+      ? [] // valid JSON with no options: nothing worth sending
+      : [{ label: "Reply", text: answer }];
+  const habits = { spelling: p.spelling, lowercaseStart: p.stats?.lowercaseStart ?? 0.5, fullStops: p.stats?.fullStops ?? 0.5 };
+  const out: ReplyOption[] = [];
+  for (const o of raw) {
+    const clean = cleanDraft(o.text);
+    if (!clean) continue;
+    const text = mimic(p.isGroup ? clean : fixAddress(clean, p.address.map((a) => a.term)).text, habits);
+    if (text && !out.some((x) => x.text === text)) out.push({ label: o.label, text });
+  }
+  return out.slice(0, 4);
+}
+
 const phoneOf = (chatId: string) => (chatId.endsWith("@s.whatsapp.net") ? chatId.split("@")[0] : undefined);
 
 export class ReplyDrafter {
@@ -56,6 +80,10 @@ export class ReplyDrafter {
       id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, incoming TEXT NOT NULL, text TEXT NOT NULL,
       provider TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open', created_at INTEGER NOT NULL
     )`);
+    // Drafts made before options existed have none; their text is the one option.
+    if (!(store.db.prepare("PRAGMA table_info(wa_drafts)").all() as { name: string }[]).some((c) => c.name === "options")) {
+      store.db.exec("ALTER TABLE wa_drafts ADD COLUMN options TEXT");
+    }
   }
 
   private get bookFile() {
@@ -137,11 +165,9 @@ export class ReplyDrafter {
         error = `${provider}: ${r.error ?? "failed"}`;
         continue;
       }
-      const raw = cleanDraft(r.text);
-      if (!raw) return undefined;
-      // What you call them is not up to the model: a wrong term of address is swapped for yours.
-      const text = isGroup ? raw : fixAddress(raw, p.address.map((a) => a.term)).text;
-      if (!text) return undefined;
+      const options = replyOptions(r.text, p);
+      if (!options.length) return undefined;
+      const text = options[0].text;
       this.retire(chatId, "replaced");
       const draft: ReplyDraft = {
         id: `${chatId.split("@")[0]}-${Date.now().toString(36)}`,
@@ -151,14 +177,16 @@ export class ReplyDrafter {
         phone: phoneOf(chatId),
         incoming: (p.incoming.length ? p.incoming : p.recent.slice(-1)).map(spoken).join("\n").slice(0, 500),
         text,
+        options,
         provider,
         createdAt: Date.now(),
       };
       this.store.db
-        .prepare("INSERT INTO wa_drafts (id, chat_id, incoming, text, provider, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-        .run(draft.id, chatId, draft.incoming, text, provider, draft.createdAt);
+        .prepare("INSERT INTO wa_drafts (id, chat_id, incoming, text, options, provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(draft.id, chatId, draft.incoming, text, JSON.stringify(options), provider, draft.createdAt);
       this.lastError = undefined;
-      this.notify?.({ title: `Reply to ${p.name}`, body: text.slice(0, 200), url: "/", tag: `wa:${chatId}` });
+      const body = options.length > 1 ? options.map((o) => `${o.label}: ${o.text}`).join("\n") : text;
+      this.notify?.({ title: `Reply to ${p.name}`, body: body.slice(0, 240), url: "/", tag: `wa:${chatId}` });
       return draft;
     }
     throw new Error(`could not draft: ${error}`);
@@ -175,6 +203,7 @@ export class ReplyDrafter {
       phone: phoneOf(r.chat_id),
       incoming: r.incoming,
       text: r.text,
+      options: r.options ? JSON.parse(r.options) : [{ label: "Reply", text: r.text }],
       provider: r.provider,
       createdAt: r.created_at,
     }));

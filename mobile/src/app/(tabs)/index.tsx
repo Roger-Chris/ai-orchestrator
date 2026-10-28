@@ -178,7 +178,10 @@ function DecisionRow({ d, first, onDone }: { d: Decision; first: boolean; onDone
  */
 function ReplyRow({ r, first, onDone }: { r: ReplyDraft; first: boolean; onDone: () => void }) {
   const c = useColors();
-  const [text, setText] = useState(r.text);
+  // An older hub sends no options: its one draft is the only choice.
+  const options = r.options?.length ? r.options : [{ label: "Reply", text: r.text }];
+  const [picked, setPicked] = useState(0);
+  const [text, setText] = useState(options[0].text);
   const [ask, setAsk] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -206,6 +209,24 @@ function ReplyRow({ r, first, onDone }: { r: ReplyDraft; first: boolean; onDone:
       <Text style={{ color: c.muted, fontSize: 14, marginTop: 3, fontStyle: "italic" }} numberOfLines={3}>
         {r.incoming}
       </Text>
+      {options.length > 1 && (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+          {options.map((o, i) => (
+            <Pressable
+              key={i}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: i === picked }}
+              onPress={() => {
+                setPicked(i);
+                setText(o.text);
+              }}
+              style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: 14, borderWidth: 1, borderColor: i === picked ? c.accent : c.border, backgroundColor: i === picked ? c.accent : "transparent" }}
+            >
+              <Text style={{ color: i === picked ? c.bg : c.text, fontSize: 14 }}>{o.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
       <TextInput
         value={text}
         onChangeText={setText}

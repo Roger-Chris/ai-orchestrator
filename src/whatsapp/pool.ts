@@ -27,6 +27,10 @@ export interface ContextPool {
   address: AddressUse[];
   /** How many of your messages that count is based on. */
   addressBasis: number;
+  /** Your spellings (yours over all chats, this chat's on top), your words and stock messages. */
+  spelling: Record<string, string>;
+  words: string[];
+  stock: string[];
   /** "own": studied chat. "similar": borrowed from the people in `similar`. "voice": only your overall voice. */
   basis: "own" | "similar" | "voice";
   similar: string[];
@@ -149,6 +153,10 @@ export function buildPool(book: StyleBook, chat: { chatId: string; name?: string
     stats: own?.stats,
     address,
     addressBasis,
+    // A book learnt before these were counted has none; the prompt then just leaves them out.
+    spelling: { ...(book.owner.stats.spelling ?? {}), ...(own?.stats.spelling ?? {}) },
+    words: own?.stats.words?.length ? own.stats.words : (book.owner.stats.words ?? []),
+    stock: [...new Set([...(own?.stats.stock ?? []), ...(book.owner.stats.stock ?? [])])].slice(0, 15),
     basis,
     similar: borrowed.length || basis !== "own" ? look.map((c) => c.name) : [],
     examples,
@@ -184,7 +192,9 @@ export function poolPrompt(p: ContextPool, ask?: string): { system: string; prom
     v?.habits.length && `My habits: ${v.habits.join("; ")}.`,
     v?.phrases.length && `Words I use a lot: ${v.phrases.join(", ")}.`,
     v?.avoid.length && `I never: ${v.avoid.join("; ")}.`,
-    "Rules: reply with the message text only, no quotes or explanations. If I would send it as several short messages, put each on its own line separated by a blank line. Keep Tanglish as Tanglish (Tamil in English letters): never translate it, and never switch to Tamil script unless I do in this chat. Never invent facts, times, amounts or promises; where the reply needs something only I know, write a short placeholder in [square brackets].",
+    "Write like I really type, not like a polished writer: copy my spellings, shortcuts, slang and mistakes exactly (okk, pls, bcoz, missing apostrophes, wrong spellings, no capitals or full stops if I don't use them). Never correct my grammar or spelling and never write more neatly than I do. Build replies from my own words and from messages I really sent; don't invent new phrasing when mine fits.",
+    "Keep Tanglish as Tanglish (Tamil in English letters): never translate it, and never switch to Tamil script unless I do in this chat. If I would send several short messages, put each on its own line. Never invent facts, times, amounts or promises; where a reply needs something only I know, write a short placeholder in [square brackets].",
+    `Answer with JSON only: {"options":[{"label":"…","text":"…"}]}. Give two to four options. When they ask, invite or request something, include one option that agrees and one that says no (and, if natural, one in between such as later, maybe, or a question back). Otherwise give different replies I might really send. "label" is one or two English words (Yes, No, Later, Ask why, Thanks, Okay…); "text" is the message exactly as I would type it.`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -212,6 +222,13 @@ export function poolPrompt(p: ContextPool, ask?: string): { system: string; prom
         s.tamilScript < 0.03 ? "I never write Tamil script here, only English letters." : `${pct(s.tamilScript)} of my messages here are in Tamil script.`,
         s.emojiPerMessage < 0.05 ? "I almost never use emoji here: use none." : `${s.emojiPerMessage} emoji per message${s.topEmoji.length ? `, mostly ${s.topEmoji.join(" ")}` : ""}.`,
       ].join(" "),
+    p.words.length && `Words as I spell them (use these spellings): ${p.words.join(", ")}.`,
+    Object.keys(p.spelling).length &&
+      `My spellings of common words (always write the right side): ${Object.entries(p.spelling)
+        .slice(0, 30)
+        .map(([a, b]) => `${a} → ${b}`)
+        .join(", ")}.`,
+    p.stock.length && `Messages I often send, word for word (reuse them when they fit): ${p.stock.map((t) => `"${t}"`).join(", ")}.`,
     p.sharedGroups.length && `Groups we are both in: ${p.sharedGroups.slice(0, 6).join(", ")}.`,
     p.examples.length &&
       [
@@ -221,10 +238,10 @@ export function poolPrompt(p: ContextPool, ask?: string): { system: string; prom
       ].join("\n"),
     `The conversation so far, oldest first:\n${p.recent.map((m) => line(m, p.isGroup ? "Someone" : p.name)).join("\n")}`,
     ask
-      ? `Write my next message. What I want to say: ${ask}`
+      ? `Write my next message, as two or three ways I might put it. What I want to say: ${ask}`
       : p.incoming.length
-        ? "Write my reply to their last message(s), the way I would."
-        : "My last message has no answer yet. Write a short natural follow-up from me, or reply with exactly SKIP if I would not send anything.",
+        ? "Give my reply options to their last message(s)."
+        : 'My last message has no answer yet. Give follow-up options from me, or {"options":[]} if I would not send anything.',
   ]
     .filter(Boolean)
     .join("\n\n");
