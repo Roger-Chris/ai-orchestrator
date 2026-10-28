@@ -1,0 +1,70 @@
+# Builds the Android app and publishes it as a GitHub release whenever a change to the app
+# lands on main (or on demand). The APK is signed with the Expo template's debug keystore,
+# the same one local builds use, so it installs over the app already on the phone.
+name: Android release
+
+on:
+  push:
+    branches: [main]
+    paths: ["mobile/**", ".github/workflows/android-release.yml"]
+  workflow_dispatch:
+
+# A burst of pushes builds once, from the newest.
+concurrency:
+  group: android-release
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install
+        working-directory: mobile
+        run: npm ci
+
+      - name: Generate the native project
+        working-directory: mobile
+        run: npx expo prebuild --platform android --clean --no-install
+
+      - name: Build the APK
+        working-directory: mobile/android
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="app-${{ github.run_number }}"
+          apk="orchestrator-${tag}.apk"
+          cp mobile/android/app/build/outputs/apk/release/app-release.apk "$apk"
+          prev=$(git describe --tags --abbrev=0 --match 'app-*' 2>/dev/null || true)
+          {
+            echo "Android app build ${{ github.run_number }} from ${GITHUB_SHA::7}."
+            echo
+            echo "Changes since ${prev:-the start}:"
+            git log --pretty='- %s' ${prev:+$prev..}HEAD | head -40
+            echo
+            echo "Install: open the APK on the phone, or \`adb install -r $apk\`."
+          } > notes.md
+          gh release create "$tag" "$apk" --title "App build ${{ github.run_number }}" --notes-file notes.md --target "$GITHUB_SHA"
