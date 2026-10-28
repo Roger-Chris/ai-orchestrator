@@ -52,12 +52,15 @@ export function buildSystem(config: Config) {
         services: () => {
           const brain = assistant?.status();
           const mail = gmail.status();
-          return [
-            assistant ? `AI_Assistant brain (reads their Gmail and extracts tasks): ${brain?.ok ? "connected" : `not reachable${brain?.lastError ? ` (${brain.lastError})` : ""}`}` : "AI_Assistant brain: not connected to this hub",
-            `Gmail reader in the hub: ${mail.connected ? `connected as ${mail.email}` : "off (Gmail tasks come from the brain)"}`,
-            `Phone notifications: ${notifier.fcm ? "on (Android app via Firebase)" : "web push only"}`,
-            "WhatsApp: off",
-          ];
+          // One plain line per source of truth, so a model can't read "reader off" as "no Gmail tasks".
+          const gmailLine = mail.connected
+            ? `Gmail: read by the hub as ${mail.email}; its tasks are in today's tasks above`
+            : brain?.ok
+              ? "Gmail: read by their AI_Assistant brain, which turns emails into tasks; those are in today's tasks above"
+              : assistant
+                ? `Gmail: their AI_Assistant brain reads it, but the hub can't reach the brain right now${brain?.lastError ? ` (${brain.lastError})` : ""}, so today's tasks may be out of date`
+                : "Gmail: not connected";
+          return [gmailLine, `Phone notifications: ${notifier.fcm ? "on (Android app via Firebase)" : "web push only"}`, "WhatsApp: not connected"];
         },
       }),
   });
