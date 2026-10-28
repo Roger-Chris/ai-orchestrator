@@ -3,7 +3,7 @@ import { type ReactNode, useCallback, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Linking, Pressable, RefreshControl, ScrollView, Share, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ErrorText } from "../../components/ui";
-import { Api, type Attention, type DayTask, type Decision, type Home as HomeData, type ReplyDraft, type Running, Unauthorized } from "../../lib/api";
+import { type AlertAction, Api, type Attention, type BrainAlert, type DayTask, type Decision, type Home as HomeData, type ReplyDraft, type Running, Unauthorized } from "../../lib/api";
 import { useColors } from "../../lib/theme";
 
 function ago(ts: number): string {
@@ -22,7 +22,9 @@ function headline(h: HomeData): string {
   const tasks = h.tasks.filter((t) => !t.done).length;
   const decisions = h.decisions.length;
   const replies = h.replies?.length ?? 0; // an older hub sends none
+  const alerts = h.alerts?.length ?? 0;
   const parts = [
+    alerts && `${alerts} ${alerts === 1 ? "thing needs" : "things need"} you`,
     tasks && `${tasks} ${tasks === 1 ? "task" : "tasks"} today`,
     replies && `${replies} ${replies === 1 ? "reply" : "replies"} to send`,
     decisions && `${decisions} ${decisions === 1 ? "decision" : "decisions"} waiting`,
@@ -77,6 +79,47 @@ function TaskRow({ t, first, onToggle }: { t: DayTask; first: boolean; onToggle:
           <Text style={{ color: c.muted, fontSize: 13, marginTop: 2 }}>{[SOURCE[t.source], t.detail].filter(Boolean).join(" · ")}</Text>
         </View>
       </Pressable>
+    </Row>
+  );
+}
+
+const ALERT_KIND: Record<string, string> = { brief: "Morning brief", question: "Someone is waiting", overdue: "Overdue", new_task: "New task" };
+
+/** Something the brain decided needs you. Your answer goes back to the brain; done also finishes the task. */
+function AlertRow({ a, first, onDone }: { a: BrainAlert; first: boolean; onDone: () => void }) {
+  const c = useColors();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [more, setMore] = useState(false);
+  const answer = async (action: AlertAction) => {
+    setBusy(true);
+    setErr("");
+    try {
+      await Api.ackAlert(a.id, action);
+      onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const since = a.created_at ? ago(Date.parse(a.created_at)) : undefined;
+  return (
+    <Row first={first}>
+      <Text style={{ color: c.muted, fontSize: 13 }}>{[ALERT_KIND[a.kind] ?? "Alert", since].filter(Boolean).join(" · ")}</Text>
+      <Text style={{ color: c.text, fontSize: 16, marginTop: 3 }}>{a.title}</Text>
+      {!!a.body && (
+        <Text onPress={() => setMore(!more)} numberOfLines={more ? undefined : 3} style={{ color: c.muted, fontSize: 14, lineHeight: 20, marginTop: 3 }}>
+          {a.body}
+        </Text>
+      )}
+      <View style={{ flexDirection: "row", gap: 20, marginTop: 10, alignItems: "center" }}>
+        <TextLink title={a.kind === "brief" ? "Got it" : "Done"} onPress={() => void answer("done")} />
+        <TextLink title="Snooze 1 h" color={c.muted} onPress={() => void answer("snooze")} />
+        <TextLink title="Not important" color={c.muted} onPress={() => void answer("dismiss")} />
+        {busy && <ActivityIndicator color={c.accent} />}
+      </View>
+      <ErrorText text={err} />
     </Row>
   );
 }
@@ -328,6 +371,14 @@ export default function Home() {
         ) : (
           <>
             <Text style={{ color: c.text, fontFamily: "serif", fontSize: 30, lineHeight: 38, marginTop: 10 }}>{headline(home)}</Text>
+
+            {(home.alerts?.length ?? 0) > 0 && (
+              <Section label="Needs you" right={home.alerts.length}>
+                {home.alerts.map((a, i) => (
+                  <AlertRow key={a.id} a={a} first={i === 0} onDone={() => void load()} />
+                ))}
+              </Section>
+            )}
 
             <Section label="Today" right={sources ? `from ${sources}` : undefined}>
               {home.tasks.map((t, i) => (

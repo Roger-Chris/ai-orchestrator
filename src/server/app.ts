@@ -57,6 +57,17 @@ const ReviewBody = z.discriminatedUnion("action", [
   z.object({ action: z.literal("edit"), output: z.string().min(1) }),
   z.object({ action: z.literal("redo"), instructions: z.string().min(1).max(20_000) }),
 ]);
+/** An alert from the AI_Assistant brain (brain/app/alerts.py as_dict). */
+const NotifyBody = z.object({
+  id: z.number().int(),
+  level: z.number().int().min(1).max(4),
+  kind: z.string().max(40),
+  title: z.string().min(1).max(200),
+  body: z.string().max(2000).default(""),
+  task_id: z.number().int().nullable().optional(),
+  created_at: z.string().optional(),
+});
+const AckBody = z.object({ action: z.enum(["done", "snooze", "dismiss"]) });
 const PushSubBody = z.object({ endpoint: z.string().url(), keys: z.object({ p256dh: z.string(), auth: z.string() }), expirationTime: z.number().nullable().optional() });
 const ExecBody = z.object({
   provider: Provider,
@@ -342,6 +353,26 @@ export function createApp(d: AppDeps) {
   app.post("/api/push/test", async (c) => {
     const sent = (await d.notifier?.notify({ title: "Orchestrator", body: "Notifications work.", url: "/", tag: "test" })) ?? 0;
     return c.json({ sent });
+  });
+  // The AI_Assistant brain's alerts: it decides what is worth interrupting you for and when
+  // (quiet hours, snooze); the hub puts it on the phone and lists it on Home until you answer.
+  app.post("/api/notify", async (c) => {
+    const a = NotifyBody.parse(await c.req.json());
+    d.assistant?.remember(a);
+    const sent = (await d.notifier?.notify({ title: a.title, body: a.body.slice(0, 300), url: "/", tag: `alert:${a.id}` })) ?? 0;
+    return c.json({ ok: true, sent });
+  });
+  app.post("/api/alerts/:id/ack", async (c) => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isInteger(id)) return c.json({ error: "bad alert id" }, 400);
+    const { action } = AckBody.parse(await c.req.json());
+    if (!d.assistant) return c.json({ error: "the brain is not connected (BRAIN_TOKEN)" }, 409);
+    try {
+      await d.assistant.ack(id, action);
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 502);
+    }
+    return c.json({ ok: true });
   });
   // Branch work: merge a step's branch into the branch checked out in the run's folder.
   app.post("/api/runs/:id/steps/:step/merge", async (c) => {

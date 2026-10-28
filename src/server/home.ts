@@ -84,6 +84,7 @@ export async function buildHome(d: {
     devices: 1 + peers.filter((p) => p.online).length,
     day,
     tasks: d.store.tasksFor(day),
+    alerts: d.assistant?.alerts() ?? [],
     // The brain reads Gmail; WhatsApp only when its bridge runs, which the hub cannot see.
     sources: { gmail: !!mail?.connected || !!brain?.ok, whatsapp: !!d.drafter?.book() },
     decisions,

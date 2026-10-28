@@ -21,7 +21,7 @@ import { localDay } from "../src/server/home.js";
 import { Fcm } from "../src/server/fcm.js";
 import { Notifier, payloadFor } from "../src/server/push.js";
 import { Store } from "../src/store/db.js";
-import type { ProviderId, ProviderRequest, ProviderResult, RunEvent, RunEventType } from "../src/types.js";
+import type { BrainAlert, ProviderId, ProviderRequest, ProviderResult, RunEvent, RunEventType } from "../src/types.js";
 
 const cleanup: (() => void)[] = [];
 afterAll(() => cleanup.forEach((f) => f()));
@@ -328,17 +328,22 @@ describe("tasks from the AI_Assistant brain", () => {
     d.setHours(h, m, 0, 0);
     return d.toISOString().slice(0, 19);
   };
-  function fakeBrain(tasks: BrainTask[], opts: { down?: boolean } = {}) {
+  function fakeBrain(tasks: BrainTask[], opts: { down?: boolean; alerts?: BrainAlert[] } = {}) {
     const calls: string[] = [];
+    const bodies: string[] = [];
     const http = (async (input: string | URL, init?: RequestInit) => {
       const url = String(input);
       calls.push(`${init?.method ?? "GET"} ${url.replace("http://brain", "")} ${String((init?.headers as Record<string, string>)?.Authorization)}`);
+      if (init?.body) bodies.push(String(init.body));
       if (opts.down) throw new Error("connect ECONNREFUSED");
-      const status = new URL(url).searchParams.get("status");
-      const body = url.includes("/done") || url.includes("/confirm") ? {} : tasks.filter((t) => (status ? t.status === status : ["open", "pending_confirmation"].includes(t.status)));
+      const { pathname, searchParams } = new URL(url);
+      const status = searchParams.get("status");
+      // A brain from before alerts answers 404 there.
+      if (pathname === "/alerts") return opts.alerts ? Response.json(opts.alerts) : new Response("not found", { status: 404 });
+      const body = /\/(done|confirm|ack)$/.test(pathname) ? {} : tasks.filter((t) => (status ? t.status === status : ["open", "pending_confirmation"].includes(t.status)));
       return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
     }) as typeof fetch;
-    return { http, calls };
+    return { http, calls, bodies };
   }
 
   it("puts today's, overdue and finished-today tasks on Today, and ticks them off in the brain", async () => {
@@ -393,6 +398,47 @@ describe("tasks from the AI_Assistant brain", () => {
     expect(home.attention).toContainEqual(expect.objectContaining({ title: "Can't reach the brain" }));
     expect(home.sources.gmail).toBe(false);
     expect((await app.request("/api/tasks/brain:9/done", { method: "POST", headers: auth, body: "{}" })).status).toBe(502);
+  });
+
+  it("puts the brain's alerts on the phone and on Home, and sends your answer back", async () => {
+    const s = system({});
+    const brain = fakeBrain([], { alerts: [{ id: 3, level: 1, kind: "brief", title: "☀️ Morning brief", body: "Two things today" }] });
+    const a = new AssistantTasks(s.store, { url: "http://brain", token: "t", pollMinutes: 5 }, brain.http);
+    await a.sync();
+    const pushed: { title: string; tag: string }[] = [];
+    const notifier = { notify: async (p: { title: string; tag: string }) => (pushed.push(p), 1) };
+    const app = createApp({ ...s, assistant: a, notifier: notifier as never, publicDir: "web/dist" });
+    const auth = { Authorization: "Bearer secret-token", "Content-Type": "application/json" };
+
+    // The brain decided this one is worth a notification.
+    const alert = { id: 7, level: 2, kind: "question", title: "❓ Jayesh is waiting", body: "“send the report?” · 25 min", task_id: 4 };
+    const r = await app.request("/api/notify", { method: "POST", headers: auth, body: JSON.stringify(alert) });
+    expect(await r.json()).toEqual({ ok: true, sent: 1 });
+    expect(pushed).toEqual([expect.objectContaining({ title: "❓ Jayesh is waiting", tag: "alert:7" })]);
+
+    // Home lists both, most urgent first.
+    let home = await (await app.request("/api/home", { headers: auth })).json();
+    expect(home.alerts.map((x: BrainAlert) => x.id)).toEqual([7, 3]);
+
+    // Snooze goes to the brain, and the alert leaves Home until the brain sends it again.
+    expect((await app.request("/api/alerts/7/ack", { method: "POST", headers: auth, body: JSON.stringify({ action: "snooze" }) })).status).toBe(200);
+    expect(brain.calls.at(-1)).toMatch(/^POST \/alerts\/7\/ack Bearer t$/);
+    expect(JSON.parse(brain.bodies.at(-1)!)).toEqual({ action: "snooze" });
+    home = await (await app.request("/api/home", { headers: auth })).json();
+    expect(home.alerts.map((x: BrainAlert) => x.id)).toEqual([3]);
+
+    expect((await app.request("/api/alerts/3/ack", { method: "POST", headers: auth, body: JSON.stringify({ action: "explode" }) })).status).toBe(400);
+    expect((await app.request("/api/notify", { method: "POST", headers: auth, body: JSON.stringify({ id: 1, level: 9, kind: "x", title: "x" }) })).status).toBe(400);
+  });
+
+  it("still syncs tasks from a brain that has no alerts yet", async () => {
+    const s = system({});
+    const a = new AssistantTasks(s.store, { url: "http://brain", token: "t", pollMinutes: 5 }, fakeBrain([]).http);
+    await expect(a.sync()).resolves.toBe(0);
+    expect(a.alerts()).toEqual([]);
+    const app = createApp({ ...s, publicDir: "web/dist" });
+    const auth = { Authorization: "Bearer secret-token", "Content-Type": "application/json" };
+    expect((await app.request("/api/alerts/1/ack", { method: "POST", headers: auth, body: JSON.stringify({ action: "done" }) })).status).toBe(409);
   });
 });
 

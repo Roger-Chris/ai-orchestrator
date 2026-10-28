@@ -1,7 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 import type { Home, Insights, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
 
-export type { Attention, DayTask, Decision, Home, Insights, ReplyDraft, RunEvent, RunOptions, RunRecord, Running, StepRecord, Thread } from "../../../src/types";
+export type { AlertAction, Attention, BrainAlert, DayTask, Decision, Home, Insights, ReplyDraft, RunEvent, RunOptions, RunRecord, Running, StepRecord, Thread } from "../../../src/types";
 
 /** Where the hub is and how to get in. Kept in Android's encrypted storage. */
 export interface Connection {
@@ -84,6 +84,8 @@ export const Api = {
   redraft: (chatId: string, ask?: string) => api<ReplyDraft | { skipped: true }>("/api/whatsapp/drafts", { body: { chatId, ask }, timeoutMs: 180_000 }),
   closeDraft: (id: string, status: "sent" | "dismissed") => api(`/api/whatsapp/drafts/${encodeURIComponent(id)}/${status}`, { body: {} }),
   taskDone: (id: string, done: boolean) => api(`/api/tasks/${encodeURIComponent(id)}/done`, { body: { done } }),
+  /** Your answer to a brain alert: done, snooze (back in an hour) or dismiss (not important). */
+  ackAlert: (id: number, action: "done" | "snooze" | "dismiss") => api(`/api/alerts/${id}/ack`, { body: { action } }),
   health: () => api<{ ok: boolean; node: string }>("/api/health", { timeoutMs: 8000 }),
   threads: () => api<Thread[]>("/api/threads"),
   thread: (id: string) => api<{ thread: Thread; runs: RunRecord[] }>(`/api/threads/${id}`),

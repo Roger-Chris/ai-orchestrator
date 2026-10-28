@@ -1,6 +1,6 @@
 import { localDay } from "../server/home.js";
 import type { Store } from "../store/db.js";
-import type { DayTask } from "../types.js";
+import type { AlertAction, BrainAlert, DayTask } from "../types.js";
 
 /**
  * Today's tasks from the AI_Assistant brain (../AI_Assistant), which already reads your Gmail
@@ -70,6 +70,8 @@ export class AssistantTasks {
   private state: AssistantStatus = { ok: false };
   private timer?: NodeJS.Timeout;
   private syncing?: Promise<number>;
+  /** The brain's open alerts: refreshed on every sync, added to as POST /api/notify brings new ones. */
+  private open = new Map<number, BrainAlert>();
 
   constructor(
     private store: Store,
@@ -106,6 +108,9 @@ export class AssistantTasks {
       const tasks = todayTasks([...active, ...done]);
       for (const t of tasks) this.store.upsertTask({ ...t, day });
       this.store.pruneTasks("brain:", day, tasks.map((t) => t.id));
+      // A brain from before alerts has no /alerts; its tasks still sync.
+      const open = await this.call<BrainAlert[]>("/alerts").catch(() => undefined);
+      if (open) this.open = new Map(open.map((a) => [a.id, a]));
       this.state = { ok: true, lastSync: Date.now(), today: tasks.length };
       return tasks.length;
     } catch (e) {
@@ -119,6 +124,24 @@ export class AssistantTasks {
     const n = Number(id.replace(/^brain:/, ""));
     if (!Number.isInteger(n)) throw new Error(`not a brain task: ${id}`);
     await this.call(`/tasks/${n}/${done ? "done" : "confirm"}`, { method: "POST" });
+    // The brain closes a finished task's alerts itself; mirror that until the next sync.
+    if (done) for (const a of this.open.values()) if (a.task_id === n) this.open.delete(a.id);
+  }
+
+  /** Open alerts, most urgent first, newest first within a level. */
+  alerts(): BrainAlert[] {
+    return [...this.open.values()].sort((a, b) => b.level - a.level || b.id - a.id);
+  }
+
+  /** An alert the brain just sent through POST /api/notify. */
+  remember(a: BrainAlert) {
+    this.open.set(a.id, a);
+  }
+
+  /** Your answer, recorded in the brain (which also finishes the task on done). */
+  async ack(id: number, action: AlertAction) {
+    await this.call(`/alerts/${id}/ack`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
+    this.open.delete(id);
   }
 
   private async call<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -126,7 +149,7 @@ export class AssistantTasks {
     try {
       res = await this.http(`${this.opts.url.replace(/\/+$/, "")}${path}`, {
         ...init,
-        headers: { Authorization: `Bearer ${this.opts.token}` },
+        headers: { ...(init.headers as Record<string, string>), Authorization: `Bearer ${this.opts.token}` },
         signal: AbortSignal.timeout(10_000),
       });
     } catch (e) {

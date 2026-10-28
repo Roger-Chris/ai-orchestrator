@@ -186,6 +186,25 @@ export interface Attention {
   task?: string;
 }
 
+/**
+ * Something the AI_Assistant brain wants you to see, pushed through POST /api/notify. It is quiet
+ * by default and decides the level (AI_Assistant brain/app/alerts.py); you answer with an AlertAction.
+ */
+export interface BrainAlert {
+  id: number;
+  /** 1 morning brief, 2 notification, 3 alarm, 4 call. */
+  level: number;
+  /** new_task | question | overdue | brief */
+  kind: string;
+  title: string;
+  body: string;
+  task_id?: number | null;
+  created_at?: string;
+}
+
+/** done finishes the task behind it; snooze brings it back in an hour; dismiss = not important. */
+export type AlertAction = "done" | "snooze" | "dismiss";
+
 export interface Home {
   node: string;
   devices: number;
@@ -193,6 +212,8 @@ export interface Home {
   tasks: DayTask[];
   /** Which task sources are connected (none yet: tasks are added through /api/tasks). */
   sources: { gmail: boolean; whatsapp: boolean };
+  /** What the brain says needs you, most urgent first. */
+  alerts: BrainAlert[];
   decisions: Decision[];
   running: Running[];
   attention: Attention[];
