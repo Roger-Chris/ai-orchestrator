@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { randomBytes } from "node:crypto";
-import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -26,6 +26,11 @@ import { localDay } from "./server/home.js";
 import { Notifier } from "./server/push.js";
 import { Store } from "./store/db.js";
 import type { Permission, ProviderId, RunEvent, RunMode } from "./types.js";
+import { learnStyle, type StyleBook } from "./whatsapp/learn.js";
+import { buildPool, poolPrompt } from "./whatsapp/pool.js";
+import { WhatsAppLink } from "./whatsapp/link.js";
+import { ollamaProblem, transcribe } from "./whatsapp/local.js";
+import { WaStore } from "./whatsapp/store.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -267,6 +272,98 @@ async function cmdGmail(config: Config, sub = "status") {
   }
 }
 
+/** Links WhatsApp (read-only) and keeps it running so history, new messages and voice notes are saved. */
+async function cmdWhatsApp(config: Config, sub = "status") {
+  const store = new Store(resolve(config.dataDir));
+  const wa = new WaStore(store);
+  const show = () => {
+    const n = wa.counts();
+    console.log(`${n.messages} messages (${n.mine} yours) in ${n.chats} chats · ${n.voice} voice notes, ${n.transcribed} transcribed`);
+  };
+  if (sub !== "link") {
+    show();
+    if (!readCreds(config)) console.log("Not linked yet: run `orc whatsapp link`.");
+    return store.close();
+  }
+  const link = new WhatsAppLink(wa, {
+    dataDir: resolve(config.dataDir),
+    history: config.whatsapp.history,
+    voiceNotes: config.whatsapp.voiceNotes,
+    ignore: config.whatsapp.ignore,
+    print: (s) => console.log(s),
+    onLive: (ms) => console.log(`new: ${ms.length} message(s)`),
+  });
+  await link.start();
+  console.log("Keep this running while history arrives (Ctrl+C to stop; run it again any time to catch up).");
+  const timer = setInterval(show, 60_000);
+  process.once("SIGINT", () => {
+    clearInterval(timer);
+    link.stop();
+    show();
+    store.close();
+    process.exit(0);
+  });
+}
+
+/** Learns your writing style from the saved chats with the local models; the book goes to data/style/. */
+async function cmdStyle(config: Config, sub = "show", opts: { who?: string; ask?: string; draft?: boolean } = {}) {
+  const store = new Store(resolve(config.dataDir));
+  const wa = new WaStore(store);
+  const file = join(resolve(config.dataDir), "style", "stylebook.json");
+  const previous: StyleBook | undefined = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
+  try {
+    if (sub === "learn") {
+      const problem = await ollamaProblem(config.style);
+      if (problem) throw new Error(problem);
+      const t = await transcribe(wa, config.style, (s) => console.log(s), ROOT);
+      if (t.done || t.failed) console.log(`Voice notes: ${t.done} transcribed${t.failed ? `, ${t.failed} could not be read` : ""}.`);
+      console.log(`Studying your chats with ${config.style.model}…`);
+      const book = await learnStyle(
+        wa,
+        { ...config.style, minMine: config.style.minMessages, maxContacts: config.style.maxContacts, me: readCreds(config)?.me, log: (s) => console.log(s) },
+        previous,
+      );
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, JSON.stringify(book, null, 2));
+      console.log(`\nStyle book saved to ${file}: ${book.contacts.filter((c) => c.card).length} of ${book.contacts.length} chats described.`);
+      if (book.owner.voice) console.log(`\nYour voice: ${book.owner.voice.summary}`);
+    } else if (sub === "pool") {
+      // orc style pool <name or number> [--ask "what to say"] [--draft]: the context the next reply is written from.
+      if (!previous) throw new Error("No style book yet: run `orc style learn` first.");
+      const want = (opts.who ?? "").toLowerCase().trim();
+      const digits = want.replace(/\D/g, "");
+      const chat = want ? wa.chats().find((c) => (digits.length >= 6 && c.id.split("@")[0].endsWith(digits)) || (c.name ?? "").toLowerCase().includes(want)) : undefined;
+      if (!chat) throw new Error(`no chat matches "${opts.who ?? ""}": give part of a name or the number`);
+      const pool = buildPool(previous, { chatId: chat.id, name: chat.name, isGroup: chat.isGroup }, wa.messages(chat.id, 200));
+      const { system, prompt } = poolPrompt(pool, opts.ask);
+      console.log(`=== Context pool for ${pool.name} (${pool.basis}${pool.similar.length ? `; borrows from ${pool.similar.join(", ")}` : ""}) ===\n\n[system]\n${system}\n\n[prompt]\n${prompt}`);
+      if (opts.draft) {
+        const providers = new ProviderPool(config, store);
+        const ready = await providers.available();
+        const id = (["claude", "gemini", "codex", "groq"] as ProviderId[]).find((p) => ready.includes(p));
+        if (!id) throw new Error("no online model is ready (Claude, Gemini, ChatGPT or Groq)");
+        const r = await providers.run(id, { system, prompt, permission: "read", timeoutMs: 180_000 });
+        console.log(r.ok ? `\n=== Draft from ${id} ===\n${r.text.trim()}` : `\n${id} failed: ${r.error}`);
+      }
+    } else if (!previous) console.log("No style book yet: link WhatsApp (`orc whatsapp link`), then run `orc style learn`.");
+    else {
+      if (previous.owner.voice) console.log(`Your voice: ${previous.owner.voice.summary}\n`);
+      for (const c of previous.contacts.filter((c) => c.card)) console.log(`${c.name.padEnd(24)} ${c.card!.relationship} · ${c.card!.language} · calls them ${c.card!.addressAs.join("/") || "-"}`);
+    }
+  } finally {
+    store.close();
+  }
+}
+
+/** Your own WhatsApp id from the link's saved sign-in; undefined until linked. */
+function readCreds(config: Config): { me?: string } | undefined {
+  const f = join(resolve(config.dataDir), "whatsapp", "auth", "creds.json");
+  if (!existsSync(f)) return undefined;
+  const id: string | undefined = JSON.parse(readFileSync(f, "utf8")).me?.id;
+  if (!id) return undefined;
+  return { me: `${id.split(":")[0].split("@")[0]}@s.whatsapp.net` };
+}
+
 async function cmdNodes(config: Config) {
   const sys = buildSystem(config);
   await sys.cluster.refresh();
@@ -380,6 +477,8 @@ async function main() {
       branches: { type: "boolean" },
       verbose: { type: "boolean", short: "v" },
       live: { type: "boolean" },
+      ask: { type: "string" },
+      draft: { type: "boolean" },
     },
   });
   const [cmd = "serve", ...rest] = positionals;
@@ -404,8 +503,12 @@ async function main() {
       return cmdMcp(config);
     case "gmail":
       return cmdGmail(config, rest[0]);
+    case "whatsapp":
+      return cmdWhatsApp(config, rest[0]);
+    case "style":
+      return cmdStyle(config, rest[0], { who: rest.slice(1).join(" "), ask: v.ask as string | undefined, draft: !!v.draft });
     default:
-      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|check|status|disconnect]|init|mcp>`);
+      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|check|status|disconnect]|whatsapp [link|status]|style [learn|show|pool <name> [--ask "…"] [--draft]]|init|mcp>`);
       process.exitCode = 1;
   }
 }

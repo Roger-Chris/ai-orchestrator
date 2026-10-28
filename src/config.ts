@@ -172,6 +172,33 @@ const ConfigSchema = z.object({
       provider: z.enum(["auto", "groq", "claude", "codex", "gemini"]).default("auto"),
     })
     .prefault({}),
+  /** Your WhatsApp as a read-only linked device (`orc whatsapp link`). Nothing is ever sent. */
+  whatsapp: z
+    .object({
+      /** "full" asks the phone for all the history it will give; it only arrives when you link. */
+      history: z.enum(["off", "recent", "full"]).default("full"),
+      /** Download voice notes so the local Whisper can transcribe them. */
+      voiceNotes: z.boolean().default(true),
+      /** Chat ids to leave alone, e.g. 9190000…@s.whatsapp.net or …@g.us. */
+      ignore: z.array(z.string()).default([]),
+    })
+    .prefault({}),
+  /** Learning your writing style from WhatsApp with local models (`orc style learn`). */
+  style: z
+    .object({
+      ollamaUrl: z.string().default("http://127.0.0.1:11434"),
+      /** Ollama model that reads your chats and writes the style notes. */
+      model: z.string().default("qwen3:8b"),
+      /** faster-whisper model for voice notes. */
+      whisperModel: z.string().default("large-v3-turbo"),
+      /** Whisper language code (e.g. "ta"); empty detects it per voice note. */
+      whisperLanguage: z.string().default(""),
+      uv: z.string().default("uv"),
+      /** Chats where you sent fewer messages than this are not studied. */
+      minMessages: z.number().int().min(1).default(15),
+      maxContacts: z.number().int().min(1).default(80),
+    })
+    .prefault({}),
   cluster: z
     .object({
       enabled: z.boolean().default(true),
