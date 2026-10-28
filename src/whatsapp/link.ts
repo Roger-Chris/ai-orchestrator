@@ -18,7 +18,7 @@ export interface LinkOptions {
   voiceNotes: boolean;
   /** Chat ids to skip. */
   ignore: string[];
-  /** New messages as they arrive (not history). */
+  /** New messages, including ones caught up after a reconnect (not the history sync). */
   onLive?: (messages: WaMessage[]) => void;
   print: (s: string) => void;
 }
@@ -174,9 +174,11 @@ export class WhatsAppLink {
       this.opts.print(`history: ${this.state.historyMessages} messages so far`);
     });
 
-    sock.ev.on("messages.upsert", ({ messages, type }) => {
+    // "notify" is a message arriving now; "append" is one caught up after a reconnect. Both are
+    // passed on: the hub only drafts for messages under an hour old, so old ones just add context.
+    sock.ev.on("messages.upsert", ({ messages }) => {
       const kept = this.keep(messages);
-      if (type === "notify" && kept.length) this.opts.onLive?.(kept);
+      if (kept.length) this.opts.onLive?.(kept);
     });
   }
 
