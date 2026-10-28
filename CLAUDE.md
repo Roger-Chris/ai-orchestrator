@@ -44,6 +44,7 @@ Hard-won details:
   For a JS-only change (no new native packages), skip prebuild: mirror `mobile/src` into `C:\orcm\src` (`robocopy ... /MIR`) and rerun gradle.
 - `mobile/metro.config.js` resolves the app's own `node_modules` first (the repo root has a different React for the web app) but keeps nested lookup on (expo-router keeps `@expo/metro-runtime` nested).
 - On Xiaomi phones `adb install` needs Developer options → **Install via USB**.
+- GitHub builds it too: `.github/workflows/android-release.yml` publishes a release `app-<run>` with the APK for every push to `main` that touches `mobile/` (or Actions → Android release → Run workflow). It signs with the Expo template's debug keystore, like local builds, so it installs over the phone's app. Latest APK to Downloads: `gh release download --repo Roger-Chris/ai-orchestrator --pattern "*.apk" -D ~/Downloads`.
 
 ## Home screen
 
