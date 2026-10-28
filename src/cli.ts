@@ -32,6 +32,7 @@ import { WhatsAppLink } from "./whatsapp/link.js";
 import { ollamaProblem, transcribe } from "./whatsapp/local.js";
 import { WaStore, type WaMessage } from "./whatsapp/store.js";
 import { ReplyDrafter } from "./whatsapp/drafter.js";
+import { addTerms, fixAddress } from "./whatsapp/address.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -84,6 +85,7 @@ export function buildSystem(config: Config) {
   const assistant = config.assistant.token
     ? new AssistantTasks(store, { url: config.assistant.url, token: config.assistant.token, pollMinutes: config.assistant.pollMinutes })
     : undefined;
+  addTerms(config.style.addressTerms);
   const drafter = new ReplyDrafter(
     store,
     new WaStore(store),
@@ -331,6 +333,7 @@ async function cmdWhatsApp(config: Config, sub = "status") {
 
 /** Learns your writing style from the saved chats with the local models; the book goes to data/style/. */
 async function cmdStyle(config: Config, sub = "show", opts: { who?: string; ask?: string; draft?: boolean } = {}) {
+  addTerms(config.style.addressTerms);
   const store = new Store(resolve(config.dataDir));
   const wa = new WaStore(store);
   const file = join(resolve(config.dataDir), "style", "stylebook.json");
@@ -376,7 +379,9 @@ async function cmdStyle(config: Config, sub = "show", opts: { who?: string; ask?
         const id = (["claude", "gemini", "codex", "groq"] as ProviderId[]).find((p) => ready.includes(p));
         if (!id) throw new Error("no online model is ready (Claude, Gemini, ChatGPT or Groq)");
         const r = await providers.run(id, { system, prompt, permission: "read", timeoutMs: 180_000 });
-        console.log(r.ok ? `\n=== Draft from ${id} ===\n${r.text.trim()}` : `\n${id} failed: ${r.error}`);
+        const fixed = r.ok && !pool.isGroup ? fixAddress(r.text.trim(), pool.address.map((a) => a.term)) : undefined;
+        console.log(r.ok ? `\n=== Draft from ${id} ===\n${fixed?.text ?? r.text.trim()}` : `\n${id} failed: ${r.error}`);
+        if (fixed?.fixed.length) console.log(`(corrected what it called them: ${fixed.fixed.join(", ")})`);
       }
     } else if (!previous) console.log("No style book yet: link WhatsApp (`orc whatsapp link`), then run `orc style learn`.");
     else {

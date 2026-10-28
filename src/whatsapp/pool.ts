@@ -1,5 +1,6 @@
 import type { ChatStats, ContactStyle, ReplyPair, StyleBook, StyleCard, Voice } from "./learn.js";
 import { spoken, type WaMessage } from "./store.js";
+import { addressTerms, type AddressUse } from "./address.js";
 
 /**
  * The context pool a reply is written from. Every analysed person in the style book feeds it:
@@ -22,6 +23,10 @@ export interface ContextPool {
   /** This person's profile; for a chat never studied, the closest person's. */
   card?: StyleCard;
   stats?: ChatStats;
+  /** What you call them, counted from your messages in this chat; never borrowed from anyone else. */
+  address: AddressUse[];
+  /** How many of your messages that count is based on. */
+  addressBasis: number;
   /** "own": studied chat. "similar": borrowed from the people in `similar`. "voice": only your overall voice. */
   basis: "own" | "similar" | "voice";
   similar: string[];
@@ -128,6 +133,10 @@ export function buildPool(book: StyleBook, chat: { chatId: string; name?: string
     .map((x) => x.e)
     .sort((a, b) => a.ts - b.ts);
 
+  // The book's count covers far more of your messages than the hub keeps; fall back to what is here.
+  const address = own?.stats.address ?? addressTerms(mine);
+  const addressBasis = own?.stats.address ? own.stats.mine : mine.length;
+
   const groupName = new Map(book.graph.nodes.filter((n) => n.kind === "group").map((n) => [n.id, n.label]));
   const sharedGroups = book.graph.edges.filter((e) => e.kind === "member" && e.from === chat.chatId).map((e) => groupName.get(e.to) ?? e.to);
 
@@ -138,6 +147,8 @@ export function buildPool(book: StyleBook, chat: { chatId: string; name?: string
     voice: book.owner.voice,
     card,
     stats: own?.stats,
+    address,
+    addressBasis,
     basis,
     similar: borrowed.length || basis !== "own" ? look.map((c) => c.name) : [],
     examples,
@@ -149,6 +160,17 @@ export function buildPool(book: StyleBook, chat: { chatId: string; name?: string
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 const line = (m: WaMessage, who: string) => `${m.fromMe ? "Me" : m.isGroup ? (m.senderName ?? "Someone") : who}: ${spoken(m).replace(/\s*\n\s*/g, " / ")}`;
+
+/** What to call them, as a rule the model must not bend: the term is how they know it is you. */
+export function addressRule(p: Pick<ContextPool, "address" | "addressBasis">): string {
+  if (p.address.length) {
+    const used = p.address.map((a) => `"${a.term}" (in ${a.n} of my messages)`).join(", ");
+    return `What I call them: ${used}. Use ${p.address.length > 1 ? "these, mostly the first," : `"${p.address[0].term}"`} wherever I would address them, and never any other term (no sir, ji, bro, machi, da, di or the like unless listed here).`;
+  }
+  return p.addressBasis >= 10
+    ? "I never use a term of address with them (no sir, ji, bro, machi, da, di): do not add one."
+    : "I have not written to them enough to know what I call them: use no term of address (no sir, ji, bro, machi, da, di).";
+}
 
 /** The pool as instructions for an online model: system = who you are and how you write, prompt = this chat. */
 export function poolPrompt(p: ContextPool, ask?: string): { system: string; prompt: string } {
@@ -172,7 +194,6 @@ export function poolPrompt(p: ContextPool, ask?: string): { system: string; prom
     [
       `${p.isGroup ? "This group" : "They"}: ${c.relationship || "unknown"}${p.basis === "similar" ? ` (${c.notes})` : ""}.`,
       `How I write here: ${c.language}; ${c.tone}; formality ${c.formality} of 5; ${c.length}; emoji: ${c.emoji}.`,
-      c.addressAs.length && `I call them: ${c.addressAs.join(", ")}. Use only these terms of address.`,
       c.theyCallMe.length && `They call me: ${c.theyCallMe.join(", ")}.`,
       c.phrases.length && `Phrases I use with them: ${c.phrases.join(", ")}.`,
       c.avoid.length && `Here I never: ${c.avoid.join("; ")}.`,
@@ -184,6 +205,7 @@ export function poolPrompt(p: ContextPool, ask?: string): { system: string; prom
   const prompt = [
     `Chat: ${p.isGroup ? `the group "${p.name}"` : `direct chat with ${p.name}`}.`,
     card,
+    !p.isGroup && addressRule(p),
     s &&
       [
         `Measured from my ${s.mine} messages here: about ${s.avgWords} words each, ${pct(s.shortShare)} are four words or fewer, ${s.burst} messages in a row, ${pct(s.lowercaseStart)} start lowercase, ${pct(s.fullStops)} end with a full stop.`,

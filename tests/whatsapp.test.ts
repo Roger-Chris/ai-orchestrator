@@ -6,6 +6,7 @@ import { buildGraph, chatStats, learnStyle, normalizeCard, replyPairs, type Styl
 import { content } from "../src/whatsapp/link.js";
 import { buildPool, groundCard, poolPrompt } from "../src/whatsapp/pool.js";
 import { cleanDraft, ReplyDrafter } from "../src/whatsapp/drafter.js";
+import { addressTerms, addTerms, fixAddress } from "../src/whatsapp/address.js";
 import type { ProviderId, ProviderRequest } from "../src/types.js";
 import { WaStore, type WaMessage } from "../src/whatsapp/store.js";
 import { Store } from "../src/store/db.js";
@@ -150,7 +151,7 @@ describe("context pool", () => {
     expect(p.examples.at(-1)?.them).toBe("match pakalama"); // closest to "match ku varuviya"
     const { system, prompt } = poolPrompt(p);
     expect(system).toContain("Short Tanglish.");
-    expect(prompt).toContain("I call them: da.");
+    expect(prompt).toContain('What I call them: "da" (in 3 of my messages)');
     expect(prompt).toContain("0.25 emoji per message");
     expect(prompt).toContain("I never write Tamil script here");
     expect(prompt).toContain("Write my reply to their last message(s)");
@@ -160,6 +161,8 @@ describe("context pool", () => {
     const p = buildPool(book, { chatId: B, name: "Karthik", isGroup: false }, [msg(B, false, "hi da free ah", 50)]);
     expect(p).toMatchObject({ basis: "similar", similar: ["Arun"], name: "Karthik" });
     expect(p.card?.addressAs).toEqual([]); // never borrow what you call someone else
+    expect(p.address).toEqual([]);
+    expect(poolPrompt(p).prompt).toContain("use no term of address");
     expect(p.examples.every((e) => e.from === "Arun")).toBe(true);
     expect(poolPrompt(p, "say I'll call at 6").prompt).toContain("What I want to say: say I'll call at 6");
   });
@@ -235,5 +238,41 @@ describe("reply drafter", () => {
     expect(d).toMatchObject({ text: "6 ku call panren da", provider: "gemini" });
     expect(drafter.close(d!.id, "sent")).toBe(true);
     expect(drafter.drafts()).toEqual([]);
+  });
+});
+
+describe("terms of address", () => {
+  it("counts what you call them, spellings together, ignoring strays", () => {
+    const mine = ["seri sir", "ok sirr", "thanks sir", "sure sir", "bro wait", ...Array(20).fill("noted sir")];
+    expect(addressTerms(mine)).toEqual([{ term: "sir", n: 24 }]);
+    expect(addressTerms(["vaa da", "seri daa", "machi enga", "macha sollu"])).toEqual([
+      { term: "da", n: 2 },
+      { term: "machi", n: 2 },
+    ]);
+  });
+
+  it("swaps a wrong term for yours, keeps family words and spellings, drops one when you use none", () => {
+    expect(fixAddress("Seri bro, naan varen da", ["da"])).toEqual({ text: "Seri da, naan varen da", fixed: ["bro"] });
+    expect(fixAddress("Sir, I will send it ji", ["sir"]).text).toBe("Sir, I will send it sir");
+    expect(fixAddress("seri daa", ["da"]).fixed).toEqual([]);
+    expect(fixAddress("anna kitta kelu machi", ["da"]).text).toBe("anna kitta kelu da");
+    expect(fixAddress("ok da, varen", []).text).toBe("ok, varen");
+  });
+
+  it("learns your own nicknames from the config", () => {
+    addTerms(["chinna chinnu"]);
+    expect(addressTerms(["vaa chinnu", "chinna sollu"])).toEqual([{ term: "chinna", n: 2 }]);
+  });
+
+  it("corrects the term in a hub draft", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "orc-wa-"));
+    const store = new Store(dir);
+    cleanup.push(() => (store.close(), rmSync(dir, { recursive: true, force: true })));
+    const wa = new WaStore(store);
+    const pool = { available: async () => ["claude" as ProviderId], run: async () => ({ ok: true, text: "seri bro varen", provider: "claude" as ProviderId, durationMs: 1 }) };
+    const drafter = new ReplyDrafter(store, wa, pool, { dataDir: dir, delaySeconds: 0, auto: false, groups: false, provider: "auto", node: "hub" });
+    drafter.saveBook({ version: 1, builtAt: 1, model: "m", owner: { stats: chatStats(chatA) }, contacts: [{ chatId: A, name: "Arun", isGroup: false, stats: chatStats(chatA), card: card(), examples: [], lastTs: 1 }], graph: buildGraph([], new Map()) });
+    wa.save([...chatA, msg(A, false, "varuviya", 9999)]);
+    expect((await drafter.draft(A))?.text).toBe("seri da varen");
   });
 });

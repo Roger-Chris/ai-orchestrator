@@ -4,6 +4,7 @@ import type { ProviderPool } from "../providers/registry.js";
 import type { PushPayload } from "../server/push.js";
 import type { Store } from "../store/db.js";
 import type { ProviderId, ReplyDraft } from "../types.js";
+import { fixAddress } from "./address.js";
 import type { StyleBook } from "./learn.js";
 import { buildPool, poolPrompt } from "./pool.js";
 import { spoken, type WaMessage, type WaStore } from "./store.js";
@@ -136,7 +137,10 @@ export class ReplyDrafter {
         error = `${provider}: ${r.error ?? "failed"}`;
         continue;
       }
-      const text = cleanDraft(r.text);
+      const raw = cleanDraft(r.text);
+      if (!raw) return undefined;
+      // What you call them is not up to the model: a wrong term of address is swapped for yours.
+      const text = isGroup ? raw : fixAddress(raw, p.address.map((a) => a.term)).text;
       if (!text) return undefined;
       this.retire(chatId, "replaced");
       const draft: ReplyDraft = {

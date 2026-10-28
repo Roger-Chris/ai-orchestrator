@@ -209,6 +209,8 @@ const ConfigSchema = z.object({
       uv: z.string().default("uv"),
       /** Chats where you sent fewer messages than this are not studied. */
       minMessages: z.number().int().min(1).default(15),
+      /** Extra terms of address or nicknames, each with its spellings: ["chinna chinnu", "kanna kannu"]. */
+      addressTerms: z.array(z.string()).default([]),
       maxContacts: z.number().int().min(1).default(80),
     })
     .prefault({}),

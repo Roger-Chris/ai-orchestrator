@@ -8,7 +8,7 @@ A brain that routes work across the owner's Claude, ChatGPT (Go), Gemini (Google
 - `web/`: React + Vite web app (PWA), built to `web/dist` by `npm start`.
 - `mobile/`: Expo (SDK 58) React Native Android app, installed from an APK, not the Play Store. It has its own `AGENTS.md`: read it before touching Expo APIs.
 - `agents/`: specialist agent YAML files.
-- `tests/`: vitest with fake providers. `npm test` must stay green (86 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
+- `tests/`: vitest with fake providers. `npm test` must stay green (90 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
 
 ## Running the hub
 
@@ -59,6 +59,7 @@ Hard-won details:
 - Cards are grounded (`groundCard` in `src/whatsapp/pool.ts`): terms of address must be known ones (da, bro, sir…) or part of the name and used at least twice; qwen otherwise copies the prompt's examples or lists words like "okk".
 - `buildPool`/`poolPrompt` (`orc style pool <name|number> [--ask "…"] [--draft]`) is what every reply is written from: your voice, this chat's card and stats, the examples closest to their message, look-alike characters' examples when the chat has few (or was never studied; never their terms of address), shared groups and the last 30 messages. The hub drafts from it (`src/whatsapp/drafter.ts`, below).
 
+- Terms of address (`src/whatsapp/address.ts`): what you call each person (sir, ji, bro, machi, da, di, amma, madam…, ~150 spellings in `TERMS`, plus `style.addressTerms` in config) is counted from your own messages into `stats.address`, stated as a hard rule in the prompt for direct chats, and `fixAddress` swaps any other term in a draft for the main one. Family words (anna, akka, mama, appa…) and pa/ma are never rewritten: they are also ordinary words. Never borrowed from look-alike chats.
 - Replies (`src/whatsapp/drafter.ts`, `ReplyDrafter`): the laptop's `orc whatsapp link` forwards live messages to `whatsapp.hub` (`POST /api/whatsapp/messages`, queued and retried while the hub is down); `orc style push` sends the book (`PUT /api/style`) plus the last 60 messages per chat (`live: false`, never drafted). The hub waits `draftDelaySeconds` after their last message in a direct chat, drafts with the first ready of Claude/Gemini/ChatGPT/Groq, stores it in `wa_drafts`, notifies the phone and lists it as `replies` in `/api/home`. Your own message in that chat marks its drafts sent. The phone's "Send in WhatsApp" opens wa.me for phone-number chats and the share sheet for hidden-id chats; nothing is ever sent by the hub. Live voice notes reach the hub untranscribed.
 
 ## Agents know the setup

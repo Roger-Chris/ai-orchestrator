@@ -1,3 +1,4 @@
+import { addressTerms, type AddressUse } from "./address.js";
 import { ollamaJson, type LocalModelOptions } from "./local.js";
 import { groundCard } from "./pool.js";
 import { spoken, type WaChat, type WaMessage, type WaStore } from "./store.js";
@@ -32,6 +33,8 @@ export interface ChatStats {
   voiceNotes: number;
   /** Median minutes before you reply. */
   replyMinutes?: number;
+  /** What you call them (sir, ji, bro, machi, da, di…), counted from your messages; most used first. */
+  address: AddressUse[];
 }
 
 /** A real exchange: what they said, then what you sent back. */
@@ -162,6 +165,7 @@ export function chatStats(msgs: WaMessage[]): ChatStats {
     burst: round(mine.length / (runs || 1), 1),
     voiceNotes: mine.filter((m) => m.mediaType === "audio").length,
     replyMinutes: gaps.length ? Math.round(gaps[Math.floor(gaps.length / 2)]) : undefined,
+    address: addressTerms(texts),
   };
 }
 
