@@ -30,9 +30,11 @@ export default function Settings() {
   const [restricted, setRestricted] = useState(false);
   const [gmail, setGmail] = useState<Awaited<ReturnType<typeof Api.gmail>>>();
   const [gmailMsg, setGmailMsg] = useState("");
+  const [brain, setBrain] = useState<Awaited<ReturnType<typeof Api.assistant>>>();
 
   useEffect(() => {
     Api.gmail().then(setGmail).catch(() => {});
+    Api.assistant().then(setBrain).catch(() => {});
   }, []);
 
   const checkGmail = async () => {
@@ -92,6 +94,14 @@ export default function Settings() {
 
       <Card>
         <Text style={h2}>Gmail</Text>
+        {brain?.configured && (
+          <>
+            <Text style={{ color: brain.ok ? c.text : c.err }}>
+              {brain.ok ? `From the AI_Assistant brain: ${brain.today ?? 0} task(s) today` : `The brain is not reachable: ${brain.lastError ?? "not synced yet"}`}
+            </Text>
+            <Muted small>The brain reads your Gmail and turns mail into tasks; today's appear on Home, and ticking one off there marks it done in the brain.</Muted>
+          </>
+        )}
         {gmail?.connected ? (
           <>
             <Text style={{ color: c.text }}>Connected as {gmail.email}</Text>
@@ -104,7 +114,7 @@ export default function Settings() {
               <Button title="Check now" busy={busy === "gmail"} onPress={() => void checkGmail()} />
             </Row>
           </>
-        ) : (
+        ) : brain?.configured ? null : (
           <Muted small>
             {gmail?.configured
               ? "Not connected. On the hub, run: npm run orc -- gmail connect"

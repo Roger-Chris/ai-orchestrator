@@ -77,6 +77,7 @@ export type ActiveRun = Pick<RunRecord, "id" | "threadId" | "task" | "status" | 
 export const Api = {
   home: () => api<Home>("/api/home"),
   insights: (days = 7) => api<Insights>(`/api/insights?days=${days}`),
+  assistant: () => api<{ configured: boolean; ok: boolean; lastSync?: number; lastError?: string; today?: number }>("/api/assistant"),
   gmail: () => api<{ configured: boolean; connected: boolean; email?: string; lastCheck?: number; lastError?: string; lastAdded?: number }>("/api/gmail"),
   gmailCheck: () => api<{ scanned: number; added: number }>("/api/gmail/check", { body: {}, timeoutMs: 600_000 }),
   taskDone: (id: string, done: boolean) => api(`/api/tasks/${encodeURIComponent(id)}/done`, { body: { done } }),

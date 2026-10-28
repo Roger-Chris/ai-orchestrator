@@ -139,6 +139,18 @@ const ConfigSchema = z.object({
       graphifyTimeoutSeconds: z.number().default(180),
     })
     .prefault({}),
+  /**
+   * The AI_Assistant brain (../AI_Assistant) on this machine: it reads Gmail and WhatsApp and
+   * extracts tasks; today's go to the home screen. On when BRAIN_TOKEN is set.
+   */
+  assistant: z
+    .object({
+      url: z.string().default("http://127.0.0.1:8000"),
+      /** The brain's BRAIN_TOKEN (from AI_Assistant/.env). */
+      token: z.string().optional(),
+      pollMinutes: z.number().min(1).default(2),
+    })
+    .prefault({}),
   /** Picks today's tasks out of your Gmail (read-only). Off until you run `orc gmail connect`. */
   gmail: z
     .object({
@@ -188,6 +200,7 @@ export function parseConfig(raw: unknown): Config {
   if (!cfg.server.token) cfg.server.token = process.env.ORC_TOKEN || undefined;
   // Without a key Perplexity stays listed but reports itself as not logged in.
   if (!cfg.providers.perplexity.apiKey) cfg.providers.perplexity.apiKey = process.env.PERPLEXITY_API_KEY || undefined;
+  if (!cfg.assistant.token) cfg.assistant.token = process.env.BRAIN_TOKEN || undefined;
   if (!cfg.providers.groq.apiKey) cfg.providers.groq.apiKey = process.env.GROQ_API_KEY || undefined;
   if (!cfg.providers.groq.apiKeys.length) cfg.providers.groq.apiKeys = (process.env.GROQ_API_KEYS ?? "").split(",").map((k) => k.trim()).filter(Boolean);
   return cfg;

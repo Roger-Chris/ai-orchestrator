@@ -12,6 +12,7 @@ import { Cluster } from "../src/cluster/cluster.js";
 import { parseConfig } from "../src/config.js";
 import type { Provider } from "../src/providers/base.js";
 import { ProviderPool } from "../src/providers/registry.js";
+import { AssistantTasks, type BrainTask } from "../src/integrations/assistant.js";
 import { GmailReader, parseTasks } from "../src/integrations/gmail.js";
 import { OpenAICompatProvider } from "../src/providers/openai-compat.js";
 import { createApp } from "../src/server/app.js";
@@ -289,6 +290,80 @@ describe("gmail reader", () => {
     const text = `{"tasks":[{"email":1,"title":"Old","day":"2000-01-01"},{"email":5,"title":"Ghost"},{"email":1,"title":" "},{"email":1,"title":"Reply to Priya","time":"null"}]}`;
     expect(parseTasks(text, mails, today)).toEqual([{ id: "gmail:a:3", day: today, time: undefined, title: "Reply to Priya", detail: undefined }]);
     expect(parseTasks("no json here", mails, today)).toBeUndefined();
+  });
+});
+
+describe("tasks from the AI_Assistant brain", () => {
+  /** A UTC time without an offset, as the brain stores it, for a local clock time `days` from today. */
+  const due = (days: number, h: number, m = 0) => {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    d.setHours(h, m, 0, 0);
+    return d.toISOString().slice(0, 19);
+  };
+  function fakeBrain(tasks: BrainTask[], opts: { down?: boolean } = {}) {
+    const calls: string[] = [];
+    const http = (async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push(`${init?.method ?? "GET"} ${url.replace("http://brain", "")} ${String((init?.headers as Record<string, string>)?.Authorization)}`);
+      if (opts.down) throw new Error("connect ECONNREFUSED");
+      const status = new URL(url).searchParams.get("status");
+      const body = url.includes("/done") || url.includes("/confirm") ? {} : tasks.filter((t) => (status ? t.status === status : ["open", "pending_confirmation"].includes(t.status)));
+      return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as typeof fetch;
+    return { http, calls };
+  }
+
+  it("puts today's, overdue and finished-today tasks on Today, and ticks them off in the brain", async () => {
+    const s = system({});
+    const tasks: BrainTask[] = [
+      { id: 1, kind: "event", status: "open", title: "Dentist", due_at: due(0, 13, 30), source: "email", source_chat: "Clinic" },
+      { id: 2, kind: "task", status: "pending_confirmation", title: "Send Priya the deck", due_at: due(0, 18), source: "whatsapp", source_chat: "Priya" },
+      { id: 3, kind: "task", status: "open", title: "Pay the bill", due_at: due(-2, 17), source: "email" },
+      { id: 4, kind: "task", status: "done", title: "Call Arun", due_at: due(0, 10) },
+      { id: 5, kind: "task", status: "open", title: "Next week thing", due_at: due(5, 9) },
+      { id: 6, kind: "task", status: "open", title: "Someday", due_at: null },
+    ];
+    const brain = fakeBrain(tasks);
+    const a = new AssistantTasks(s.store, { url: "http://brain", token: "brain-secret", pollMinutes: 5 }, brain.http);
+    expect(await a.sync()).toBe(4);
+    const today = s.store.tasksFor(localDay());
+    expect(today.map((t) => [t.id, t.time, t.source, t.done])).toEqual([
+      ["brain:4", "10:00", "manual", true],
+      ["brain:1", "13:30", "gmail", false],
+      ["brain:2", "18:00", "whatsapp", false],
+      ["brain:3", "overdue", "gmail", false],
+    ]);
+    expect(today.find((t) => t.id === "brain:2")?.detail).toBe("not confirmed yet · Priya");
+    expect(brain.calls[0]).toContain("Bearer brain-secret");
+
+    // Ticked off on the phone: done in the brain first, then here.
+    const app = createApp({ ...s, assistant: a, publicDir: "web/dist" });
+    const auth = { Authorization: "Bearer secret-token", "Content-Type": "application/json" };
+    expect((await app.request("/api/tasks/brain:1/done", { method: "POST", headers: auth, body: JSON.stringify({ done: true }) })).status).toBe(200);
+    expect(brain.calls.at(-1)).toMatch(/^POST \/tasks\/1\/done /);
+    expect((await app.request("/api/tasks/brain:1/done", { method: "POST", headers: auth, body: JSON.stringify({ done: false }) })).status).toBe(200);
+    expect(brain.calls.at(-1)).toMatch(/^POST \/tasks\/1\/confirm /);
+
+    // Rejected in Telegram: it leaves Today on the next sync.
+    tasks[1].status = "rejected";
+    await a.sync();
+    expect(s.store.tasksFor(localDay()).map((t) => t.id)).not.toContain("brain:2");
+
+    const home = await (await app.request("/api/home", { headers: auth })).json();
+    expect(home.sources.gmail).toBe(true);
+  });
+
+  it("shows an unreachable brain under needs a look and refuses to tick its tasks", async () => {
+    const s = system({});
+    const a = new AssistantTasks(s.store, { url: "http://brain", token: "t", pollMinutes: 5 }, fakeBrain([], { down: true }).http);
+    await expect(a.sync()).rejects.toThrow(/did not answer/);
+    const app = createApp({ ...s, assistant: a, publicDir: "web/dist" });
+    const auth = { Authorization: "Bearer secret-token", "Content-Type": "application/json" };
+    const home = await (await app.request("/api/home", { headers: auth })).json();
+    expect(home.attention).toContainEqual(expect.objectContaining({ title: "Can't reach the brain" }));
+    expect(home.sources.gmail).toBe(false);
+    expect((await app.request("/api/tasks/brain:9/done", { method: "POST", headers: auth, body: "{}" })).status).toBe(502);
   });
 });
 

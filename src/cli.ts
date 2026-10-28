@@ -12,6 +12,7 @@ import { Orchestrator } from "./brain/orchestrator.js";
 import { Router } from "./brain/router.js";
 import { Cluster } from "./cluster/cluster.js";
 import { workspaceMap } from "./context/graphify.js";
+import { AssistantTasks } from "./integrations/assistant.js";
 import { GmailReader } from "./integrations/gmail.js";
 import { Memory } from "./memory/memory.js";
 import { tailnetDevices, tailscaleIPv4 } from "./cluster/tailscale.js";
@@ -47,7 +48,10 @@ export function buildSystem(config: Config) {
     provider: config.gmail.provider,
     node: config.node.name,
   });
-  return { store, pool, cluster, router, orchestrator, agents, memory, notifier, gmail };
+  const assistant = config.assistant.token
+    ? new AssistantTasks(store, { url: config.assistant.url, token: config.assistant.token, pollMinutes: config.assistant.pollMinutes })
+    : undefined;
+  return { store, pool, cluster, router, orchestrator, agents, memory, notifier, gmail, assistant };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */
@@ -87,6 +91,7 @@ async function cmdServe(config: Config) {
   for (const hostname of hosts) serve({ fetch: app.fetch, port: config.server.port, hostname });
   sys.cluster.start();
   sys.gmail.start(config.gmail.pollMinutes);
+  sys.assistant?.start();
 
   const status = await sys.pool.status();
   console.log(`\n  AI Orchestrator · device "${config.node.name}"`);
@@ -197,6 +202,10 @@ async function cmdDoctor(config: Config, live: boolean) {
   const graphify = await probeVersion(config.context.graphifyCommand);
   console.log(`\n${graphify ? "✓" : "✗"} graphify   ${graphify ?? "not installed (optional: uv tool install graphifyy). Gives the planner a code map."}`);
   console.log(`· android    notifications ${sys.notifier.fcm ? "on (Firebase key loaded)" : "off (no fcm-service-account.json)"}`);
+  if (sys.assistant) {
+    const n = await sys.assistant.sync().catch(() => undefined);
+    console.log(`· brain      ${n === undefined ? `not reachable: ${sys.assistant.status().lastError}` : `${config.assistant.url}, ${n} task(s) on today's list`}`);
+  } else console.log("· brain      off (set BRAIN_TOKEN in .env to show the AI_Assistant brain's tasks on Today)");
   const mail = sys.gmail.status();
   console.log(`· gmail      ${mail.connected ? `connected as ${mail.email}` : mail.configured ? "not connected (run `orc gmail connect`)" : `off (no ${config.gmail.clientFile}; see Gmail in the README)`}`);
   console.log(`· memory     local${config.memory.enabled ? "" : " (disabled)"} · NotebookLM: ${await sys.memory.notebookStatus()}`);

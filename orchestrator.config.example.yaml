@@ -84,6 +84,11 @@ routing:
   #   ui_ux: { gemini: 9.5 }
   overrides: {}
 
+assistant:                   # the AI_Assistant brain on this machine: its tasks (from Gmail, WhatsApp) go on Today
+  url: http://127.0.0.1:8000
+  token: ${BRAIN_TOKEN}      # copy BRAIN_TOKEN from AI_Assistant/.env into this .env; unset = off
+  pollMinutes: 2
+
 gmail:                       # today's tasks from your mail; off until `orc gmail connect` (README: Gmail)
   clientFile: gmail-client.json
   pollMinutes: 15

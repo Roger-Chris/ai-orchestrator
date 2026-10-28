@@ -70,6 +70,25 @@ export class Store implements CooldownStore, FeedbackSource {
     }));
   }
 
+  /** Adds or refreshes a task copied from elsewhere, keeping its done state from there. */
+  upsertTask(t: DayTask) {
+    this.db
+      .prepare(
+        `INSERT INTO tasks (id, day, time, title, source, detail, done, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET day = excluded.day, time = excluded.time, title = excluded.title,
+           source = excluded.source, detail = excluded.detail, done = excluded.done`,
+      )
+      .run(t.id, t.day, t.time ?? null, t.title, t.source, t.detail ?? null, t.done ? 1 : 0, Date.now());
+  }
+
+  /** Removes a day's tasks whose id starts with `prefix` and is not in `keep` (they left the source's list). */
+  pruneTasks(prefix: string, day: string, keep: string[]) {
+    const gone = (this.db.prepare("SELECT id FROM tasks WHERE day = ? AND substr(id, 1, ?) = ?").all(day, prefix.length, prefix) as { id: string }[])
+      .map((r) => r.id)
+      .filter((id) => !keep.includes(id));
+    for (const id of gone) this.deleteTask(id);
+  }
+
   setTaskDone(id: string, done: boolean): boolean {
     return this.db.prepare("UPDATE tasks SET done = ? WHERE id = ?").run(done ? 1 : 0, id).changes > 0;
   }
