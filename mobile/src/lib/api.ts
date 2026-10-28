@@ -1,7 +1,7 @@
 import * as SecureStore from "expo-secure-store";
-import type { Home, Insights, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
+import type { Home, Insights, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
 
-export type { Attention, DayTask, Decision, Home, Insights, RunEvent, RunOptions, RunRecord, Running, StepRecord, Thread } from "../../../src/types";
+export type { Attention, DayTask, Decision, Home, Insights, ReplyDraft, RunEvent, RunOptions, RunRecord, Running, StepRecord, Thread } from "../../../src/types";
 
 /** Where the hub is and how to get in. Kept in Android's encrypted storage. */
 export interface Connection {
@@ -80,6 +80,9 @@ export const Api = {
   assistant: () => api<{ configured: boolean; ok: boolean; lastSync?: number; lastError?: string; today?: number }>("/api/assistant"),
   gmail: () => api<{ configured: boolean; connected: boolean; email?: string; lastCheck?: number; lastError?: string; lastAdded?: number }>("/api/gmail"),
   gmailCheck: () => api<{ scanned: number; added: number }>("/api/gmail/check", { body: {}, timeoutMs: 600_000 }),
+  /** Writes a fresh draft for a chat; `ask` is what you want to say. */
+  redraft: (chatId: string, ask?: string) => api<ReplyDraft | { skipped: true }>("/api/whatsapp/drafts", { body: { chatId, ask }, timeoutMs: 180_000 }),
+  closeDraft: (id: string, status: "sent" | "dismissed") => api(`/api/whatsapp/drafts/${encodeURIComponent(id)}/${status}`, { body: {} }),
   taskDone: (id: string, done: boolean) => api(`/api/tasks/${encodeURIComponent(id)}/done`, { body: { done } }),
   health: () => api<{ ok: boolean; node: string }>("/api/health", { timeoutMs: 8000 }),
   threads: () => api<Thread[]>("/api/threads"),

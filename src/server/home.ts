@@ -4,6 +4,7 @@ import type { ProviderPool } from "../providers/registry.js";
 import type { AssistantTasks } from "../integrations/assistant.js";
 import type { GmailReader } from "../integrations/gmail.js";
 import type { Store } from "../store/db.js";
+import type { ReplyDrafter } from "../whatsapp/drafter.js";
 import type { Attention, Decision, Home, Insights, ProviderId, Running } from "../types.js";
 
 export const PROVIDER_NAME: Record<ProviderId, string> = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity", groq: "Groq" };
@@ -18,7 +19,15 @@ const short = (s: string, n = 90) => {
 
 const clock = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
-export async function buildHome(d: { store: Store; orchestrator: Orchestrator; pool: ProviderPool; cluster: Cluster; gmail?: GmailReader; assistant?: AssistantTasks }): Promise<Home> {
+export async function buildHome(d: {
+  store: Store;
+  orchestrator: Orchestrator;
+  pool: ProviderPool;
+  cluster: Cluster;
+  gmail?: GmailReader;
+  assistant?: AssistantTasks;
+  drafter?: ReplyDrafter;
+}): Promise<Home> {
   const decisions: Decision[] = [];
   const running: Running[] = [];
   for (const a of d.orchestrator.active()) {
@@ -76,7 +85,7 @@ export async function buildHome(d: { store: Store; orchestrator: Orchestrator; p
     day,
     tasks: d.store.tasksFor(day),
     // The brain reads Gmail; WhatsApp only when its bridge runs, which the hub cannot see.
-    sources: { gmail: !!mail?.connected || !!brain?.ok, whatsapp: false },
+    sources: { gmail: !!mail?.connected || !!brain?.ok, whatsapp: !!d.drafter?.book() },
     decisions,
     running,
     attention,
@@ -85,6 +94,7 @@ export async function buildHome(d: { store: Store; orchestrator: Orchestrator; p
       .filter((r) => r.finishedAt)
       .slice(0, 3)
       .map((r) => ({ runId: r.id, threadId: r.threadId, task: short(r.task, 60), status: r.status, at: r.finishedAt! })),
+    replies: d.drafter?.drafts(10) ?? [],
   };
 }
 

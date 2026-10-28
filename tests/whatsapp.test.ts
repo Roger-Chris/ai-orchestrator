@@ -5,6 +5,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph, chatStats, learnStyle, normalizeCard, replyPairs, type StyleBook, type StyleCard } from "../src/whatsapp/learn.js";
 import { content } from "../src/whatsapp/link.js";
 import { buildPool, groundCard, poolPrompt } from "../src/whatsapp/pool.js";
+import { cleanDraft, ReplyDrafter } from "../src/whatsapp/drafter.js";
+import type { ProviderId, ProviderRequest } from "../src/types.js";
 import { WaStore, type WaMessage } from "../src/whatsapp/store.js";
 import { Store } from "../src/store/db.js";
 
@@ -160,5 +162,78 @@ describe("context pool", () => {
     expect(p.card?.addressAs).toEqual([]); // never borrow what you call someone else
     expect(p.examples.every((e) => e.from === "Arun")).toBe(true);
     expect(poolPrompt(p, "say I'll call at 6").prompt).toContain("What I want to say: say I'll call at 6");
+  });
+});
+
+describe("reply drafter", () => {
+  function setup(answers: Partial<Record<ProviderId, string | null>>) {
+    const dir = mkdtempSync(join(tmpdir(), "orc-wa-"));
+    const store = new Store(dir);
+    cleanup.push(() => (store.close(), rmSync(dir, { recursive: true, force: true })));
+    const wa = new WaStore(store);
+    const asked: { id: ProviderId; req: ProviderRequest }[] = [];
+    const pool = {
+      available: async () => Object.keys(answers) as ProviderId[],
+      run: async (id: ProviderId, req: ProviderRequest) => {
+        asked.push({ id, req });
+        const text = answers[id];
+        return text === null ? { ok: false, text: "", provider: id, durationMs: 1, error: "limit" } : { ok: true, text: text ?? "", provider: id, durationMs: 1 };
+      },
+    };
+    const notes: string[] = [];
+    const drafter = new ReplyDrafter(store, wa, pool, { dataDir: dir, delaySeconds: 0, auto: true, groups: false, provider: "auto", node: "hub" }, (p) => notes.push(p.title));
+    const book: StyleBook = {
+      version: 1,
+      builtAt: 1,
+      model: "m",
+      owner: { id: "999@s.whatsapp.net", stats: chatStats(chatA) },
+      contacts: [{ chatId: A, name: "Arun", isGroup: false, stats: chatStats(chatA), card: card(), examples: replyPairs(chatA), lastTs: 9050 }],
+      graph: buildGraph([], new Map()),
+    };
+    drafter.saveBook(book);
+    return { drafter, asked, notes };
+  }
+  const now = () => Math.floor(Date.now() / 1000);
+  const tick = () => new Promise((r) => setTimeout(r, 20));
+
+  it("cleans the model's answer and treats SKIP as no reply", () => {
+    expect(cleanDraft('"okk da"')).toBe("okk da");
+    expect(cleanDraft("Me: varen da")).toBe("varen da");
+    expect(cleanDraft("SKIP")).toBeUndefined();
+  });
+
+  it("drafts after their messages, in a direct chat only, and notifies the phone", async () => {
+    const { drafter, asked, notes } = setup({ claude: "seri da varen" });
+    const r = drafter.ingest([msg(A, false, "match ku varuviya", now()), msg("444@g.us", false, "group news", now())]);
+    expect(r.scheduled).toBe(1);
+    await tick();
+    expect(asked).toHaveLength(1);
+    expect(asked[0].req.prompt).toContain("match ku varuviya");
+    expect(drafter.drafts()).toMatchObject([{ chatId: A, name: "Arun", phone: "111", text: "seri da varen", incoming: "match ku varuviya", provider: "claude" }]);
+    expect(notes).toEqual(["Reply to Arun"]);
+  });
+
+  it("retires the draft when you reply yourself, and ignores history", async () => {
+    const { drafter, asked } = setup({ claude: "seri da" });
+    drafter.ingest([msg(A, false, "free ah", now())]);
+    await tick();
+    expect(drafter.drafts()).toHaveLength(1);
+    drafter.ingest([msg(A, true, "illa da busy", now())]);
+    expect(drafter.drafts()).toEqual([]);
+    drafter.ingest([msg(A, false, "old one", now() - 7200)]);
+    drafter.ingest([msg(A, false, "synced", now())], false);
+    await tick();
+    expect(asked).toHaveLength(1);
+  });
+
+  it("falls back to the next model, and writes what you ask for", async () => {
+    const { drafter, asked } = setup({ claude: null, gemini: "6 ku call panren da" });
+    drafter.ingest([msg(A, false, "eppo call panra", now())], false);
+    const d = await drafter.draft(A, "call at 6");
+    expect(asked.map((a) => a.id)).toEqual(["claude", "gemini"]);
+    expect(asked[1].req.prompt).toContain("What I want to say: call at 6");
+    expect(d).toMatchObject({ text: "6 ku call panren da", provider: "gemini" });
+    expect(drafter.close(d!.id, "sent")).toBe(true);
+    expect(drafter.drafts()).toEqual([]);
   });
 });

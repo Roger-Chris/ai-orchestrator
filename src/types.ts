@@ -197,6 +197,23 @@ export interface Home {
   running: Running[];
   attention: Attention[];
   recent: { runId: string; threadId?: string; task: string; status: string; at: number }[];
+  /** WhatsApp replies drafted in your style, waiting for you to send or dismiss. */
+  replies: ReplyDraft[];
+}
+
+/** A WhatsApp reply written in your style. The hub never sends it; you do. */
+export interface ReplyDraft {
+  id: string;
+  chatId: string;
+  name: string;
+  isGroup: boolean;
+  /** Phone number for a wa.me link; absent for chats WhatsApp only gives a hidden id for. */
+  phone?: string;
+  /** What they said that this answers. */
+  incoming: string;
+  text: string;
+  provider: ProviderId;
+  createdAt: number;
 }
 
 export interface Insights {

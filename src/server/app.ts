@@ -16,6 +16,8 @@ import { buildHome, buildInsights, localDay } from "./home.js";
 import type { AssistantTasks } from "../integrations/assistant.js";
 import type { GmailReader } from "../integrations/gmail.js";
 import type { Notifier } from "./push.js";
+import type { ReplyDrafter } from "../whatsapp/drafter.js";
+import type { StyleBook } from "../whatsapp/learn.js";
 
 export interface AppDeps {
   config: Config;
@@ -32,6 +34,8 @@ export interface AppDeps {
   gmail?: GmailReader;
   /** Today's tasks from the AI_Assistant brain; absent when BRAIN_TOKEN is not set. */
   assistant?: AssistantTasks;
+  /** WhatsApp replies in your style; absent in tests that don't need it. */
+  drafter?: ReplyDrafter;
 }
 
 const Provider = z.enum(PROVIDER_IDS as [ProviderId, ...ProviderId[]]);
@@ -195,6 +199,50 @@ export function createApp(d: AppDeps) {
   });
   app.get("/api/assistant", (c) => c.json(d.assistant ? { configured: true, ...d.assistant.status() } : { configured: false, ok: false }));
   app.get("/api/gmail", (c) => c.json(d.gmail?.status() ?? { configured: false, connected: false }));
+  // WhatsApp replies in your style. The device running `orc whatsapp link` sends messages here;
+  // `orc style push` sends the style book. Nothing on the hub can send a WhatsApp message.
+  const noDrafter = (c: Context) => c.json({ error: "WhatsApp drafting is off on this hub" }, 404);
+  app.get("/api/style", (c) => (d.drafter ? c.json(d.drafter.status()) : noDrafter(c)));
+  app.put("/api/style", async (c) => {
+    if (!d.drafter) return noDrafter(c);
+    const book = (await c.req.json()) as StyleBook;
+    if (book?.version !== 1 || !Array.isArray(book.contacts)) return c.json({ error: "not a style book" }, 400);
+    d.drafter.saveBook(book);
+    return c.json({ ok: true, contacts: book.contacts.length });
+  });
+  const WaMessageBody = z.object({
+    id: z.string().min(1),
+    chatId: z.string().min(3),
+    chatName: z.string().optional(),
+    senderId: z.string(),
+    senderName: z.string().optional(),
+    fromMe: z.boolean(),
+    isGroup: z.boolean(),
+    text: z.string(),
+    mediaType: z.string().optional(),
+    transcript: z.string().optional(),
+    quoted: z.string().optional(),
+    ts: z.number(),
+  });
+  app.post("/api/whatsapp/messages", async (c) => {
+    if (!d.drafter) return noDrafter(c);
+    const body = z.object({ messages: z.array(WaMessageBody).max(5000), live: z.boolean().default(true) }).parse(await c.req.json());
+    return c.json(d.drafter.ingest(body.messages, body.live));
+  });
+  app.get("/api/whatsapp/drafts", (c) => (d.drafter ? c.json(d.drafter.drafts()) : noDrafter(c)));
+  app.post("/api/whatsapp/drafts", async (c) => {
+    if (!d.drafter) return noDrafter(c);
+    const { chatId, ask } = z.object({ chatId: z.string(), ask: z.string().max(1000).optional() }).parse(await c.req.json());
+    try {
+      const draft = await d.drafter.draft(chatId, ask);
+      return draft ? c.json(draft, 201) : c.json({ skipped: true, reason: "nothing to answer: your message is the last one" });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 409);
+    }
+  });
+  app.post("/api/whatsapp/drafts/:id/:status{sent|dismissed}", (c) =>
+    d.drafter ? c.json({ ok: d.drafter.close(c.req.param("id"), c.req.param("status") as "sent" | "dismissed") }) : noDrafter(c),
+  );
   app.post("/api/gmail/check", async (c) => {
     if (!d.gmail?.status().connected) return c.json({ error: "Gmail is not connected: run `orc gmail connect` on the hub" }, 409);
     return c.json(await d.gmail.check());

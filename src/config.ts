@@ -181,6 +181,19 @@ const ConfigSchema = z.object({
       voiceNotes: z.boolean().default(true),
       /** Chat ids to leave alone, e.g. 9190000…@s.whatsapp.net or …@g.us. */
       ignore: z.array(z.string()).default([]),
+      /**
+       * The hub that drafts replies, e.g. http://100.104.185.17:4317. The device running the link
+       * forwards new messages there and `orc style push` sends the style book. Empty: this device.
+       */
+      hub: z.string().default(""),
+      /** Draft a reply when someone messages you (the hub; needs a style book). */
+      autoDraft: z.boolean().default(true),
+      /** Also draft for groups; off drafts only for direct chats. */
+      draftGroups: z.boolean().default(false),
+      /** Seconds to wait after their last message, so a burst of messages gets one draft. */
+      draftDelaySeconds: z.number().min(0).default(45),
+      /** Model that writes the drafts: auto uses the first ready of Claude, Gemini, ChatGPT, Groq. */
+      replyProvider: z.enum(["auto", "claude", "codex", "gemini", "groq"]).default("auto"),
     })
     .prefault({}),
   /** Learning your writing style from WhatsApp with local models (`orc style learn`). */

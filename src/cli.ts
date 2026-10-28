@@ -30,7 +30,8 @@ import { learnStyle, type StyleBook } from "./whatsapp/learn.js";
 import { buildPool, poolPrompt } from "./whatsapp/pool.js";
 import { WhatsAppLink } from "./whatsapp/link.js";
 import { ollamaProblem, transcribe } from "./whatsapp/local.js";
-import { WaStore } from "./whatsapp/store.js";
+import { WaStore, type WaMessage } from "./whatsapp/store.js";
+import { ReplyDrafter } from "./whatsapp/drafter.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -65,7 +66,11 @@ export function buildSystem(config: Config) {
               : assistant
                 ? `Gmail: their AI_Assistant brain reads it, but the hub can't reach the brain right now${brain?.lastError ? ` (${brain.lastError})` : ""}, so today's tasks may be out of date`
                 : "Gmail: not connected";
-          return [gmailLine, `Phone notifications: ${notifier.fcm ? "on (Android app via Firebase)" : "web push only"}`, "WhatsApp: not connected"];
+          const book = drafter.book();
+          const waLine = book
+            ? `WhatsApp: replies are drafted in their style (style book of ${book.contacts.length} chats) and shown on the phone; nothing is ever sent for them`
+            : "WhatsApp: not connected";
+          return [gmailLine, `Phone notifications: ${notifier.fcm ? "on (Android app via Firebase)" : "web push only"}`, waLine];
         },
       }),
   });
@@ -79,7 +84,21 @@ export function buildSystem(config: Config) {
   const assistant = config.assistant.token
     ? new AssistantTasks(store, { url: config.assistant.url, token: config.assistant.token, pollMinutes: config.assistant.pollMinutes })
     : undefined;
-  return { store, pool, cluster, router, orchestrator, agents, memory, notifier, gmail, assistant };
+  const drafter = new ReplyDrafter(
+    store,
+    new WaStore(store),
+    pool,
+    {
+      dataDir: resolve(config.dataDir),
+      delaySeconds: config.whatsapp.draftDelaySeconds,
+      auto: config.whatsapp.autoDraft,
+      groups: config.whatsapp.draftGroups,
+      provider: config.whatsapp.replyProvider,
+      node: config.node.name,
+    },
+    (p) => void notifier.notify(p),
+  );
+  return { store, pool, cluster, router, orchestrator, agents, memory, notifier, gmail, assistant, drafter };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */
@@ -285,13 +304,18 @@ async function cmdWhatsApp(config: Config, sub = "status") {
     if (!readCreds(config)) console.log("Not linked yet: run `orc whatsapp link`.");
     return store.close();
   }
+  const forward = hubForwarder(config);
+  console.log(`New messages go to the hub at ${hubUrl(config)} for reply drafts.`);
   const link = new WhatsAppLink(wa, {
     dataDir: resolve(config.dataDir),
     history: config.whatsapp.history,
     voiceNotes: config.whatsapp.voiceNotes,
     ignore: config.whatsapp.ignore,
     print: (s) => console.log(s),
-    onLive: (ms) => console.log(`new: ${ms.length} message(s)`),
+    onLive: (ms) => {
+      console.log(`new: ${ms.length} message(s)`);
+      forward.send(ms);
+    },
   });
   await link.start();
   console.log("Keep this running while history arrives (Ctrl+C to stop; run it again any time to catch up).");
@@ -312,7 +336,16 @@ async function cmdStyle(config: Config, sub = "show", opts: { who?: string; ask?
   const file = join(resolve(config.dataDir), "style", "stylebook.json");
   const previous: StyleBook | undefined = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : undefined;
   try {
-    if (sub === "learn") {
+    if (sub === "push") {
+      // The hub drafts from the book plus each chat's recent messages, so both go over.
+      if (!previous) throw new Error("No style book yet: run `orc style learn` first.");
+      const r = await hubCall(config, "PUT", "/api/style", previous);
+      console.log(`Style book sent to ${hubUrl(config)}: ${r.contacts} chats.`);
+      const recent = previous.contacts.flatMap((c) => wa.messages(c.chatId, 60).map((m) => ({ ...m, mediaPath: undefined, chatName: c.name.startsWith("+") ? undefined : c.name })));
+      let saved = 0;
+      for (let i = 0; i < recent.length; i += 2000) saved += (await hubCall(config, "POST", "/api/whatsapp/messages", { messages: recent.slice(i, i + 2000), live: false })).saved;
+      console.log(`Sent ${recent.length} recent messages for context (${saved} new on the hub).`);
+    } else if (sub === "learn") {
       const problem = await ollamaProblem(config.style);
       if (problem) throw new Error(problem);
       const t = await transcribe(wa, config.style, (s) => console.log(s), ROOT);
@@ -353,6 +386,45 @@ async function cmdStyle(config: Config, sub = "show", opts: { who?: string; ask?
   } finally {
     store.close();
   }
+}
+
+/** Where reply drafting happens: `whatsapp.hub`, else the hub on this device. */
+const hubUrl = (config: Config) => (config.whatsapp.hub || `http://127.0.0.1:${config.server.port}`).replace(/\/$/, "");
+
+async function hubCall(config: Config, method: string, path: string, body: unknown): Promise<any> {
+  const res = await fetch(`${hubUrl(config)}${path}`, {
+    method,
+    headers: { "Content-Type": "application/json", ...(config.server.token ? { Authorization: `Bearer ${config.server.token}` } : {}) },
+    body: JSON.stringify(body),
+  });
+  const out = (await res.json().catch(() => ({}))) as any;
+  if (!res.ok) throw new Error(`hub ${res.status}: ${out.error ?? res.statusText}`);
+  return out;
+}
+
+/** Sends new messages to the hub in order; while the hub is unreachable they wait and are retried. */
+function hubForwarder(config: Config) {
+  const queue: WaMessage[] = [];
+  let busy = false;
+  let warned = false;
+  const drain = async () => {
+    if (busy) return;
+    busy = true;
+    while (queue.length) {
+      const batch = queue.slice(0, 200).map((m) => ({ ...m, mediaPath: undefined }));
+      try {
+        await hubCall(config, "POST", "/api/whatsapp/messages", { messages: batch, live: true });
+        queue.splice(0, batch.length);
+        warned = false;
+      } catch (e) {
+        if (!warned) console.warn(`! hub unreachable (${(e as Error).message}); keeping ${queue.length} message(s) to retry`);
+        warned = true;
+        await new Promise((r) => setTimeout(r, 15_000));
+      }
+    }
+    busy = false;
+  };
+  return { send: (ms: WaMessage[]) => (queue.push(...ms), void drain()) };
 }
 
 /** Your own WhatsApp id from the link's saved sign-in; undefined until linked. */
@@ -508,7 +580,7 @@ async function main() {
     case "style":
       return cmdStyle(config, rest[0], { who: rest.slice(1).join(" "), ask: v.ask as string | undefined, draft: !!v.draft });
     default:
-      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|check|status|disconnect]|whatsapp [link|status]|style [learn|show|pool <name> [--ask "…"] [--draft]]|init|mcp>`);
+      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|check|status|disconnect]|whatsapp [link|status]|style [learn|push|show|pool <name> [--ask "…"] [--draft]]|init|mcp>`);
       process.exitCode = 1;
   }
 }

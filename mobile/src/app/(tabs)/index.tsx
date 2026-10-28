@@ -1,9 +1,9 @@
 import { router, useFocusEffect } from "expo-router";
 import { type ReactNode, useCallback, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Linking, Pressable, RefreshControl, ScrollView, Share, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ErrorText } from "../../components/ui";
-import { Api, type Attention, type DayTask, type Decision, type Home as HomeData, type Running, Unauthorized } from "../../lib/api";
+import { Api, type Attention, type DayTask, type Decision, type Home as HomeData, type ReplyDraft, type Running, Unauthorized } from "../../lib/api";
 import { useColors } from "../../lib/theme";
 
 function ago(ts: number): string {
@@ -21,7 +21,12 @@ const open = (threadId?: string) => threadId && router.push(`/t/${threadId}`);
 function headline(h: HomeData): string {
   const tasks = h.tasks.filter((t) => !t.done).length;
   const decisions = h.decisions.length;
-  const parts = [tasks && `${tasks} ${tasks === 1 ? "task" : "tasks"} today`, decisions && `${decisions} ${decisions === 1 ? "decision" : "decisions"} waiting`].filter(Boolean);
+  const replies = h.replies?.length ?? 0; // an older hub sends none
+  const parts = [
+    tasks && `${tasks} ${tasks === 1 ? "task" : "tasks"} today`,
+    replies && `${replies} ${replies === 1 ? "reply" : "replies"} to send`,
+    decisions && `${decisions} ${decisions === 1 ? "decision" : "decisions"} waiting`,
+  ].filter(Boolean);
   if (parts.length) return `${parts.join(",\n")}.`.replace(/^./, (s) => s.toUpperCase());
   return h.attention.length ? "Nothing needs you,\na few things to look at." : "Nothing needs you\nright now.";
 }
@@ -119,6 +124,67 @@ function DecisionRow({ d, first, onDone }: { d: Decision; first: boolean; onDone
           {busy && <ActivityIndicator color={c.accent} />}
         </View>
       )}
+      <ErrorText text={err} />
+    </Row>
+  );
+}
+
+/**
+ * A reply drafted in your style. Nothing is sent from here: "Send in WhatsApp" opens WhatsApp
+ * with the text ready (straight to the chat when the number is known, else via the share sheet).
+ */
+function ReplyRow({ r, first, onDone }: { r: ReplyDraft; first: boolean; onDone: () => void }) {
+  const c = useColors();
+  const [text, setText] = useState(r.text);
+  const [ask, setAsk] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const act = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    setErr("");
+    try {
+      await fn();
+      onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const send = () =>
+    act(async () => {
+      if (r.phone) await Linking.openURL(`https://wa.me/${r.phone}?text=${encodeURIComponent(text)}`);
+      else await Share.share({ message: text });
+      await Api.closeDraft(r.id, "sent");
+    });
+  return (
+    <Row first={first}>
+      <Text style={{ color: c.muted, fontSize: 13 }}>{[r.name, ago(r.createdAt)].join(" · ")}</Text>
+      <Text style={{ color: c.muted, fontSize: 14, marginTop: 3, fontStyle: "italic" }} numberOfLines={3}>
+        {r.incoming}
+      </Text>
+      <TextInput
+        value={text}
+        onChangeText={setText}
+        multiline
+        accessibilityLabel={`Reply to ${r.name}`}
+        style={{ color: c.text, fontSize: 16, marginTop: 6, borderLeftWidth: 2, borderLeftColor: c.accent, paddingLeft: 10, paddingVertical: 2 }}
+      />
+      <TextInput
+        value={ask}
+        onChangeText={setAsk}
+        placeholder="Or say what you want to reply…"
+        placeholderTextColor={c.muted}
+        returnKeyType="send"
+        onSubmitEditing={() => ask.trim() && void act(() => Api.redraft(r.chatId, ask.trim()))}
+        style={{ color: c.text, fontSize: 14, marginTop: 8, borderBottomWidth: 1, borderBottomColor: c.border, paddingVertical: 4 }}
+      />
+      <View style={{ flexDirection: "row", gap: 20, marginTop: 10, alignItems: "center" }}>
+        <TextLink title="Send in WhatsApp" onPress={() => void send()} />
+        <TextLink title="Redo" color={c.muted} onPress={() => void act(() => Api.redraft(r.chatId, ask.trim() || undefined))} />
+        <TextLink title="Dismiss" color={c.muted} onPress={() => void act(() => Api.closeDraft(r.id, "dismissed"))} />
+        {busy && <ActivityIndicator color={c.accent} />}
+      </View>
       <ErrorText text={err} />
     </Row>
   );
@@ -273,6 +339,14 @@ export default function Home() {
                 </Text>
               )}
             </Section>
+
+            {(home.replies?.length ?? 0) > 0 && (
+              <Section label="Replies" right={home.replies.length}>
+                {home.replies.map((r, i) => (
+                  <ReplyRow key={r.id} r={r} first={i === 0} onDone={() => void load()} />
+                ))}
+              </Section>
+            )}
 
             {home.decisions.length > 0 && (
               <Section label="Decisions" right={home.decisions.length}>
