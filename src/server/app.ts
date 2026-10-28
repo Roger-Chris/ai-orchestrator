@@ -15,8 +15,9 @@ import { PROVIDER_IDS, type ProviderId, type RunEvent, type RunOptions } from ".
 import { buildHome, buildInsights, localDay } from "./home.js";
 import type { AssistantTasks } from "../integrations/assistant.js";
 import type { GmailReader } from "../integrations/gmail.js";
-import type { Notifier } from "./push.js";
+import { type Notifier, alertPayload } from "./push.js";
 import type { ReplyDrafter } from "../whatsapp/drafter.js";
+import { CallError, type CallDesk } from "../calls/desk.js";
 import type { StyleBook } from "../whatsapp/learn.js";
 
 export interface AppDeps {
@@ -36,6 +37,8 @@ export interface AppDeps {
   assistant?: AssistantTasks;
   /** WhatsApp replies in your style; absent in tests that don't need it. */
   drafter?: ReplyDrafter;
+  /** Voice calls about brain alerts; absent in tests that don't need it. */
+  calls?: CallDesk;
 }
 
 const Provider = z.enum(PROVIDER_IDS as [ProviderId, ...ProviderId[]]);
@@ -68,6 +71,11 @@ const NotifyBody = z.object({
   created_at: z.string().optional(),
 });
 const AckBody = z.object({ action: z.enum(["done", "snooze", "dismiss"]) });
+/** A call turn as JSON: typed words, or a base64 voice clip. (The app sends voice as multipart.) */
+const TurnBody = z.object({ text: z.string().max(4000).optional(), audio: z.string().max(14_000_000).optional(), mime: z.string().max(60).optional() });
+/** Voice clips above this are refused (Groq's own limit is 25 MB; a minute of speech is ~0.5 MB). */
+const MAX_CLIP = 10 * 1024 * 1024;
+const CLIP_EXT: Record<string, string> = { "audio/mp4": "m4a", "audio/m4a": "m4a", "audio/x-m4a": "m4a", "audio/aac": "m4a", "audio/webm": "webm", "audio/wav": "wav", "audio/x-wav": "wav", "audio/mpeg": "mp3", "audio/ogg": "ogg", "audio/3gpp": "3gp" };
 const PushSubBody = z.object({ endpoint: z.string().url(), keys: z.object({ p256dh: z.string(), auth: z.string() }), expirationTime: z.number().nullable().optional() });
 const ExecBody = z.object({
   provider: Provider,
@@ -359,7 +367,7 @@ export function createApp(d: AppDeps) {
   app.post("/api/notify", async (c) => {
     const a = NotifyBody.parse(await c.req.json());
     d.assistant?.remember(a);
-    const sent = (await d.notifier?.notify({ title: a.title, body: a.body.slice(0, 300), url: "/", tag: `alert:${a.id}` })) ?? 0;
+    const sent = (await d.notifier?.notify(alertPayload(a))) ?? 0;
     return c.json({ ok: true, sent });
   });
   app.post("/api/alerts/:id/ack", async (c) => {
@@ -372,6 +380,65 @@ export function createApp(d: AppDeps) {
     } catch (e) {
       return c.json({ error: (e as Error).message }, 502);
     }
+    return c.json({ ok: true });
+  });
+  // Calls: the phone rings for a level-4 alert (or when you ask to talk one through), speaks what
+  // the hub says and sends back what you answer. Only safe actions; see src/calls/desk.ts.
+  const callAlert = (c: Context) => {
+    const id = Number(c.req.param("alertId"));
+    if (!Number.isInteger(id)) return { error: c.json({ error: "bad alert id" }, 400) };
+    if (!d.calls) return { error: c.json({ error: "calls are off on this hub" }, 404) };
+    if (!d.assistant) return { error: c.json({ error: "the brain is not connected (BRAIN_TOKEN)" }, 409) };
+    const alert = d.assistant.alerts().find((a) => a.id === id);
+    if (!alert) return { error: c.json({ error: "this alert is no longer open" }, 404) };
+    return { alert, calls: d.calls };
+  };
+  const callFailed = (c: Context, e: unknown) => {
+    if (e instanceof CallError) return c.json({ error: e.message, ...(e.status === 409 ? { fallback: "text" } : {}) }, e.status);
+    throw e;
+  };
+  app.get("/api/calls/:alertId", (c) => {
+    const r = callAlert(c);
+    if (r.error) return r.error;
+    const st = r.calls.state(r.alert.id);
+    return c.json({ alert: r.alert, voice: r.calls.voice, available: r.calls.available, lines: st?.lines ?? [], ended: st?.ended ?? false });
+  });
+  app.post("/api/calls/:alertId/answer", async (c) => {
+    const r = callAlert(c);
+    if (r.error) return r.error;
+    return c.json({ ...(await r.calls.answer(r.alert)), voice: r.calls.voice });
+  });
+  app.post("/api/calls/:alertId/turn", async (c) => {
+    const r = callAlert(c);
+    if (r.error) return r.error;
+    let input: { text?: string; audio?: { data: Blob; filename: string } };
+    if ((c.req.header("content-type") ?? "").startsWith("multipart/form-data")) {
+      const form = await c.req.parseBody();
+      const file = form.audio;
+      if (file instanceof File) {
+        if (file.size > MAX_CLIP) return c.json({ error: "that voice clip is too long" }, 413);
+        input = { audio: { data: file, filename: file.name || `clip.${CLIP_EXT[file.type] ?? "m4a"}` } };
+      } else input = { text: typeof form.text === "string" ? form.text : undefined };
+    } else {
+      const b = TurnBody.parse(await c.req.json());
+      if (b.audio) {
+        const bytes = Buffer.from(b.audio, "base64");
+        if (bytes.length > MAX_CLIP) return c.json({ error: "that voice clip is too long" }, 413);
+        const mime = b.mime ?? "audio/mp4";
+        input = { audio: { data: new Blob([bytes], { type: mime }), filename: `clip.${CLIP_EXT[mime] ?? "m4a"}` } };
+      } else input = { text: b.text };
+    }
+    if (!input.audio && !input.text?.trim()) return c.json({ error: "say or type something" }, 400);
+    try {
+      return c.json(await r.calls.turn(r.alert, input));
+    } catch (e) {
+      return callFailed(c, e);
+    }
+  });
+  app.post("/api/calls/:alertId/end", (c) => {
+    const id = Number(c.req.param("alertId"));
+    if (!Number.isInteger(id)) return c.json({ error: "bad alert id" }, 400);
+    d.calls?.end(id);
     return c.json({ ok: true });
   });
   // Branch work: merge a step's branch into the branch checked out in the run's folder.

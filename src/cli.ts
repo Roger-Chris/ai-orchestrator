@@ -32,6 +32,8 @@ import { WhatsAppLink } from "./whatsapp/link.js";
 import { ollamaProblem, transcribe } from "./whatsapp/local.js";
 import { WaStore, type WaMessage } from "./whatsapp/store.js";
 import { ReplyDrafter } from "./whatsapp/drafter.js";
+import { CallDesk } from "./calls/desk.js";
+import { GroqVoice } from "./calls/groq.js";
 import { addTerms, fixAddress } from "./whatsapp/address.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -49,32 +51,34 @@ export function buildSystem(config: Config) {
     workspace: (cwd) => workspaceMap(cwd, config),
     onAttention: notifier.attention,
     // Built fresh for every step, so agents see the setup as it is right now.
-    setup: () =>
-      describeSetup({
-        profile: config.profile,
-        cluster,
-        pool,
-        store,
-        active: () => orchestrator.active(),
-        services: () => {
-          const brain = assistant?.status();
-          const mail = gmail.status();
-          // One plain line per source of truth, so a model can't read "reader off" as "no Gmail tasks".
-          const gmailLine = mail.connected
-            ? `Gmail: read by the hub as ${mail.email}; its tasks are in today's tasks above`
-            : brain?.ok
-              ? "Gmail: read by their AI_Assistant brain, which turns emails into tasks; those are in today's tasks above"
-              : assistant
-                ? `Gmail: their AI_Assistant brain reads it, but the hub can't reach the brain right now${brain?.lastError ? ` (${brain.lastError})` : ""}, so today's tasks may be out of date`
-                : "Gmail: not connected";
-          const book = drafter.book();
-          const waLine = book
-            ? `WhatsApp: replies are drafted in their style (style book of ${book.contacts.length} chats) and shown on the phone; nothing is ever sent for them`
-            : "WhatsApp: not connected";
-          return [gmailLine, `Phone notifications: ${notifier.fcm ? "on (Android app via Firebase)" : "web push only"}`, waLine];
-        },
-      }),
+    setup: () => setup(),
   });
+  /** The live owner/setup briefing: for every step, and for calls. */
+  const setup = () =>
+    describeSetup({
+      profile: config.profile,
+      cluster,
+      pool,
+      store,
+      active: () => orchestrator.active(),
+      services: () => {
+        const brain = assistant?.status();
+        const mail = gmail.status();
+        // One plain line per source of truth, so a model can't read "reader off" as "no Gmail tasks".
+        const gmailLine = mail.connected
+          ? `Gmail: read by the hub as ${mail.email}; its tasks are in today's tasks above`
+          : brain?.ok
+            ? "Gmail: read by their AI_Assistant brain, which turns emails into tasks; those are in today's tasks above"
+            : assistant
+              ? `Gmail: their AI_Assistant brain reads it, but the hub can't reach the brain right now${brain?.lastError ? ` (${brain.lastError})` : ""}, so today's tasks may be out of date`
+              : "Gmail: not connected";
+        const book = drafter.book();
+        const waLine = book
+          ? `WhatsApp: replies are drafted in their style (style book of ${book.contacts.length} chats) and shown on the phone; nothing is ever sent for them`
+          : "WhatsApp: not connected";
+        return [gmailLine, `Phone notifications: ${notifier.fcm ? "on (Android app via Firebase)" : "web push only"}`, waLine];
+      },
+    });
   const gmail = new GmailReader(store, pool, {
     clientFile: resolve(config.gmail.clientFile),
     dataDir: resolve(config.dataDir),
@@ -100,7 +104,33 @@ export function buildSystem(config: Config) {
     },
     (p) => void notifier.notify(p),
   );
-  return { store, pool, cluster, router, orchestrator, agents, memory, notifier, gmail, assistant, drafter };
+  const groq = config.providers.groq;
+  const calls = new CallDesk({
+    voice: new GroqVoice({ baseUrl: groq.baseUrl, keys: [...groq.apiKeys, groq.apiKey ?? ""], model: groq.model, transcribeModel: groq.transcribeModel }),
+    // Without Groq, typed answers on a call are decided by the first ready of Claude, Gemini, ChatGPT.
+    think: async (system, prompt) => {
+      const ready = await pool.available();
+      const order = (["claude", "gemini", "codex"] as ProviderId[]).filter((id) => ready.includes(id));
+      if (!order.length) throw new Error("no model is ready (Claude, Gemini or ChatGPT)");
+      let error = "";
+      for (const id of order) {
+        const r = await pool.run(id, { system, prompt, permission: "read", timeoutMs: 60_000 });
+        store.recordUsage(id, config.node.name, r.ok, r.durationMs);
+        if (r.ok) return r.text;
+        error = `${id}: ${r.error ?? "failed"}`;
+      }
+      throw new Error(error);
+    },
+    ack: async (id, action) => {
+      if (!assistant) throw new Error("the brain is not connected (BRAIN_TOKEN)");
+      await assistant.ack(id, action);
+    },
+    // Read-only: a call can have things researched or drafted, never sent or changed.
+    start: (task) => orchestrator.submit(task, { permission: "read" }).id,
+    setup,
+    task: (taskId) => store.tasksFor(localDay()).find((t) => t.id === `brain:${taskId}`),
+  });
+  return { store, pool, cluster, router, orchestrator, agents, memory, notifier, gmail, assistant, drafter, calls };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */

@@ -89,6 +89,8 @@ const ConfigSchema = z.object({
           baseUrl: z.string().default("https://api.groq.com/openai/v1"),
           model: z.string().default("openai/gpt-oss-120b"),
           deepModel: z.string().default("openai/gpt-oss-120b"),
+          /** Speech-to-text for phone calls (Groq's free Whisper). */
+          transcribeModel: z.string().default("whisper-large-v3-turbo"),
           maxConcurrent: z.number().int().min(1).default(4),
         })
         .prefault({}),
