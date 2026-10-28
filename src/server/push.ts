@@ -2,8 +2,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import webpush from "web-push";
 import type { Store } from "../store/db.js";
-import { type Fcm, FcmError } from "./fcm.js";
-import type { RunEventType, RunRecord, StepRecord } from "../types.js";
+import { ALARM_CHANNEL, type Fcm, FcmError } from "./fcm.js";
+import type { BrainAlert, RunEventType, RunRecord, StepRecord } from "../types.js";
 
 /** Push services want a contact for the sender; any https URL or mailto: works. */
 const CONTACT = "https://github.com/Roger-Chris/ai-orchestrator";
@@ -14,6 +14,8 @@ export interface PushPayload {
   /** Where the app opens when you tap the notification. */
   url: string;
   tag: string;
+  /** The app's Android channel; the default one when absent. Web push ignores it. */
+  channel?: string;
 }
 
 /**
@@ -98,4 +100,19 @@ export function payloadFor(run: RunRecord, step: StepRecord | undefined, type: R
     default:
       return undefined;
   }
+}
+
+/** Brain levels: 3 rings as an alarm, 4 is a call. Lower levels are ordinary notifications. */
+export const ALARM_LEVEL = 3;
+export const CALL_LEVEL = 4;
+
+/**
+ * How a brain alert reaches the phone. Levels 1-2 stay ordinary notifications that open Home;
+ * an alarm or a call goes on the loud channel and opens the call screen for that alert.
+ */
+export function alertPayload(a: BrainAlert): PushPayload {
+  const base = { title: a.title, body: a.body.slice(0, 300), tag: `alert:${a.id}` };
+  if (a.level < ALARM_LEVEL) return { ...base, url: "/" };
+  const title = a.level >= CALL_LEVEL ? `Call: ${a.title}` : a.title;
+  return { ...base, title, url: `/#/call/${a.id}`, channel: ALARM_CHANNEL };
 }

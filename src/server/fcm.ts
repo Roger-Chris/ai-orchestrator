@@ -20,6 +20,11 @@ export class FcmError extends Error {
   }
 }
 
+/** The app's channels (mobile/src/lib/push.ts creates them with the same ids). */
+export const DEFAULT_CHANNEL = "orchestrator";
+/** Max importance, alarm sound, strong vibration: for the brain's level 3 (alarm) and 4 (call) alerts. */
+export const ALARM_CHANNEL = "alarm";
+
 const SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
 const b64url = (b: Buffer | string) => Buffer.from(b).toString("base64url");
 
@@ -61,7 +66,10 @@ export class Fcm {
    * with `url` in the data so tapping it opens the right conversation. Data-only messages were
    * silently dropped on Xiaomi/HyperOS in testing; notification messages arrive reliably.
    */
-  async send(deviceToken: string, p: { title: string; body: string; url: string; tag: string }): Promise<void> {
+  async send(deviceToken: string, p: { title: string; body: string; url: string; tag: string; channel?: string }): Promise<void> {
+    const channel = p.channel ?? DEFAULT_CHANNEL;
+    // Alarms and calls: the app's loud channel, shown at full priority and on the lock screen.
+    const loud = channel === ALARM_CHANNEL ? { notification_priority: "PRIORITY_MAX", visibility: "PUBLIC" } : {};
     const res = await this.http(`https://fcm.googleapis.com/v1/projects/${this.sa.project_id}/messages:send`, {
       method: "POST",
       headers: { Authorization: `Bearer ${await this.accessToken()}`, "Content-Type": "application/json" },
@@ -69,7 +77,7 @@ export class Fcm {
         message: {
           token: deviceToken,
           notification: { title: p.title, body: p.body },
-          android: { priority: "high", ttl: "3600s", notification: { channel_id: "orchestrator", tag: p.tag } },
+          android: { priority: "high", ttl: "3600s", notification: { channel_id: channel, tag: p.tag, ...loud } },
           data: { url: p.url, tag: p.tag },
         },
       }),
