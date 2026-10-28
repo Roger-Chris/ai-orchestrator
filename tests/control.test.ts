@@ -323,6 +323,8 @@ describe("tasks from the AI_Assistant brain", () => {
       { id: 4, kind: "task", status: "done", title: "Call Arun", due_at: due(0, 10) },
       { id: 5, kind: "task", status: "open", title: "Next week thing", due_at: due(5, 9) },
       { id: 6, kind: "task", status: "open", title: "Someday", due_at: null },
+      { id: 7, kind: "event", status: "open", title: "Webinar yesterday", due_at: due(-1, 18), source: "email" },
+      { id: 8, kind: "task", status: "open", title: "Six weeks late", due_at: due(-40, 9), source: "whatsapp" },
     ];
     const brain = fakeBrain(tasks);
     const a = new AssistantTasks(s.store, { url: "http://brain", token: "brain-secret", pollMinutes: 5 }, brain.http);

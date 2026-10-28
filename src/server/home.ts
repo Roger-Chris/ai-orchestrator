@@ -54,7 +54,8 @@ export async function buildHome(d: { store: Store; orchestrator: Orchestrator; p
     attention.push({ level: "error", title: `Failed: ${short(r.task, 50)}`, detail: short(r.error ?? "no error message", 80), runId: r.id, threadId: r.threadId, task: r.task });
   }
   // Signed out only matters for a model you were using; an optional one you never set up is not news.
-  const usedThisWeek = new Set((d.store.usage(7) as { provider: string }[]).map((u) => u.provider));
+  // Only use on this device counts: history copied from another machine says nothing about logins here.
+  const usedThisWeek = new Set((d.store.usage(7) as { provider: string; node: string }[]).filter((u) => u.node === d.cluster.name).map((u) => u.provider));
   for (const p of await d.pool.status()) {
     if (p.coolingDownUntil) attention.push({ level: "warn", title: `${PROVIDER_NAME[p.id]} hit its limit`, detail: `Back at ${clock(p.coolingDownUntil)}; other models take its work until then` });
     else if (p.installed && !p.authenticated && usedThisWeek.has(p.id)) attention.push({ level: "warn", title: `${PROVIDER_NAME[p.id]} is signed out`, detail: p.detail ?? "Sign in again on the hub" });

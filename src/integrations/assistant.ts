@@ -44,6 +44,9 @@ export function brainTime(s: string): Date {
 
 const SOURCES: Record<string, DayTask["source"]> = { email: "gmail", whatsapp: "whatsapp" };
 
+/** Overdue tasks older than this are left to the brain (Telegram); Today stays about today. */
+const OVERDUE_DAYS = 7;
+
 /** Which brain tasks belong on today's list, and how they read there. */
 export function todayTasks(tasks: BrainTask[], now = new Date()): Omit<DayTask, "day">[] {
   const today = localDay(now);
@@ -53,7 +56,8 @@ export function todayTasks(tasks: BrainTask[], now = new Date()): Omit<DayTask, 
     const due = brainTime(t.due_at);
     const day = localDay(due);
     const done = t.status === "done";
-    const overdue = day < today && !done;
+    // A past event is simply over; a past task is still owed, for a week.
+    const overdue = day < today && !done && t.kind !== "event" && now.getTime() - due.getTime() < OVERDUE_DAYS * 86_400_000;
     if (day !== today && !overdue) continue;
     const time = overdue ? "overdue" : due.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
     const detail = [t.status === "pending_confirmation" ? "not confirmed yet" : undefined, t.source_chat ?? undefined].filter(Boolean).join(" · ");
