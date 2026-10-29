@@ -40,10 +40,18 @@ export default function Assistant() {
     if (!you || busy) return;
     setText("");
     setBusy(true);
+    // the last three exchanges go along, so "open it" or "and the other one?" work
+    const history = log
+      .filter((t) => t.reply)
+      .slice(-3)
+      .flatMap((t) => [
+        { role: "user" as const, content: t.you },
+        { role: "assistant" as const, content: t.reply!.answer },
+      ]);
     const turn: Turn = { id: nextId++, you };
     update([...log, turn]);
     try {
-      turn.reply = await Api.ask(you);
+      turn.reply = await Api.ask(you, history);
     } catch (e) {
       turn.error = (e as Error).message;
     } finally {

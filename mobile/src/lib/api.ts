@@ -122,7 +122,9 @@ const q = (o: Record<string, string | number | undefined>) =>
 
 export const Api = {
   // ---- the assistant (the brain's thinking loop), tasks, memory, WhatsApp chats
-  ask: (text: string) => api<AssistantReply>("/api/assistant/ask", { body: { text, source: "app" }, timeoutMs: 900_000 }),
+  /** `history`: the last few turns, oldest first, so a follow-up like "open it" makes sense. */
+  ask: (text: string, history: { role: "user" | "assistant"; content: string }[] = []) =>
+    api<AssistantReply>("/api/assistant/ask", { body: { text, source: "app", history }, timeoutMs: 900_000 }),
   brainTasks: (status?: BrainTask["status"]) => api<BrainTask[]>(`/api/brain/tasks?${q({ status, limit: 200 })}`),
   /** keep (confirm), drop (reject) or done; keep also reopens a finished one. */
   taskAction: (id: number, action: "confirm" | "reject" | "done") => api<BrainTask>(`/api/brain/tasks/${id}/${action}`, { body: {} }),

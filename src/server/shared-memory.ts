@@ -96,7 +96,14 @@ export function mountSharedMemory(app: Hono, d: { config: Config; replica?: Memo
   app.post("/api/assistant/ask", async (c) => {
     const { url, token } = d.config.assistant;
     if (!token) return c.json({ error: `device ${d.config.node.name} does not run the brain` }, 404);
-    const body = z.object({ text: z.string().min(1), source: z.string().default("app") }).parse(await c.req.json());
+    const body = z
+      .object({
+        text: z.string().min(1),
+        source: z.string().default("app"),
+        // the last few turns of this conversation, so follow-ups ("open it") make sense
+        history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).max(12).default([]),
+      })
+      .parse(await c.req.json());
     try {
       const res = await (d.brainFetch ?? fetch)(`${url.replace(/\/$/, "")}/agent/ask`, {
         method: "POST",

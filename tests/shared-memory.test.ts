@@ -231,7 +231,10 @@ describe("shared memory over HTTP", () => {
     mountSharedMemory(hub, { config: parseConfig({ assistant: { token: "b" } }), brainFetch });
     const res = await hub.request("/api/assistant/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: "where is my thrust sheet" }) });
     expect((await res.json()).answer).toContain("thrust sheet");
-    expect(sent).toEqual({ url: "http://127.0.0.1:8000/agent/ask", body: { text: "where is my thrust sheet", source: "app" } });
+    expect(sent).toEqual({ url: "http://127.0.0.1:8000/agent/ask", body: { text: "where is my thrust sheet", source: "app", history: [] } });
+    const history = [{ role: "user", content: "where is my thrust sheet" }, { role: "assistant", content: "D:/evtol/thrust.xlsx on omen" }];
+    await hub.request("/api/assistant/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: "open it", history }) });
+    expect(sent.body).toEqual({ text: "open it", source: "app", history });
   });
 });
 
