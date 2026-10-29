@@ -20,6 +20,8 @@ export interface LinkOptions {
   ignore: string[];
   /** New messages, including ones caught up after a reconnect (not the history sync). */
   onLive?: (messages: WaMessage[]) => void;
+  /** A queued voice note was downloaded (`ok`) or could not be. Fired for history ones too. */
+  onVoice?: (message: WaMessage, ok: boolean) => void;
   print: (s: string) => void;
 }
 
@@ -182,6 +184,11 @@ export class WhatsAppLink {
     });
   }
 
+  /** Whether a voice note in this chat gets downloaded (and so `onVoice` will fire for it). */
+  wantsVoice(m: WaMessage): boolean {
+    return this.opts.voiceNotes && m.mediaType === "audio" && (m.fromMe || !m.isGroup);
+  }
+
   /** Converts, stores and queues voice notes for download; returns what was kept. */
   private keep(messages: WAMessage[]): WaMessage[] {
     const out: WaMessage[] = [];
@@ -189,7 +196,7 @@ export class WhatsAppLink {
       const m = this.convert(msg);
       if (!m) continue;
       out.push(m);
-      if (this.opts.voiceNotes && m.mediaType === "audio" && (m.fromMe || !m.isGroup)) this.voiceQueue.push({ msg, out: m });
+      if (this.wantsVoice(m)) this.voiceQueue.push({ msg, out: m });
     }
     this.store.save(out);
     void this.downloadVoice();
@@ -235,15 +242,20 @@ export class WhatsAppLink {
       while (this.voiceQueue.length) {
         const { msg, out } = this.voiceQueue.shift()!;
         const len = Number(unwrap(msg.message).audioMessage?.fileLength ?? 0);
-        if (len > MAX_VOICE_BYTES) continue;
+        if (len > MAX_VOICE_BYTES) {
+          this.opts.onVoice?.(out, false);
+          continue;
+        }
         try {
           const buf = await downloadMediaMessage(msg, "buffer", {}, { logger: silent as any, reuploadRequest: this.sock.updateMediaMessage });
           const path = join(this.opts.dataDir, "whatsapp", "voice", `${out.id.replace(/[^\w-]/g, "_")}.ogg`);
           writeFileSync(path, buf);
           this.store.save([{ ...out, mediaPath: path }]);
           this.state.voiceDownloaded++;
+          this.opts.onVoice?.({ ...out, mediaPath: path }, true);
         } catch {
           // Expired on WhatsApp's servers and gone from the phone: nothing to transcribe.
+          this.opts.onVoice?.(out, false);
         }
       }
     } finally {

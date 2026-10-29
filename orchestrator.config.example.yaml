@@ -93,6 +93,22 @@ assistant:                   # the AI_Assistant brain on this machine: its tasks
   token: ${BRAIN_TOKEN}      # copy BRAIN_TOKEN from AI_Assistant/.env into this .env; unset = off
   pollMinutes: 2
 
+whatsapp:                    # replies in your style (README: WhatsApp); read-only, never sends
+  hub: ""                    # on the linked machine: the hub that drafts, e.g. http://100.x.y.z:4317
+  history: full              # off | recent | full: history only arrives when you link
+  voiceNotes: true
+  autoDraft: true            # on the hub: draft when someone messages you
+  draftGroups: false
+  draftDelaySeconds: 45
+  replyProvider: auto        # auto | claude | gemini | codex | groq
+
+style:                       # local models that learn how you write (`orc style learn`)
+  model: qwen3:8b            # Ollama
+  whisperModel: large-v3-turbo
+  minMessages: 15
+  maxContacts: 80
+  addressTerms: []           # your own nicknames with their spellings, e.g. ["chinna chinnu"]
+
 gmail:                       # today's tasks from your mail; off until `orc gmail connect` (README: Gmail)
   clientFile: gmail-client.json
   pollMinutes: 15
