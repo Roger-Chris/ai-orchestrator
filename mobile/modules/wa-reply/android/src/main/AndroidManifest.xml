@@ -1,0 +1,16 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- Reads WhatsApp's own notifications (only after you grant Notification access) so you can
+         answer from Orchestrator's notification; WhatsApp itself sends the reply. -->
+    <service
+      android:name="expo.modules.wareply.WaListenerService"
+      android:exported="true"
+      android:label="Orchestrator: WhatsApp replies"
+      android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+      <intent-filter>
+        <action android:name="android.service.notification.NotificationListenerService" />
+      </intent-filter>
+    </service>
+    <receiver android:name="expo.modules.wareply.WaActionReceiver" android:exported="false" />
+  </application>
+</manifest>
