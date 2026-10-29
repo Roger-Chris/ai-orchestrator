@@ -1,5 +1,6 @@
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from "expo-audio";
 import { router, useLocalSearchParams } from "expo-router";
+import { useHoldMic } from "../../lib/mic";
 import { speak as say, stopSpeaking } from "../../lib/voice";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, Vibration, View } from "react-native";
@@ -36,6 +37,7 @@ export default function CallScreen() {
   const [typed, setTyped] = useState("");
   const [err, setErr] = useState("");
   const recorder = useAudioRecorder(CLIP);
+  useHoldMic(); // the "Hey Jarvis" listener stays off during a call
   const scroll = useRef<{ scrollToEnd: (o?: { animated?: boolean }) => void } | null>(null);
   const ended = useRef(false);
 

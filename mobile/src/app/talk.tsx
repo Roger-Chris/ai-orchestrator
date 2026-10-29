@@ -1,5 +1,5 @@
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from "expo-audio";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { type ComponentRef, useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -27,6 +27,8 @@ const GOODBYE = /^(ok(ay)?\s+)?(bye|goodbye|bye bye|that'?s all|that is all|stop
 export default function Talk() {
   const c = useColors();
   const listenable = useRef(canListen()).current;
+  // Opened by "Hey Jarvis, <question>": the question is asked straight away.
+  const { say: firstAsk } = useLocalSearchParams<{ say?: string }>();
   const [phase, setPhase] = useState<Phase>("idle");
   const [handsFree, setHandsFree] = useState(listenable);
   const [turns, setTurns] = useState<Turn[]>(convo.get());
@@ -104,9 +106,10 @@ export default function Talk() {
     if (await listen.start()) setPhase("listening");
   };
 
-  // Start listening as soon as the screen opens.
+  // Start listening as soon as the screen opens (or answer what came with "Hey Jarvis").
   useEffect(() => {
-    if (listenable) void listenAgain();
+    if (firstAsk?.trim()) void ask(firstAsk);
+    else if (listenable) void listenAgain();
     else setErr("Speech recognition isn't available here: hold the circle to talk instead.");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -1,5 +1,6 @@
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import { useCallback, useRef, useState } from "react";
+import { claimMic, micOwner, setMicOwner, useHoldMic } from "./mic";
 import { stopSpeaking } from "./voice";
 
 /**
@@ -39,6 +40,9 @@ export function useListen(onFinal: (text: string) => void) {
   const sent = useRef(true);
   const cb = useRef(onFinal);
   cb.current = onFinal;
+  useHoldMic(); // no "Hey Jarvis" listening while this screen is on
+  // The recogniser's events reach every listener in the app: only react while this screen owns it.
+  const mine = () => micOwner() === "listen" && !sent.current;
 
   const finish = () => {
     if (sent.current) return;
@@ -46,17 +50,21 @@ export function useListen(onFinal: (text: string) => void) {
     cb.current(final.current.trim());
   };
 
-  useSpeechRecognitionEvent("start", () => setListening(true));
+  useSpeechRecognitionEvent("start", () => mine() && setListening(true));
   useSpeechRecognitionEvent("result", (e) => {
+    if (!mine()) return;
     const t = e.results[0]?.transcript ?? "";
     setPartial(t);
     if (e.isFinal) final.current = t;
   });
   useSpeechRecognitionEvent("error", (e) => {
+    if (!mine()) return;
     if (e.error !== "aborted" && e.error !== "no-speech") setError(MESSAGES[e.error] ?? e.message);
   });
   useSpeechRecognitionEvent("end", () => {
+    if (!mine()) return;
     setListening(false);
+    setMicOwner("none");
     finish();
   });
 
@@ -68,6 +76,7 @@ export function useListen(onFinal: (text: string) => void) {
       setError(MESSAGES["not-allowed"]);
       return false;
     }
+    await claimMic();
     final.current = "";
     sent.current = false;
     setPartial("");
@@ -87,6 +96,8 @@ export function useListen(onFinal: (text: string) => void) {
   /** Stop and throw away what was heard. */
   const cancel = useCallback(() => {
     sent.current = true;
+    setListening(false);
+    if (micOwner() === "listen") setMicOwner("none");
     try {
       ExpoSpeechRecognitionModule.abort();
     } catch {

@@ -40,6 +40,7 @@ import { ReplyDrafter, replyOptions } from "./whatsapp/drafter.js";
 import { CallDesk } from "./calls/desk.js";
 import { GroqVoice } from "./calls/groq.js";
 import { ttsFromConfig } from "./voice/tts.js";
+import { WakeListener, wakeOptions } from "./voice/wake.js";
 import { addTerms } from "./whatsapp/address.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -183,6 +184,8 @@ async function cmdServe(config: Config) {
   sys.gmail.start(config.gmail.pollMinutes);
   sys.assistant?.start();
   sys.replica?.start(config.sharedMemory.pollSeconds);
+  // "Hey Jarvis" on this computer's microphone, when turned on for this device.
+  if (config.wake.enabled) void new WakeListener(wakeOptions(config, ROOT)).start().then((code) => console.warn(`! the wake word listener stopped (exit ${code}); run \`orc wake\` to see why`));
 
   const status = await sys.pool.status();
   console.log(`\n  AI Orchestrator · device "${config.node.name}"`);
@@ -784,6 +787,16 @@ async function cmdMcp(config: Config) {
   }
 }
 
+/** `orc wake`: listen for "Hey Jarvis" on this computer and talk to the hub's assistant. Ctrl+C stops. */
+async function cmdWake(config: Config, over: { threshold?: number; device?: string }) {
+  if (over.threshold !== undefined && !(over.threshold > 0 && over.threshold < 1)) throw new Error("--threshold is between 0 and 1 (default 0.5; lower wakes more easily)");
+  const listener = new WakeListener(wakeOptions(config, ROOT, over));
+  process.on("SIGINT", () => listener.stop());
+  console.log('Starting the wake word listener (the first run downloads openWakeWord and its models)… Say "Hey Jarvis".');
+  const code = await listener.start();
+  if (code) process.exitCode = code;
+}
+
 async function main() {
   const { values: v, positionals } = parseArgs({
     allowPositionals: true,
@@ -801,6 +814,8 @@ async function main() {
       ask: { type: "string" },
       draft: { type: "boolean" },
       raw: { type: "boolean" },
+      threshold: { type: "string" },
+      device: { type: "string" },
     },
   });
   const [cmd = "serve", ...rest] = positionals;
@@ -827,10 +842,12 @@ async function main() {
       return cmdGmail(config, rest[0]);
     case "whatsapp":
       return cmdWhatsApp(config, rest[0]);
+    case "wake":
+      return cmdWake(config, { threshold: v.threshold ? Number(v.threshold) : undefined, device: v.device as string | undefined });
     case "style":
       return cmdStyle(config, rest[0], { who: rest.slice(1).join(" "), ask: v.ask as string | undefined, draft: !!v.draft, raw: !!v.raw });
     default:
-      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|check|status|disconnect]|whatsapp [link|status]|style [learn|push|show|graph|pool <name> [--ask "…"] [--draft]]|init|mcp>`);
+      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|check|status|disconnect]|whatsapp [link|status]|style [learn|push|show|graph|pool <name> [--ask "…"] [--draft]]|wake [--threshold 0.5] [--device <mic>]|init|mcp>`);
       process.exitCode = 1;
   }
 }

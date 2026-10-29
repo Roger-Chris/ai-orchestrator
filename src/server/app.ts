@@ -518,7 +518,7 @@ export function createApp(d: AppDeps) {
   });
   // ---- Jarvis's voice: a line in, audio out (src/voice/tts.ts). 409 {fallback: "phone"} = use the phone's TTS.
   // GET /api/tts/audio?text=… exists so the app's audio player can stream it straight from a URL.
-  const TtsBody = z.object({ text: z.string().min(1).max(4000), provider: z.enum(TTS_PROVIDERS).optional(), voice: z.string().max(60).optional() });
+  const TtsBody = z.object({ text: z.string().min(1).max(4000), provider: z.enum(TTS_PROVIDERS).optional(), voice: z.string().max(60).optional(), format: z.enum(["mp3", "wav"]).optional() });
   const speakNow = async (c: Context, body: unknown) => {
     const parsed = TtsBody.safeParse(body);
     if (!parsed.success) return c.json({ error: "send {text, provider?, voice?}" }, 400);
@@ -533,7 +533,7 @@ export function createApp(d: AppDeps) {
   };
   app.get("/api/tts", (c) => c.json(d.tts?.status() ?? { enabled: false, default: null, providers: [] }));
   app.post("/api/tts", async (c) => speakNow(c, await c.req.json().catch(() => ({}))));
-  app.get("/api/tts/audio", (c) => speakNow(c, { text: c.req.query("text") ?? "", provider: c.req.query("provider") || undefined, voice: c.req.query("voice") || undefined }));
+  app.get("/api/tts/audio", (c) => speakNow(c, { text: c.req.query("text") ?? "", provider: c.req.query("provider") || undefined, voice: c.req.query("voice") || undefined, format: c.req.query("format") || undefined }));
   app.post("/api/calls/:alertId/end", (c) => {
     const id = Number(c.req.param("alertId"));
     if (!Number.isInteger(id)) return c.json({ error: "bad alert id" }, 400);

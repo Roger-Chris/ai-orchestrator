@@ -15,6 +15,8 @@ export interface VoiceChoice {
   voice?: string;
   /** An Android TTS voice identifier; empty = the phone's default. */
   phoneVoice?: string;
+  /** Listen for "Hey Jarvis" while the app is open (lib/wake.ts). */
+  wakeWord?: boolean;
 }
 
 export interface HubTts {
@@ -28,6 +30,12 @@ const KEY = "orc.voice";
 const HUB_TIMEOUT_MS = 12_000;
 
 let choice: VoiceChoice = { engine: "auto" };
+const voiceWatchers = new Set<(v: VoiceChoice) => void>();
+
+export function watchVoice(fn: (v: VoiceChoice) => void): () => void {
+  voiceWatchers.add(fn);
+  return () => void voiceWatchers.delete(fn);
+}
 let loaded: Promise<void> | null = null;
 let hubStatus: { at: number; tts: HubTts | null } | null = null;
 let player: AudioPlayer | null = null;
@@ -51,6 +59,7 @@ export async function getVoiceChoice(): Promise<VoiceChoice> {
 
 export async function setVoiceChoice(next: VoiceChoice) {
   choice = next;
+  voiceWatchers.forEach((w) => w(next));
   await SecureStore.setItemAsync(KEY, JSON.stringify(next));
 }
 

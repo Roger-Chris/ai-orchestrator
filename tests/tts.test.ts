@@ -60,6 +60,13 @@ describe("text to speech", () => {
     expect(s.calls[0].body).toMatchObject({ model: "gpt-4o-mini-tts", voice: "onyx", input: "Hello Kishaun.", response_format: "mp3" });
   });
 
+  it("asks OpenAI for WAV when the player can't decode mp3 (the laptop's wake word listener)", async () => {
+    const s = services();
+    const r = await new Tts(opts(), s.http).speak("Hi.", { format: "wav" });
+    expect(r.mime).toBe("audio/wav");
+    expect(s.calls[0].body.response_format).toBe("wav");
+  });
+
   it("honours the asked service and voice, and repeats a line from the cache", async () => {
     const s = services();
     const tts = new Tts(opts(), s.http);

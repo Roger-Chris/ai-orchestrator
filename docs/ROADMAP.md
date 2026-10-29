@@ -25,7 +25,7 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 - [x] V2 App: mic in the Assistant tab (on-device speech recognition, `expo-speech-recognition` 58.0.0; falls back to sending the clip), spoken answers, approvals still a tap.
 - [x] V3 App: "Talk to Jarvis" call screen any time (not tied to an alert), push-to-talk and hands-free (auto end of speech), barge-in stops speaking.
 - [x] V4 Better voice: hub `POST /api/tts` (OpenAI / Gemini TTS when configured) with phone TTS as the fallback; voice choice in Settings.
-- [ ] V5 Wake word on the laptop (node agent, openWakeWord/Porcupine-free) and in-app "Hey Jarvis" while the app is open.
+- [x] V5 Wake word on the laptop (node agent, openWakeWord/Porcupine-free) and in-app "Hey Jarvis" while the app is open.
 
 ### Phase 1: model router + AI hub
 - [ ] R1 Tool registry: every provider with kind strengths, cost class (local/free/subscription/paid), limits, live state (ready/busy/cooling until), usage today.
@@ -55,3 +55,9 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 ## Log
 - 2026-10-30: roadmap written; V1 hub voice endpoint; V2-V3 mic in Assistant tab + hands-free Talk screen (needs a new APK: expo-speech-recognition is native).
 - 2026-10-29 (scheduled run): V4 hub `POST /api/tts` + `GET /api/tts/audio` (OpenAI gpt-4o-mini-tts, Gemini Interactions TTS, Groq Orpheus split at 200 chars; failing services rest; cache) and Settings → Voice (auto / hub / phone, service, voice, phone voice, test). Phone TTS stays the fallback. Assumed Gemini model `gemini-3.8-flash-lite-tts` from the current docs; change `tts.gemini.model` if it is renamed. JS-only app change: rebuild the APK.
+- 2026-10-29 (scheduled run): V5 `orc wake` on the laptop (tools/wakeword.py: openWakeWord `hey_jarvis` on the CPU, records until you pause, plays the hub's WAV answer; src/voice/wake.ts sends it to `/api/assistant/voice`, follow-ups without the wake word, computer's own voice as fallback; `wake.enabled` starts it with `orc serve`) and in-app "Hey Jarvis" while the app is open (Settings → Voice switch; continuous Android recognition, mic ownership so screens that listen keep it off). Read "Porcupine-free" as: no Picovoice key, so openWakeWord. Screen-off phone wake word not built (needs a native service). Could not test with a real mic from the cloud.
+
+## Owner to-do
+- Rebuild and install the APK (`npm run build:apk` in mobile/ on the laptop, or the GitHub Actions build): V4 Settings → Voice and V5 "Hey Jarvis" are in the app (JS only, no new native packages since V2-V3's build).
+- For the hub's voice: add `OPENAI_API_KEY` or `GEMINI_API_KEY` to the hub's `.env` and restart it, or accept the Orpheus model terms once in the Groq console (the Groq keys are reused). Without any, the phone's own voice speaks (as before).
+- Try `npm run orc -- wake` on the laptop (needs uv, already used for `orc style learn`); if it wakes too rarely or too often, try `--threshold 0.4` / `0.6` and put the value under `wake:` in the config; `wake.enabled: true` to start it with `orc serve`.

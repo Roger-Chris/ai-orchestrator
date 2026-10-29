@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { Text } from "react-native";
+import { Switch, Text } from "react-native";
+import { ExpoSpeechRecognitionModule } from "expo-speech-recognition";
+import { canListen } from "../lib/listen";
 import { useColors } from "../lib/theme";
 import { type HubTts, type VoiceChoice, getVoiceChoice, hubTts, phoneVoices, setVoiceChoice, speak, stopSpeaking } from "../lib/voice";
 import { Button, Card, Muted, Row } from "./ui";
@@ -25,6 +27,16 @@ export function VoiceSettings() {
   const pick = (next: VoiceChoice) => {
     setV(next);
     void setVoiceChoice(next);
+  };
+  const [wakeMsg, setWakeMsg] = useState("");
+  const toggleWake = async (on: boolean) => {
+    setWakeMsg("");
+    if (on) {
+      if (!canListen()) return setWakeMsg("This phone (or this APK) has no speech recognition, so it can't listen for the wake word.");
+      const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync().catch(() => ({ granted: false }));
+      if (!perm.granted) return setWakeMsg("Allow the microphone and speech recognition for this app first.");
+    }
+    pick({ ...v, wakeWord: on });
   };
   const test = async () => {
     setTesting(true);
@@ -92,6 +104,15 @@ export function VoiceSettings() {
           )}
         </>
       )}
+
+      <Row style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
+        <Text style={{ ...sub, flex: 1 }}>Listen for "Hey Jarvis" while the app is open</Text>
+        <Switch value={!!v.wakeWord} onValueChange={(on) => void toggleWake(on)} />
+      </Row>
+      <Muted small>
+        Say "Hey Jarvis" (or "Jarvis, …") on any screen except Assistant, Talk and calls: the Talk screen opens and answers. Only while the app is on screen; Android may click when listening restarts. On the laptop, run `orc wake`.
+      </Muted>
+      {!!wakeMsg && <Text style={{ color: c.warn }}>{wakeMsg}</Text>}
 
       <Row>
         <Button title={testing ? "Stop" : "Test voice"} onPress={() => (testing ? stopSpeaking() : void test())} />

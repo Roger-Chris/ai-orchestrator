@@ -133,7 +133,7 @@ export class Tts {
   }
 
   /** Audio for `text`. Tries the asked service, then the others; throws TtsError(409) when none can speak. */
-  async speak(text: string, choice: { provider?: TtsProviderId; voice?: string } = {}): Promise<Speech> {
+  async speak(text: string, choice: { provider?: TtsProviderId; voice?: string; format?: "mp3" | "wav" } = {}): Promise<Speech> {
     const line = fitLength(text.trim(), this.opts.maxChars);
     if (!line) throw new TtsError("nothing to say", 400);
     const order = this.candidates(choice.provider);
@@ -145,7 +145,8 @@ export class Tts {
     for (const provider of ranked) {
       // The asked voice belongs to the asked service; the others use their own default.
       const voice = provider === choice.provider && choice.voice ? choice.voice : this.opts[provider].voice;
-      const key = `${provider}|${voice}|${line}`;
+      const format = choice.format ?? "mp3";
+      const key = `${provider}|${voice}|${format}|${line}`;
       const hit = this.cache.get(key);
       if (hit) {
         this.cache.delete(key);
@@ -153,7 +154,7 @@ export class Tts {
         return hit;
       }
       try {
-        const speech = await this.call(provider, voice, line);
+        const speech = await this.call(provider, voice, line, format);
         this.resting.delete(provider);
         this.cache.set(key, speech);
         if (this.cache.size > CACHE_SIZE) this.cache.delete(this.cache.keys().next().value!);
@@ -178,8 +179,9 @@ export class Tts {
     this.resting.set(p, { until: this.now() + ms, error: e.message.slice(0, 200) });
   }
 
-  private call(p: TtsProviderId, voice: string, text: string): Promise<Speech> {
-    if (p === "openai") return this.openai(voice, text);
+  /** `format` only matters to OpenAI; Gemini and Groq always answer WAV (players that can't decode mp3 ask for wav). */
+  private call(p: TtsProviderId, voice: string, text: string, format: "mp3" | "wav"): Promise<Speech> {
+    if (p === "openai") return this.openai(voice, text, format);
     if (p === "gemini") return this.gemini(voice, text);
     return this.groq(voice, text);
   }
@@ -195,16 +197,16 @@ export class Tts {
     return res;
   }
 
-  private async openai(voice: string, text: string): Promise<Speech> {
+  private async openai(voice: string, text: string, format: "mp3" | "wav"): Promise<Speech> {
     const o = this.opts.openai;
     const res = await this.post(`${trim(o.baseUrl)}/audio/speech`, { Authorization: `Bearer ${o.apiKey}` }, {
       model: o.model,
       voice,
       input: text,
-      response_format: "mp3",
+      response_format: format,
       ...(o.instructions ? { instructions: o.instructions } : {}),
     });
-    return { audio: new Uint8Array(await res.arrayBuffer()), mime: "audio/mpeg", provider: "openai", voice };
+    return { audio: new Uint8Array(await res.arrayBuffer()), mime: format === "wav" ? "audio/wav" : "audio/mpeg", provider: "openai", voice };
   }
 
   /** Gemini's Interactions API: the audio comes back base64 in the model_output step (WAV, or raw 24 kHz PCM). */

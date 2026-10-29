@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { loadConnection } from "../lib/api";
+import { useWakeWord } from "../lib/wake";
 import { ensureChannels, routeFor } from "../lib/push";
 import { useColors } from "../lib/theme";
 
@@ -12,6 +13,7 @@ export default function RootLayout() {
   const c = useColors();
   const [ready, setReady] = useState(false);
   const lastTap = Notifications.useLastNotificationResponse();
+  useWakeWord(); // "Hey Jarvis" while the app is open, when turned on in Settings → Voice
 
   useEffect(() => {
     // The alarm channel must exist before the first alarm arrives, also on phones that turned

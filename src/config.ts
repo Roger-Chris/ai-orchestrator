@@ -300,6 +300,23 @@ const ConfigSchema = z.object({
         .prefault({}),
     })
     .prefault({}),
+  /** "Hey Jarvis" on this computer (`orc wake`; src/voice/wake.ts, tools/wakeword.py). */
+  wake: z
+    .object({
+      /** Also start it with `orc serve` (on a computer with a microphone: the laptop, the Mac mini). */
+      enabled: z.boolean().default(false),
+      /** The hub with the brain; empty = sharedMemory.hub, whatsapp.hub, or this machine. */
+      hub: z.string().default(""),
+      /** openWakeWord model name or a .onnx path. */
+      model: z.string().default("hey_jarvis"),
+      threshold: z.number().min(0.05).max(0.99).default(0.5),
+      chime: z.boolean().default(true),
+      /** Microphone name or index; empty = the system's default. */
+      device: z.string().optional(),
+      followUps: z.number().int().min(0).max(10).default(3),
+      voice: z.enum(["hub", "system"]).default("hub"),
+    })
+    .prefault({}),
   cluster: z
     .object({
       enabled: z.boolean().default(true),

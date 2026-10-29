@@ -219,6 +219,12 @@ npm run orc -- agents
 claude mcp add orchestrator -- npx tsx /path/to/ai-orchestrator/src/cli.ts mcp
 ```
 
+## Talking to Jarvis
+
+- **Phone:** the mic in the Assistant tab, or the Talk screen for a hands-free conversation. Settings → Voice picks how Jarvis sounds (the hub's voice service or the phone's own) and turns on "Hey Jarvis" while the app is open.
+- **Hub voice:** add `OPENAI_API_KEY` or `GEMINI_API_KEY` to the hub's `.env` (or accept Groq's Orpheus terms in the Groq console; the Groq keys are reused). Without any, the phone speaks with Android's voice. Settings live under `tts:` in the config.
+- **Laptop:** `npm run orc -- wake` listens for "Hey Jarvis" on the microphone (openWakeWord, runs locally, needs [uv](https://docs.astral.sh/uv/)) and answers out loud. `wake.enabled: true` starts it with `orc serve`; `--threshold 0.4` wakes more easily.
+
 ## WhatsApp replies in your style
 
 The orchestrator can learn how you write on WhatsApp and draft replies that sound like you: your Tanglish, your spellings and mistakes, what you call each person (sir, ji, bro, machi, da, di, amma…). It **never sends anything**: drafts appear on the phone's Home screen as options (agree, decline, something in between), you pick or edit one and press send in WhatsApp yourself.

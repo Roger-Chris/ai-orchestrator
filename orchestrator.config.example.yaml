@@ -137,6 +137,13 @@ tts:                         # Jarvis's voice (POST /api/tts); the phone's own v
   gemini: { voice: Charon }  # GEMINI_API_KEY in .env; model gemini-3.8-flash-lite-tts (Interactions API)
   groq: { voice: troy }      # Groq keys above; Orpheus (accept its terms once in the Groq console)
 
+wake:                        # "Hey Jarvis" on this computer's microphone (`orc wake`; needs uv)
+  enabled: false             # true: also start it with `orc serve` (the laptop, the Mac mini)
+  hub: ""                    # the hub with the brain; empty = sharedMemory.hub / whatsapp.hub / this machine
+  threshold: 0.5             # lower wakes more easily (and falsely); `orc wake --threshold 0.4` to try
+  followUps: 3               # questions without the wake word before it waits again
+  voice: hub                 # hub (its TTS, then this computer's) | system
+
 cluster:
   enabled: true
   tailscale: true            # find other devices running the orchestrator on your tailnet
