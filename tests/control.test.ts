@@ -194,6 +194,22 @@ describe("conversations", () => {
   });
 });
 
+describe("raw model calls for the brain", () => {
+  it("raw:codex is one plain call to your ChatGPT session: no run, no notification", async () => {
+    const s = system({ codex: (req) => ({ text: `{"say":"hi"} (${req.system})` }) });
+    const app = createApp({ ...s, publicDir: "web/dist" });
+    const auth = { Authorization: "Bearer secret-token", "Content-Type": "application/json" };
+    const body = (model: string) => JSON.stringify({ model, messages: [{ role: "system", content: "json only" }, { role: "user", content: "hello" }] });
+    const r = await (await app.request("/v1/chat/completions", { method: "POST", headers: auth, body: body("raw:codex") })).json();
+    expect(r.choices[0].message.content).toBe('{"say":"hi"} (json only)');
+    expect(s.prompts).toEqual(["hello"]);
+    expect(s.store.listRuns().length).toBe(0);
+    expect(s.attention).toEqual([]);
+    expect((await app.request("/v1/chat/completions", { method: "POST", headers: auth, body: body("raw:nope") })).status).toBe(400);
+    expect((await app.request("/v1/chat/completions", { method: "POST", headers: auth, body: body("raw:claude") })).status).toBe(502); // not set up here
+  });
+});
+
 describe("home screen", () => {
   it("shows today's tasks, open questions, failures and this week's numbers", async () => {
     const s = system({ claude: (req) => (req.prompt.includes("paint") ? { text: "<ask>Which colour?</ask>" } : { ok: false, error: "boom" }) });

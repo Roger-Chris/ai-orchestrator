@@ -590,6 +590,23 @@ export function createApp(d: AppDeps) {
   app.post("/v1/chat/completions", async (c) => {
     const body = ChatBody.parse(await c.req.json());
     const { system, prompt } = messagesToPrompt(body.messages);
+    // "raw:<provider>": one plain call to your logged-in session (codex = ChatGPT), no run, no plan,
+    // no notification or memory entry. The AI_Assistant brain thinks through this (PLANNER_BASE_URL=hub).
+    const raw = body.model.startsWith("raw:") ? Provider.safeParse(body.model.slice(4)) : undefined;
+    if (raw) {
+      if (!raw.success) return c.json({ error: { message: `unknown provider in ${body.model}`, type: "invalid_request_error" } }, 400);
+      const r = await d.pool.run(raw.data, { system, prompt, permission: "read", timeoutMs: 240_000 });
+      d.store.recordUsage(raw.data, d.cluster.name, r.ok, r.durationMs);
+      if (!r.ok) return c.json({ error: { message: r.error ?? "failed", type: r.rateLimited ? "rate_limit" : "provider_error" } }, r.rateLimited ? 429 : 502);
+      return c.json({
+        id: `chatcmpl-raw-${Date.now()}`,
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model: body.model,
+        choices: [{ index: 0, message: { role: "assistant", content: r.text }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      });
+    }
     const task = system ? `${system}\n\n${prompt}` : prompt;
     const run = d.orchestrator.submit(task, modelToOptions(body.model));
     const created = Math.floor(Date.now() / 1000);
