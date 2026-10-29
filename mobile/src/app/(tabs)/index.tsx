@@ -481,7 +481,7 @@ export default function Home() {
               </Section>
             )}
 
-            <Section label="Today" right={sources ? `from ${sources}` : undefined}>
+            <Section label="Today" right={<TextLink title={sources ? `from ${sources} · All tasks →` : "All tasks →"} color={c.muted} onPress={() => router.push("/tasks")} />}>
               {home.tasks.map((t, i) => (
                 <TaskRow key={t.id} t={t} first={i === 0} onToggle={() => toggle(t)} />
               ))}

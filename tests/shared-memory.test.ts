@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseConfig } from "../src/config.js";
 import { mountSharedMemory } from "../src/server/shared-memory.js";
+import { mountBrain } from "../src/server/brain.js";
 import { MemoryReplica, namedUid } from "../src/shared/replica.js";
 import { memoryUpstream } from "../src/shared/setup.js";
 
@@ -231,5 +232,33 @@ describe("shared memory over HTTP", () => {
     const res = await hub.request("/api/assistant/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: "where is my thrust sheet" }) });
     expect((await res.json()).answer).toContain("thrust sheet");
     expect(sent).toEqual({ url: "http://127.0.0.1:8000/agent/ask", body: { text: "where is my thrust sheet", source: "app" } });
+  });
+});
+
+describe("the app's way to the brain", () => {
+  it("passes the listed paths with BRAIN_TOKEN and refuses the rest", async () => {
+    const seen: string[] = [];
+    const brainFetch: typeof fetch = async (input, init) => {
+      seen.push(`${init?.method} ${String(input)} ${(init?.headers as any).Authorization} ${init?.body ?? ""}`);
+      return Response.json({ ok: true });
+    };
+    const hub = new Hono();
+    mountBrain(hub, { config: parseConfig({ assistant: { token: "b" } }), brainFetch });
+    expect((await hub.request("/api/brain/tasks?status=pending_confirmation")).status).toBe(200);
+    expect((await hub.request("/api/brain/tasks/12/confirm", { method: "POST" })).status).toBe(200);
+    expect((await hub.request("/api/brain/chats/3/mute", { method: "POST", body: JSON.stringify({ muted: true }) })).status).toBe(200);
+    expect(seen).toEqual([
+      "GET http://127.0.0.1:8000/tasks?status=pending_confirmation Bearer b ",
+      "POST http://127.0.0.1:8000/tasks/12/confirm Bearer b {}",
+      'POST http://127.0.0.1:8000/chats/3/mute Bearer b {"muted":true}',
+    ]);
+    // not on the list: the brain's memory sync, ingest, workers, deleting
+    for (const [m, p] of [["POST", "/api/brain/ingest/whatsapp"], ["POST", "/api/brain/memory/batch"], ["GET", "/api/brain/workers"], ["DELETE", "/api/brain/tasks/1"]]) {
+      expect((await hub.request(p, { method: m })).status).toBe(403);
+    }
+    expect(seen).toHaveLength(3);
+    const off = new Hono();
+    mountBrain(off, { config: parseConfig({}) });
+    expect((await off.request("/api/brain/tasks")).status).toBe(404);
   });
 });

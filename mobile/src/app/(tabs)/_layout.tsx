@@ -3,7 +3,7 @@ import { Tabs } from "expo-router/js-tabs";
 import { Button } from "../../components/ui";
 import { useColors } from "../../lib/theme";
 
-/** Home, Chats, Insights and Devices, as plain text tabs along the bottom. */
+/** Home, Assistant, Chats, Insights and Devices, as plain text tabs along the bottom. */
 export default function TabsLayout() {
   const c = useColors();
   return (
@@ -22,6 +22,7 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen name="index" options={{ title: "Home", headerShown: false }} />
+      <Tabs.Screen name="assistant" options={{ title: "Assistant" }} />
       <Tabs.Screen
         name="chats"
         options={{ title: "Chats", headerRight: () => <Button small kind="primary" title="New" onPress={() => router.push("/t/new")} />, headerRightContainerStyle: { paddingRight: 12 } }}

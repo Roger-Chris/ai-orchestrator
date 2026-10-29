@@ -25,7 +25,7 @@ export interface BrainTask {
   title: string;
   due_at: string | null;
   source_chat?: string | null;
-  /** "email" | "whatsapp" | "telegram" | "manual"; older brains don't send it. */
+  /** "email" | "whatsapp" | "manual"; older brains don't send it. */
   source?: string;
 }
 
@@ -44,7 +44,7 @@ export function brainTime(s: string): Date {
 
 const SOURCES: Record<string, DayTask["source"]> = { email: "gmail", whatsapp: "whatsapp" };
 
-/** Overdue tasks older than this are left to the brain (Telegram); Today stays about today. */
+/** Overdue tasks older than this stay on the Tasks screen only; Today stays about today. */
 const OVERDUE_DAYS = 7;
 
 /** Which brain tasks belong on today's list, and how they read there. */

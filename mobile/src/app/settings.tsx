@@ -33,6 +33,8 @@ export default function Settings() {
   const [gmail, setGmail] = useState<Awaited<ReturnType<typeof Api.gmail>>>();
   const [gmailMsg, setGmailMsg] = useState("");
   const [brain, setBrain] = useState<Awaited<ReturnType<typeof Api.assistant>>>();
+  const [usage, setUsage] = useState("");
+  const [briefMsg, setBriefMsg] = useState("");
 
   useEffect(() => {
     Api.gmail().then(setGmail).catch(() => {});
@@ -95,6 +97,32 @@ export default function Settings() {
         <Row>
           <Button title="Change hub or token" onPress={() => router.push("/connect")} />
         </Row>
+      </Card>
+
+      <Card>
+        <Text style={h2}>Assistant</Text>
+        <Muted small>Tasks found in your mail and WhatsApp, your shared memory, and which WhatsApp chats are read.</Muted>
+        <Row>
+          <Button title="Tasks" onPress={() => router.push("/tasks")} />
+          <Button title="Memory" onPress={() => router.push("/memory")} />
+          <Button title="WhatsApp chats" onPress={() => router.push("/wa-chats")} />
+        </Row>
+        <Row>
+          <Button
+            title="Send today's brief now"
+            busy={busy === "brief"}
+            onPress={() => {
+              setBusy("brief");
+              Api.briefNow()
+                .then(() => setBriefMsg("Sent: it shows under Needs you on Home."))
+                .catch((e) => setBriefMsg((e as Error).message))
+                .finally(() => setBusy(""));
+            }}
+          />
+          <Button title={usage ? "Hide key usage" : "Model key usage"} onPress={() => (usage ? setUsage("") : Api.modelUsage().then((u) => setUsage(u.report)).catch((e) => setUsage((e as Error).message)))} />
+        </Row>
+        {!!briefMsg && <Text style={{ color: c.text }}>{briefMsg}</Text>}
+        {!!usage && <Text selectable style={{ color: c.text, fontFamily: "monospace", fontSize: 12 }}>{usage}</Text>}
       </Card>
 
       <Card>

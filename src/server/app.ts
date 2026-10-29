@@ -24,6 +24,7 @@ import type { MemoryReplica } from "../shared/replica.js";
 import { mountSharedMemory } from "./shared-memory.js";
 import type { ActionHub } from "../actions/desk.js";
 import { mountActions } from "./actions.js";
+import { mountBrain } from "./brain.js";
 
 export interface AppDeps {
   config: Config;
@@ -184,6 +185,7 @@ export function createApp(d: AppDeps) {
   app.get("/api/health", (c) => c.json({ ok: true, node: d.cluster.name }));
   mountSharedMemory(app, d);
   mountActions(app, d);
+  mountBrain(app, d);
 
   // ---- providers & devices
   app.get("/api/providers", async (c) => c.json(await d.pool.status(c.req.query("refresh") === "1")));

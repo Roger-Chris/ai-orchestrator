@@ -8,7 +8,7 @@ A brain that routes work across the owner's Claude, ChatGPT (Go), Gemini (Google
 - `web/`: React + Vite web app (PWA), built to `web/dist` by `npm start`.
 - `mobile/`: Expo (SDK 58) React Native Android app, installed from an APK, not the Play Store. It has its own `AGENTS.md`: read it before touching Expo APIs.
 - `agents/`: specialist agent YAML files.
-- `tests/`: vitest with fake providers. `npm test` must stay green (135 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
+- `tests/`: vitest with fake providers. `npm test` must stay green (136 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
 
 ## Running the hub
 
@@ -111,7 +111,13 @@ Hard-won details:
 - Flow (`src/actions/desk.ts`): `POST /api/act {node, action, args, reason}` on the hub → the device's `POST /node/act`. Safe: done. Ask: the device answers `needs_approval`, the hub stores an approval (`approvals` table, 30 min), pushes "Approve on <device>?" and lists it in `/api/home` `approvals` (the app's "Approve?" section). `POST /api/approvals/:id/approve` sends the call again with the approval id; the device claims it with the hub that holds it (`/node/approvals/:id/claim`: same action, same args hash, unused, unexpired; claiming uses it up). Approved actions are written to shared memory as `work`.
 - Approve/Deny endpoints are for the owner's own apps; the thinking loop must never be given a tool that calls them.
 - `SHELL_META` includes `( ) { } @`: PowerShell evaluates them inside arguments (`git status (Remove-Item x)`). `insideRoots` resolves links on the deepest existing folder, so `root/link/new/file` with a link out of the roots is refused (a test covers both). A write approval shows the start of the text, so the owner is not approving blind.
-- `POST /api/assistant/ask {text}` on the brain's machine passes to the brain's thinking loop (`/agent/ask`); the app's chat is not wired to it yet.
+- `POST /api/assistant/ask {text}` on the brain's machine passes to the brain's thinking loop (`/agent/ask`): the app's Assistant tab.
+
+## The brain in the app (no Telegram)
+
+- Telegram was removed from the brain on 29 Oct 2026; the app is the only remote. `/api/brain/*` (`src/server/brain.ts`) passes an allow-list of brain paths with BRAIN_TOKEN: tasks (list, add, confirm/reject/done, patch), chats + mute, brief, llm/usage, graph, memory/stats. Anything else is 403; keep the list short.
+- App screens: Assistant tab (`(tabs)/assistant.tsx`, conversation kept for the app session), `tasks.tsx` (Keep / Not a task / Done, add), `memory.tsx` (search, kinds, about, remember), `wa-chats.tsx` (mute switches), Settings → Assistant (brief now, model key usage). Brain errors come as `{detail}`; `api()` reads both.
+- To look at the app in a browser: copy `mobile/` aside, swap `expo-secure-store` for localStorage and drop `useLastNotificationResponse` (both native-only), `npm install --no-save react-dom react-native-web`, `npx expo export --platform web`, and serve it on the same origin as the hub's `/api`. That is how the screens were checked before Telegram was removed.
 
 ## Conventions
 

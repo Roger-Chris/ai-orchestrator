@@ -51,7 +51,8 @@ export async function api<T = unknown>(path: string, init: { method?: string; bo
     });
     if (res.status === 401) throw new Unauthorized("The hub rejected the access token.");
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`);
+    // The hub says {error}; the brain (FastAPI, through /api/brain) says {detail}.
+    if (!res.ok) throw new Error((data as { error?: string; detail?: unknown }).error ?? String((data as { detail?: unknown }).detail ?? `HTTP ${res.status}`));
     return data as T;
   } catch (e) {
     if ((e as Error).name === "AbortError") throw new Error(`The hub at ${current.url} did not answer. Is Tailscale on and the hub running?`);
@@ -77,7 +78,67 @@ export interface Agent {
 
 export type ActiveRun = Pick<RunRecord, "id" | "threadId" | "task" | "status" | "createdAt">;
 
+/** A task as the brain keeps it (all of them, not just today's). */
+export interface BrainTask {
+  id: number;
+  kind: "task" | "event" | "question";
+  status: "watching" | "pending_confirmation" | "open" | "done" | "rejected";
+  title: string;
+  details?: string | null;
+  due_at?: string | null;
+  priority: string;
+  people?: string | null;
+  source_chat?: string | null;
+  source_text?: string | null;
+  source?: string;
+}
+
+export interface WaChat {
+  id: number;
+  name: string;
+  is_group: boolean;
+  muted: boolean;
+  messages: number;
+}
+
+export interface MemoryRecord {
+  uid: string;
+  kind: string;
+  title: string;
+  body: string;
+  device?: string;
+  updated_at?: string;
+  data?: Record<string, unknown>;
+}
+
+export interface AssistantReply {
+  answer: string;
+  steps: { tool: string; args: Record<string, unknown>; result: string }[];
+  pending: { device: string; action: string; status: string }[];
+}
+
+const q = (o: Record<string, string | number | undefined>) =>
+  new URLSearchParams(Object.entries(o).filter(([, v]) => v !== undefined && v !== "") as [string, string][]).toString();
+
 export const Api = {
+  // ---- the assistant (the brain's thinking loop), tasks, memory, WhatsApp chats
+  ask: (text: string) => api<AssistantReply>("/api/assistant/ask", { body: { text, source: "app" }, timeoutMs: 900_000 }),
+  brainTasks: (status?: BrainTask["status"]) => api<BrainTask[]>(`/api/brain/tasks?${q({ status, limit: 200 })}`),
+  /** keep (confirm), drop (reject) or done; keep also reopens a finished one. */
+  taskAction: (id: number, action: "confirm" | "reject" | "done") => api<BrainTask>(`/api/brain/tasks/${id}/${action}`, { body: {} }),
+  addTask: (title: string, due_at?: string) => api<BrainTask>("/api/brain/tasks", { body: { title, due_at } }),
+  waChats: () => api<WaChat[]>("/api/brain/chats?limit=200"),
+  muteChat: (id: number, muted: boolean) => api(`/api/brain/chats/${id}/mute`, { body: { muted } }),
+  briefNow: () => api("/api/brain/brief", { body: {}, timeoutMs: 120_000 }),
+  modelUsage: () => api<{ report: string }>("/api/brain/llm/usage"),
+  graph: () => api<{ entities: Record<string, number>; relations: number; owner?: string; owner_summary?: string }>("/api/brain/graph"),
+  memorySearch: (query: string, kind?: string) => api<MemoryRecord[]>(`/api/shared-memory/search?${q({ q: query, kind, limit: 30 })}`),
+  memoryRecent: () => api<MemoryRecord[]>("/api/shared-memory/recent?limit=20"),
+  memoryAbout: (name: string) =>
+    api<{ record: MemoryRecord; relations: { title: string }[]; linked: MemoryRecord[] }>(`/api/shared-memory/about?${q({ name })}`),
+  remember: (text: string, kind: "note" | "fact" | "decision" = "note") => api<MemoryRecord>("/api/shared-memory/remember", { body: { text, kind } }),
+  memoryStatus: () => api<{ ok: boolean; records: number; pending: number; lastSync?: number; lastError?: string }>("/api/shared-memory/status"),
+
   home: () => api<Home>("/api/home"),
   insights: (days = 7) => api<Insights>(`/api/insights?days=${days}`),
   assistant: () => api<{ configured: boolean; ok: boolean; lastSync?: number; lastError?: string; today?: number }>("/api/assistant"),

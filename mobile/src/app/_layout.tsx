@@ -53,6 +53,9 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="connect" options={{ title: "Connect to your hub" }} />
         <Stack.Screen name="settings" options={{ title: "Settings" }} />
+        <Stack.Screen name="tasks" options={{ title: "Tasks" }} />
+        <Stack.Screen name="memory" options={{ title: "Memory" }} />
+        <Stack.Screen name="wa-chats" options={{ title: "WhatsApp chats" }} />
         <Stack.Screen name="t/[id]" options={{ title: "Conversation" }} />
         <Stack.Screen name="call/[id]" options={{ headerShown: false, gestureEnabled: false, animation: "fade" }} />
       </Stack>
