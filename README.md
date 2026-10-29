@@ -219,6 +219,36 @@ npm run orc -- agents
 claude mcp add orchestrator -- npx tsx /path/to/ai-orchestrator/src/cli.ts mcp
 ```
 
+## WhatsApp replies in your style
+
+The orchestrator can learn how you write on WhatsApp and draft replies that sound like you: your Tanglish, your spellings and mistakes, what you call each person (sir, ji, bro, machi, da, di, amma…). It **never sends anything**: drafts appear on the phone's Home screen as options (agree, decline, something in between), you pick or edit one and press send in WhatsApp yourself.
+
+Your chats are read and studied **on your own machine** by two local models; only the reply context goes to your online models when a draft is written.
+
+1. **Link WhatsApp** (read-only, as a linked device, like WhatsApp Web), on a machine with a GPU if you have one:
+   ```bash
+   npm run orc -- whatsapp link      # scan the QR in WhatsApp → Settings → Linked devices; keep it running
+   ```
+   History arrives once, at link time. Voice notes are downloaded so they can be transcribed.
+2. **Learn your style** with the local models: [Ollama](https://ollama.com) (`ollama pull qwen3:8b`) and Whisper through [uv](https://docs.astral.sh/uv/) (`tools/transcribe.py` installs faster-whisper on first run):
+   ```bash
+   npm run orc -- style learn        # transcribes voice notes, then one profile per chat + your overall voice
+   npm run orc -- style show
+   ```
+   The style book (`data/style/stylebook.json`) stays out of git: it contains other people's messages.
+3. **Send it to the hub** that drafts replies (set `whatsapp.hub`, e.g. `http://100.x.y.z:4317`, on the linked machine):
+   ```bash
+   npm run orc -- style push
+   ```
+   From then on the link forwards new messages to the hub (voice notes transcribed first). About 45 seconds after someone stops typing in a direct chat, the hub drafts options with the first ready of Claude, Gemini, ChatGPT and Groq, and notifies your phone. Replying yourself retires the draft.
+4. **Try it from the terminal** on any chat (part of a name or the number):
+   ```bash
+   npm run orc -- style pool "Arun" --draft
+   npm run orc -- style pool 98400 --draft --ask "tell him I'll come at 6"
+   ```
+
+What goes into every draft (the "context pool"): your overall voice; this person's profile; what you call them, counted from your messages and enforced in the draft; your spellings, most-used words and the short messages you send again and again; real exchanges closest to their message; examples from people you write to the same way when this chat has few; groups you share; and the last 30 messages. Settings live under `whatsapp:` and `style:` in the config (`autoDraft`, `draftGroups`, `draftDelaySeconds`, `replyProvider`, `style.model`, `style.addressTerms` for your own nicknames).
+
 ## Configuration
 
 See [orchestrator.config.example.yaml](orchestrator.config.example.yaml). Commonly changed settings:

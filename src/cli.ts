@@ -327,18 +327,37 @@ async function cmdGmail(config: Config, sub = "status") {
 async function cmdWhatsApp(config: Config, sub = "status") {
   const store = new Store(resolve(config.dataDir));
   const wa = new WaStore(store);
+  let undecryptableCount = () => 0;
   const show = () => {
     const n = wa.counts();
-    console.log(`${n.messages} messages (${n.mine} yours) in ${n.chats} chats · ${n.voice} voice notes, ${n.transcribed} transcribed`);
+    const lost = undecryptableCount();
+    console.log(`${n.messages} messages (${n.mine} yours) in ${n.chats} chats · ${n.voice} voice notes, ${n.transcribed} transcribed${lost ? ` · ${lost} WhatsApp could not decrypt` : ""}`);
   };
   if (sub !== "link") {
     show();
     if (!readCreds(config)) console.log("Not linked yet: run `orc whatsapp link`.");
     return store.close();
   }
+  undecryptableCount = quietSignalNoise();
+  // Baileys sometimes rejects a retry request after the socket closed ("428 Connection Closed")
+  // with nothing awaiting it; Node would exit. The link reconnects on its own, so note and go on.
+  process.on("unhandledRejection", (e) => console.warn(`! WhatsApp: ${(e as Error)?.message ?? e} (reconnecting by itself)`));
   const forward = hubForwarder(config);
   console.log(`New messages go to the hub at ${hubUrl(config)} for reply drafts.`);
-  const link = new WhatsAppLink(wa, {
+
+  // A live voice note waits for this device's Whisper, so the hub drafts from what was said.
+  // If the download or the transcriber fails it goes on as "[voice note]" after all.
+  const held = new Map<string, WaMessage>();
+  let whisper = Promise.resolve();
+  const release = (id: string) => {
+    const m = held.get(id);
+    if (!m) return;
+    held.delete(id);
+    const transcript = wa.messages(m.chatId, 50).find((x) => x.id === id)?.transcript;
+    if (transcript) console.log(`voice note transcribed: "${transcript.slice(0, 60)}${transcript.length > 60 ? "…" : ""}"`);
+    forward.send([{ ...m, transcript }]);
+  };
+  const link: WhatsAppLink = new WhatsAppLink(wa, {
     dataDir: resolve(config.dataDir),
     history: config.whatsapp.history,
     voiceNotes: config.whatsapp.voiceNotes,
@@ -346,7 +365,23 @@ async function cmdWhatsApp(config: Config, sub = "status") {
     print: (s) => console.log(s),
     onLive: (ms) => {
       console.log(`new: ${ms.length} message(s)`);
-      forward.send(ms);
+      const voice = ms.filter((m) => link.wantsVoice(m) && !m.transcript);
+      forward.send(ms.filter((m) => !voice.includes(m)));
+      for (const m of voice) {
+        held.set(m.id, m);
+        setTimeout(() => release(m.id), 180_000).unref(); // never hold one for ever
+      }
+    },
+    onVoice: (m, ok) => {
+      if (!held.has(m.id)) return; // a history note: `orc style learn` transcribes those
+      if (!ok) return release(m.id);
+      whisper = whisper
+        .then(() => transcribe(wa, config.style, () => {}, ROOT))
+        .then(
+          () => {},
+          (e) => console.warn(`! voice note not transcribed: ${(e as Error).message}`),
+        )
+        .then(() => release(m.id));
     },
   });
   await link.start();
@@ -424,6 +459,27 @@ async function cmdStyle(config: Config, sub = "show", opts: { who?: string; ask?
   } finally {
     store.close();
   }
+}
+
+/**
+ * Baileys' encryption library prints a stack trace for every message it cannot decrypt ("Bad MAC",
+ * common for a while after a reconnect as sessions resync). Those lines are counted instead of
+ * flooding the terminal; returns the count so far.
+ */
+function quietSignalNoise(): () => number {
+  let n = 0;
+  const noisy = (a: unknown) => typeof a === "string" && /^(Failed to decrypt message|Session error:|Closing (open )?session|Decrypted message with closed session)/.test(a);
+  for (const level of ["log", "error", "warn", "info"] as const) {
+    const original = console[level].bind(console);
+    console[level] = (...args: unknown[]) => {
+      if (noisy(args[0])) {
+        if (String(args[0]).startsWith("Failed to decrypt")) n++;
+        return;
+      }
+      original(...args);
+    };
+  }
+  return () => n;
 }
 
 /** Where reply drafting happens: `whatsapp.hub`, else the hub on this device. */
