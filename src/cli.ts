@@ -328,10 +328,12 @@ async function cmdWhatsApp(config: Config, sub = "status") {
   const store = new Store(resolve(config.dataDir));
   const wa = new WaStore(store);
   let undecryptableCount = () => 0;
+  let linked: WhatsAppLink | undefined;
   const show = () => {
     const n = wa.counts();
-    const lost = undecryptableCount();
-    console.log(`${n.messages} messages (${n.mine} yours) in ${n.chats} chats · ${n.voice} voice notes, ${n.transcribed} transcribed${lost ? ` · ${lost} WhatsApp could not decrypt` : ""}`);
+    const u = linked?.status().undecrypted;
+    const lost = u && u.direct + u.group ? ` · undecryptable: ${u.direct} direct, ${u.group} group, ${u.recovered} recovered by retry (${undecryptableCount()} decrypt errors)` : "";
+    console.log(`${n.messages} messages (${n.mine} yours) in ${n.chats} chats · ${n.voice} voice notes, ${n.transcribed} transcribed${lost}`);
   };
   if (sub !== "link") {
     show();
@@ -386,6 +388,7 @@ async function cmdWhatsApp(config: Config, sub = "status") {
   });
   await link.start();
   console.log("Keep this running while history arrives (Ctrl+C to stop; run it again any time to catch up).");
+  linked = link;
   const timer = setInterval(show, 60_000);
   process.once("SIGINT", () => {
     clearInterval(timer);

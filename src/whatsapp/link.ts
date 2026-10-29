@@ -30,9 +30,13 @@ export interface LinkStatus {
   me?: string;
   historyMessages: number;
   voiceDownloaded: number;
+  /** Messages WhatsApp delivered that could not be decrypted, and how many a retry later recovered. */
+  undecrypted: { direct: number; group: number; recovered: number };
 }
 
 const MAX_VOICE_BYTES = 6 * 1024 * 1024;
+/** proto.WebMessageInfo.StubType.CIPHERTEXT: a message Baileys could not decrypt. */
+const CIPHERTEXT = 2;
 
 const silent = {
   level: "silent",
@@ -81,8 +85,11 @@ export function content(message: any): { text: string; mediaType?: string; quote
 }
 
 export class WhatsAppLink {
-  private state: LinkStatus = { state: "starting", historyMessages: 0, voiceDownloaded: 0 };
+  private state: LinkStatus = { state: "starting", historyMessages: 0, voiceDownloaded: 0, undecrypted: { direct: 0, group: 0, recovered: 0 } };
+  private failed = new Set<string>();
+  private failedChats = new Set<string>();
   private lidToPn = new Map<string, string>();
+  private pnToLid = new Map<string, string>();
   private names = new Map<string, string>();
   private voiceQueue: { msg: WAMessage; out: WaMessage }[] = [];
   private downloading = false;
@@ -130,7 +137,7 @@ export class WhatsAppLink {
       if (u.connection === "open") {
         const me = sock.user?.id ? jidNormalizedUser(sock.user.id) : undefined;
         const lid = (sock.user as any)?.lid ? jidNormalizedUser((sock.user as any).lid) : undefined;
-        if (me && lid) this.lidToPn.set(lid, me);
+        if (me && lid) this.mapLid(lid, me);
         this.state = { ...this.state, state: "open", me };
         this.opts.print(`WhatsApp linked as ${me?.split("@")[0] ?? "you"}.${this.opts.history !== "off" ? " History arrives over the next few minutes." : ""}`);
         // One call for every group's name: per-message lookups hit WhatsApp's rate limit.
@@ -153,17 +160,26 @@ export class WhatsAppLink {
       }
     });
 
+    // Baileys 7 contacts carry both ids (id is either; lid / phoneNumber say which is which).
     const noteContact = (c: any) => {
-      if (!c?.id) return;
+      if (!c?.id || c.id.endsWith("@g.us")) return;
+      const lid: string | undefined = c.lid ?? (c.id.endsWith("@lid") ? c.id : undefined);
+      const pn: string | undefined = c.phoneNumber ?? (c.id.endsWith("@s.whatsapp.net") ? c.id : undefined);
+      if (lid && pn) this.mapLid(lid, pn);
       const name = c.name || c.notify || c.verifiedName;
-      if (c.lid && c.id.endsWith("@s.whatsapp.net")) this.lidToPn.set(c.lid, c.id);
-      if (name && c.id.endsWith("@s.whatsapp.net")) {
-        this.names.set(c.id, name);
-        this.store.nameChat(c.id, name, false);
+      if (!name) return;
+      // Named under both ids: the chat may be stored under either.
+      for (const id of [lid, pn]) {
+        if (!id) continue;
+        this.names.set(id, name);
+        this.store.nameChat(id, name, false);
       }
     };
     sock.ev.on("contacts.upsert", (cs) => cs.forEach(noteContact));
     sock.ev.on("contacts.update", (cs) => cs.forEach(noteContact));
+    sock.ev.on("lid-mapping.update" as any, (m: { lid: string; pn: string }) => {
+      if (m?.lid && m?.pn) this.mapLid(jidNormalizedUser(m.lid), jidNormalizedUser(m.pn));
+    });
 
     sock.ev.on("messaging-history.set", ({ chats, contacts, messages }) => {
       // The history bundle carries chat names and LID mappings: take them before the messages.
@@ -179,9 +195,34 @@ export class WhatsAppLink {
     // "notify" is a message arriving now; "append" is one caught up after a reconnect. Both are
     // passed on: the hub only drafts for messages under an hour old, so old ones just add context.
     sock.ev.on("messages.upsert", ({ messages }) => {
+      this.noteUndecrypted(messages);
       const kept = this.keep(messages);
       if (kept.length) this.opts.onLive?.(kept);
     });
+  }
+
+  /**
+   * A message that failed to decrypt arrives as a CIPHERTEXT placeholder; if WhatsApp's retry
+   * works, the real message comes later with the same id. Both are counted here.
+   */
+  private noteUndecrypted(messages: WAMessage[]) {
+    const u = this.state.undecrypted;
+    for (const msg of messages) {
+      const id = msg.key.id;
+      if (!id) continue;
+      if (msg.messageStubType === CIPHERTEXT && !msg.message) {
+        if (this.failed.has(id)) continue;
+        this.failed.add(id);
+        if (msg.key.remoteJid?.endsWith("@g.us")) u.group++;
+        else u.direct++;
+        const k = msg.key as any;
+        const where = `${k.remoteJid}${k.participant ? ` from ${k.participant}` : ""}${k.fromMe ? " (sent by you)" : ""}`;
+        if (!this.failedChats.has(where)) {
+          this.failedChats.add(where);
+          this.opts.print(`cannot decrypt messages in ${where} (${msg.messageStubParameters?.[0] ?? "no reason given"})`);
+        }
+      } else if (msg.message && this.failed.delete(id)) u.recovered++;
+    }
   }
 
   /** Whether a voice note in this chat gets downloaded (and so `onVoice` will fire for it). */
@@ -203,14 +244,25 @@ export class WhatsAppLink {
     return out;
   }
 
-  /** WhatsApp's newer "LID" ids: use the phone-number id when known, so one contact is one chat. */
+  /**
+   * One contact is one chat although WhatsApp knows them by two ids: a hidden "LID" and their
+   * phone number. A chat stays under whichever id its history is already stored as (the style
+   * book is keyed by it); a new contact gets the phone-number id when it is known.
+   */
   private resolve(jid: string, alt?: string | null): string {
-    if (!jid.endsWith("@lid")) return jid;
-    if (alt) {
-      this.lidToPn.set(jid, alt);
-      return alt;
-    }
-    return this.lidToPn.get(jid) ?? jid;
+    if (jid.endsWith("@g.us")) return jid;
+    const other = alt && alt !== jid ? alt : undefined;
+    let lid = jid.endsWith("@lid") ? jid : other?.endsWith("@lid") ? other : this.pnToLid.get(jid);
+    let pn = jid.endsWith("@s.whatsapp.net") ? jid : other?.endsWith("@s.whatsapp.net") ? other : lid && this.lidToPn.get(lid);
+    if (lid && pn) this.mapLid(lid, pn);
+    if (lid && this.store.hasChat(lid)) return lid;
+    if (pn && this.store.hasChat(pn)) return pn;
+    return pn ?? lid ?? jid;
+  }
+
+  private mapLid(lid: string, pn: string) {
+    this.lidToPn.set(lid, pn);
+    this.pnToLid.set(pn, lid);
   }
 
   private convert(msg: WAMessage): WaMessage | undefined {

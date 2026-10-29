@@ -82,6 +82,11 @@ export class WaStore {
       .run(id, name, isGroup ? 1 : 0);
   }
 
+  /** Whether any message is stored under this chat id. */
+  hasChat(id: string): boolean {
+    return !!this.store.db.prepare("SELECT 1 FROM wa_messages WHERE chat_id = ? LIMIT 1").get(id);
+  }
+
   chatName(id: string): string | undefined {
     return (this.store.db.prepare("SELECT name FROM wa_chats WHERE id = ?").get(id) as { name?: string } | undefined)?.name ?? undefined;
   }
