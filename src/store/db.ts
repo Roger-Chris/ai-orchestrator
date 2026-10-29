@@ -258,7 +258,8 @@ export class Store implements CooldownStore, FeedbackSource {
     this.db.prepare("INSERT OR REPLACE INTO cooldowns (provider, until, reason) VALUES (?, ?, ?)").run(provider, until, reason);
   }
 
-  recordUsage(provider: ProviderId, node: string, ok: boolean, durationMs: number) {
+  /** `provider` is a ProviderId or another tool id from src/ai/tools.ts (tts:openai, whisper:groq, ollama:<model>). */
+  recordUsage(provider: ProviderId | (string & {}), node: string, ok: boolean, durationMs: number) {
     const day = new Date().toISOString().slice(0, 10);
     this.db
       .prepare(

@@ -317,6 +317,22 @@ const ConfigSchema = z.object({
       voice: z.enum(["hub", "system"]).default("hub"),
     })
     .prefault({}),
+  /** The tool registry (src/ai/tools.ts): per tool id (claude, groq, tts:openai, ollama:qwen3:8b…) override what it costs, cap its calls a day, or turn it off. */
+  tools: z
+    .object({
+      overrides: z
+        .record(
+          z.string(),
+          z.object({
+            cost: z.enum(["local", "free", "subscription", "paid"]).optional(),
+            perDay: z.number().int().min(1).optional(),
+            note: z.string().optional(),
+            enabled: z.boolean().optional(),
+          }),
+        )
+        .prefault({}),
+    })
+    .prefault({}),
   cluster: z
     .object({
       enabled: z.boolean().default(true),

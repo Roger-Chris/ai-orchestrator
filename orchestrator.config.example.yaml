@@ -144,6 +144,9 @@ wake:                        # "Hey Jarvis" on this computer's microphone (`orc 
   followUps: 3               # questions without the wake word before it waits again
   voice: hub                 # hub (its TTS, then this computer's) | system
 
+tools:                       # the tool registry (GET /api/tools): override cost class, cap calls a day, or turn a tool off
+  overrides: {}              # e.g. { perplexity: { perDay: 20 }, "tts:openai": { enabled: false } }
+
 cluster:
   enabled: true
   tailscale: true            # find other devices running the orchestrator on your tailnet

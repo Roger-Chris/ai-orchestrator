@@ -94,6 +94,8 @@ export class Tts {
     private opts: TtsOptions,
     private http: typeof fetch = fetch,
     private now: () => number = Date.now,
+    /** Called after every request to a service (for the tool registry's usage today). */
+    private onUse?: (provider: TtsProviderId, ok: boolean, ms: number) => void,
   ) {}
 
   configured(id: TtsProviderId): boolean {
@@ -153,14 +155,17 @@ export class Tts {
         this.cache.set(key, hit);
         return hit;
       }
+      const started = this.now();
       try {
         const speech = await this.call(provider, voice, line, format);
+        this.onUse?.(provider, true, this.now() - started);
         this.resting.delete(provider);
         this.cache.set(key, speech);
         if (this.cache.size > CACHE_SIZE) this.cache.delete(this.cache.keys().next().value!);
         return speech;
       } catch (e) {
         const err = e as TtsError;
+        this.onUse?.(provider, false, this.now() - started);
         this.rest(provider, err);
         errors.push(`${PROVIDER_LABEL[provider]}: ${err.message}`);
       }
@@ -359,7 +364,7 @@ export function wavFromPcm(pieces: Uint8Array[], f: WavFormat = GEMINI_PCM): Uin
 }
 
 /** The hub's Tts from config (keys from .env through parseConfig; Groq shares the provider's keys). */
-export function ttsFromConfig(config: Config, http?: typeof fetch): Tts {
+export function ttsFromConfig(config: Config, http?: typeof fetch, onUse?: (provider: TtsProviderId, ok: boolean, ms: number) => void): Tts {
   const t = config.tts;
   const groq = config.providers.groq;
   return new Tts(
@@ -372,5 +377,7 @@ export function ttsFromConfig(config: Config, http?: typeof fetch): Tts {
       groq: { keys: [...groq.apiKeys, groq.apiKey ?? ""], baseUrl: groq.baseUrl, model: t.groq.model, voice: t.groq.voice },
     },
     http,
+    Date.now,
+    onUse,
   );
 }

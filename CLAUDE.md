@@ -8,7 +8,7 @@ A brain that routes work across the owner's Claude, ChatGPT (Go), Gemini (Google
 - `web/`: React + Vite web app (PWA), built to `web/dist` by `npm start`.
 - `mobile/`: Expo (SDK 58) React Native Android app, installed from an APK, not the Play Store. It has its own `AGENTS.md`: read it before touching Expo APIs.
 - `agents/`: specialist agent YAML files.
-- `tests/`: vitest with fake providers. `npm test` must stay green (167 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
+- `tests/`: vitest with fake providers. `npm test` must stay green (175 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
 
 ## Running the hub
 
@@ -125,6 +125,13 @@ Hard-won details:
 - Telegram was removed from the brain on 29 Oct 2026; the app is the only remote. `/api/brain/*` (`src/server/brain.ts`) passes an allow-list of brain paths with BRAIN_TOKEN: tasks (list, add, confirm/reject/done, patch), chats + mute, brief, llm/usage, graph, memory/stats. Anything else is 403; keep the list short.
 - App screens: Assistant tab (`(tabs)/assistant.tsx`, conversation kept for the app session), `tasks.tsx` (Keep / Not a task / Done, add), `memory.tsx` (search, kinds, about, remember), `wa-chats.tsx` (mute switches), Settings → Assistant (brief now, model key usage). Brain errors come as `{detail}`; `api()` reads both.
 - To look at the app in a browser: copy `mobile/` aside, swap `expo-secure-store` for localStorage and drop `useLastNotificationResponse` (both native-only), `npm install --no-save react-dom react-native-web`, `npx expo export --platform web`, and serve it on the same origin as the hub's `/api`. That is how the screens were checked before Telegram was removed.
+
+## Tool registry (Jarvis phase 1)
+
+- `src/ai/tools.ts` `ToolRegistry.list()` (`GET /api/tools`, `?fresh=1` re-detects logins): every AI the hub can use as `ToolInfo` {id, name, kind agent/chat/speech/transcribe/vision, cost local/free/subscription/paid, strengths (kinds scored >= 8.5 in the capability matrix), scores, limits {maxConcurrent, perDay, note}, state ready/busy/cooling/limit/off/not_set_up, until, load, usageToday}. Tool ids: the five providers, `whisper:groq`, `tts:openai|gemini|groq`, `ollama:<style.model>` and `ollama:<style.visionModel>` (Ollama `/api/tags`, cached 60 s).
+- Cost classes and plan notes are in `PROVIDER_FACTS`/`TTS_FACTS`; config `tools.overrides.<id>` sets `cost`, `perDay` (state `limit` until the next UTC day once today's calls reach it), `note`, `enabled: false`.
+- Usage today comes from the `usage` table (UTC day, every device that reported here). Providers were already recorded; TTS (`Tts` `onUse`) records `tts:<service>` and Groq Whisper (`GroqVoice` `onTranscribe`) records `whisper:groq`. `Store.recordUsage` takes any tool id.
+- R2 (`routeFor`) will choose from this list; R4 shows it in the app.
 
 ## Talking to Jarvis (voice)
 

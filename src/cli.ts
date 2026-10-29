@@ -41,6 +41,7 @@ import { CallDesk } from "./calls/desk.js";
 import { GroqVoice } from "./calls/groq.js";
 import { ttsFromConfig } from "./voice/tts.js";
 import { WakeListener, wakeOptions } from "./voice/wake.js";
+import { ToolRegistry } from "./ai/tools.js";
 import { addTerms } from "./whatsapp/address.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -116,7 +117,13 @@ export function buildSystem(config: Config) {
   );
   const groq = config.providers.groq;
   const calls = new CallDesk({
-    voice: new GroqVoice({ baseUrl: groq.baseUrl, keys: [...groq.apiKeys, groq.apiKey ?? ""], model: groq.model, transcribeModel: groq.transcribeModel }),
+    voice: new GroqVoice({
+      baseUrl: groq.baseUrl,
+      keys: [...groq.apiKeys, groq.apiKey ?? ""],
+      model: groq.model,
+      transcribeModel: groq.transcribeModel,
+      onTranscribe: (ok, ms) => store.recordUsage("whisper:groq", config.node.name, ok, ms),
+    }),
     // Without Groq, typed answers on a call are decided by the first ready of Claude, ChatGPT, Gemini (Gemini last: it is often busy).
     think: async (system, prompt) => {
       const ready = await pool.available();
@@ -141,8 +148,9 @@ export function buildSystem(config: Config) {
     task: (taskId) => store.tasksFor(localDay()).find((t) => t.id === `brain:${taskId}`),
   });
   const actions = buildActions(config, { store, pool, replica, cluster, notifier });
-  const tts = ttsFromConfig(config);
-  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts };
+  const tts = ttsFromConfig(config, undefined, (p, ok, ms) => store.recordUsage(`tts:${p}`, config.node.name, ok, ms));
+  const tools = new ToolRegistry({ config, pool, capabilities: buildCapabilities(config.routing.overrides), usage: () => store.usage(1), tts });
+  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts, tools };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */

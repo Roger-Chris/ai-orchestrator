@@ -21,6 +21,7 @@ import type { ReplyDrafter } from "../whatsapp/drafter.js";
 import { CallError, type CallDesk } from "../calls/desk.js";
 import { type AskReply, sayFor, type TalkReply } from "../voice/talk.js";
 import { TTS_PROVIDERS, type Tts, TtsError } from "../voice/tts.js";
+import type { ToolRegistry } from "../ai/tools.js";
 import type { StyleBook } from "../whatsapp/learn.js";
 import type { MemoryReplica } from "../shared/replica.js";
 import { type Ask, AskBody, askBrain, mountSharedMemory } from "./shared-memory.js";
@@ -49,6 +50,8 @@ export interface AppDeps {
   calls?: CallDesk;
   /** Jarvis's voice from a speech service; absent means the phone speaks for itself. */
   tts?: Tts;
+  /** Every AI tool with cost, limits, live state and usage today (src/ai/tools.ts). */
+  tools?: ToolRegistry;
   /** This device's copy of the shared memory pool; absent when sharedMemory.enabled is false. */
   replica?: MemoryReplica;
   /** How /node/memory/* reaches the brain; tests pass a fake. */
@@ -209,6 +212,11 @@ export function createApp(d: AppDeps) {
   app.get("/api/agents", (c) => c.json([...d.orchestrator.agents.values()]));
   app.get("/api/capabilities", (c) => c.json(d.router.caps));
   app.get("/api/memory", (c) => c.json(d.store.searchMemory(c.req.query("q") ?? "", Number(c.req.query("limit") ?? 10))));
+  // The tool registry: every AI the hub can use, its cost class, limits, state and use today. ?fresh=1 re-detects logins.
+  app.get("/api/tools", async (c) => {
+    if (!d.tools) return c.json({ error: "the tool registry is not set up on this hub" }, 404);
+    return c.json({ tools: await d.tools.list(c.req.query("fresh") === "1") });
+  });
   app.get("/api/usage", (c) => c.json(d.store.usage(Number(c.req.query("days") ?? 7))));
 
   // ---- home screen

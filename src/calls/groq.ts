@@ -11,6 +11,8 @@ export interface GroqVoiceOptions {
   model: string;
   /** Speech-to-text model. */
   transcribeModel: string;
+  /** Called after each transcription (the tool registry counts Whisper's use as `whisper:groq`). */
+  onTranscribe?: (ok: boolean, ms: number) => void;
 }
 
 export class GroqError extends Error {
@@ -39,6 +41,18 @@ export class GroqVoice {
 
   /** Text of a voice clip (m4a, webm, wav, mp3, ogg…). */
   async transcribe(audio: Blob, filename: string): Promise<string> {
+    const started = Date.now();
+    try {
+      const text = await this.transcribeOnce(audio, filename);
+      this.opts.onTranscribe?.(true, Date.now() - started);
+      return text;
+    } catch (e) {
+      this.opts.onTranscribe?.(false, Date.now() - started);
+      throw e;
+    }
+  }
+
+  private async transcribeOnce(audio: Blob, filename: string): Promise<string> {
     const res = await this.post("/audio/transcriptions", () => {
       const form = new FormData();
       form.append("file", audio, filename);
