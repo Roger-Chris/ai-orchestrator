@@ -36,6 +36,10 @@ describe("action risks", () => {
     expect(shellRisk("git statusx", config)).toBe("ask");
     expect(shellRisk("npm install", config)).toBe("ask");
     expect(shellRisk("sudo apt install x", config)).toBe("never");
+    // PowerShell evaluates brackets inside arguments
+    expect(shellRisk("git status (Remove-Item x)", config)).toBe("ask");
+    expect(shellRisk("git log @(rm x)", config)).toBe("ask");
+    expect(shellRisk("git log {rm x}", config)).toBe("ask");
   });
 
   it("tokens never leave the device in action output", () => {
@@ -76,10 +80,23 @@ describe("running actions on a device", () => {
     expect(r.result.output.trim().toLowerCase()).toContain(root.split(/[\\/]/).pop()!.toLowerCase());
   });
 
+  it("a link inside the folders cannot be used to write outside them", async () => {
+    const { root, config, store } = device("omen");
+    const outside = tmp();
+    const { symlinkSync } = await import("node:fs");
+    symlinkSync(outside, join(root, "link"), "junction");
+    config.actions.safe = ["files.write"];
+    const r = (await new ActionRunner(config, {}).act({ action: "files.write", args: { path: "link/new/evil.txt", content: "x" } })) as any;
+    expect(r.result.ok).toBe(false);
+    expect(r.result.output).toMatch(/outside the folders/);
+    expect(existsSync(join(outside, "new"))).toBe(false);
+    void store;
+  });
+
   it("changes need an approval; unknown actions and bad arguments are refused", async () => {
     const { root, config } = device("omen");
     const r = new ActionRunner(config, {});
-    expect(await r.act({ action: "files.write", args: { path: "a.txt", content: "x" } })).toMatchObject({ status: "needs_approval", summary: "Write 1 characters to a.txt" });
+    expect(await r.act({ action: "files.write", args: { path: "a.txt", content: "x" } })).toMatchObject({ status: "needs_approval", summary: 'Write 1 characters to a.txt: "x"' });
     expect(existsSync(join(root, "a.txt"))).toBe(false);
     expect(await r.act({ action: "files.delete", args: { path: "a.txt" } })).toMatchObject({ status: "refused" });
     expect(await r.act({ action: "files.read", args: {} })).toMatchObject({ status: "refused" });

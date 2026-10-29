@@ -92,6 +92,24 @@ export function mountSharedMemory(app: Hono, d: { config: Config; replica?: Memo
     return c.json({ deleted: ok });
   });
 
+  // ---- the brain's thinking loop (AI_Assistant agent.py), for the phone app and the web app
+  app.post("/api/assistant/ask", async (c) => {
+    const { url, token } = d.config.assistant;
+    if (!token) return c.json({ error: `device ${d.config.node.name} does not run the brain` }, 404);
+    const body = z.object({ text: z.string().min(1), source: z.string().default("app") }).parse(await c.req.json());
+    try {
+      const res = await (d.brainFetch ?? fetch)(`${url.replace(/\/$/, "")}/agent/ask`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15 * 60_000),
+      });
+      return new Response(await res.text(), { status: res.status, headers: { "Content-Type": "application/json" } });
+    } catch (e) {
+      return c.json({ error: `brain not reachable: ${(e as Error).message}` }, 502);
+    }
+  });
+
   // ---- the memory hub: other devices' replicas sync through here
   app.all("/node/memory/*", async (c) => {
     const { url, token } = d.config.assistant;

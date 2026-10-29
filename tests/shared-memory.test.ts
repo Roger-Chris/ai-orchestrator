@@ -217,5 +217,19 @@ describe("shared memory over HTTP", () => {
     const laptop = new Hono();
     mountSharedMemory(laptop, { config: parseConfig({}) });
     expect((await laptop.request("/node/memory/changes")).status).toBe(404);
+    expect((await laptop.request("/api/assistant/ask", { method: "POST", body: JSON.stringify({ text: "hi" }) })).status).toBe(404);
+  });
+
+  it("/api/assistant/ask reaches the brain's thinking loop", async () => {
+    let sent: any;
+    const brainFetch: typeof fetch = async (input, init) => {
+      sent = { url: String(input), body: JSON.parse(String(init?.body)) };
+      return Response.json({ answer: "Your thrust sheet is on the laptop.", steps: [], pending: [] });
+    };
+    const hub = new Hono();
+    mountSharedMemory(hub, { config: parseConfig({ assistant: { token: "b" } }), brainFetch });
+    const res = await hub.request("/api/assistant/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: "where is my thrust sheet" }) });
+    expect((await res.json()).answer).toContain("thrust sheet");
+    expect(sent).toEqual({ url: "http://127.0.0.1:8000/agent/ask", body: { text: "where is my thrust sheet", source: "app" } });
   });
 });

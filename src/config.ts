@@ -177,9 +177,9 @@ const ConfigSchema = z.object({
         .default([
           "git status", "git log", "git diff", "git branch", "git show", "git remote -v",
           "nvidia-smi", "tailscale status", "tailscale ip", "df", "free", "uptime", "whoami", "hostname",
-          "ls", "dir", "pwd", "node --version", "npm --version", "python --version", "python3 --version",
+          "pwd", "node --version", "npm --version", "python --version", "python3 --version",
           "uv --version", "flutter --version", "ollama list", "ollama ps", "docker ps", "systemctl --user status",
-          "Get-ChildItem", "Get-Process", "Get-PSDrive",
+          "Get-Process", "Get-PSDrive",
         ]),
       /** Action names that never ask (e.g. "apps.open"). Your call; the defaults ask. */
       safe: z.array(z.string()).default([]),

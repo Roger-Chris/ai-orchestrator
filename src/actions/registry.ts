@@ -89,10 +89,18 @@ const norm = (p: string) => (platform() === "win32" ? p.toLowerCase() : p);
 export function insideRoots(p: string, config: Config, mustExist = true): string {
   const rs = roots(config);
   const abs = isAbsolute(p) ? resolve(p) : resolve(rs[0], p);
-  let real = abs;
-  if (existsSync(abs)) real = realpathSync(abs);
-  else if (mustExist) throw new Error(`not found: ${p}`);
-  else if (existsSync(dirname(abs))) real = join(realpathSync(dirname(abs)), basename(abs));
+  if (!existsSync(abs) && mustExist) throw new Error(`not found: ${p}`);
+  // Resolve links on the deepest part that exists: "root/link/new/file" with link -> /etc must
+  // be judged as /etc/new/file, or a new folder could be made outside the roots.
+  let existing = abs;
+  const rest: string[] = [];
+  while (!existsSync(existing)) {
+    rest.unshift(basename(existing));
+    const up = dirname(existing);
+    if (up === existing) break;
+    existing = up;
+  }
+  const real = existsSync(existing) ? join(realpathSync(existing), ...rest) : abs;
   const ok = rs.some((r) => {
     const root = existsSync(r) ? realpathSync(r) : r;
     const rel = relative(norm(root), norm(real));
@@ -103,7 +111,9 @@ export function insideRoots(p: string, config: Config, mustExist = true): string
   return real;
 }
 
-const SHELL_META = /[;&|<>`$\n\r]|\$\(/;
+// Chaining, redirection and substitution in bash and PowerShell. PowerShell also runs `( )`, `{ }`
+// and `@( )` inside arguments ("git status (Remove-Item x)"), so those always ask too.
+const SHELL_META = /[;&|<>`$\n\r(){}@]/;
 
 /** A command runs without asking only when it is on the safe list and chains nothing else. */
 export function shellRisk(command: string, config: Config): Risk {
@@ -244,7 +254,10 @@ export const ACTIONS: ActionDef[] = [
     describe: "Write a text file. An existing file is backed up first (name.bak-<time>), never lost.",
     args: z.object({ path: z.string().min(1), content: z.string() }),
     risk: () => "ask",
-    summary: (a) => `Write ${a.content.length} characters to ${a.path}`,
+    summary: (a) => {
+      const head = a.content.replace(/\s+/g, " ").trim();
+      return `Write ${a.content.length} characters to ${a.path}: "${head.slice(0, 160)}${head.length > 160 ? "…" : ""}"`;
+    },
     run: async (a, ctx) => {
       const p = insideRoots(a.path, ctx.config, false);
       mkdirSync(dirname(p), { recursive: true });
