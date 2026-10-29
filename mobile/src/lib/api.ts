@@ -1,5 +1,5 @@
 import * as SecureStore from "expo-secure-store";
-import type { Home, Insights, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
+import type { BrainAlert, Home, Insights, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
 
 export type { AlertAction, Attention, BrainAlert, DayTask, Decision, Home, Insights, ReplyDraft, RunEvent, RunOptions, RunRecord, Running, StepRecord, Thread } from "../../../src/types";
 
@@ -109,6 +109,59 @@ export const Api = {
   fcmStatus: () => api<{ enabled: boolean }>("/api/push/fcm"),
   registerFcm: (token: string) => api("/api/push/fcm", { body: { token } }),
   pushTest: () => api<{ sent: number }>("/api/push/test", { body: {} }),
+};
+
+/** One exchange on a call (src/calls/desk.ts TurnResult). */
+export interface CallTurn {
+  transcript: string;
+  say: string;
+  action: "done" | "snooze" | "dismiss" | "draft_reply" | "delegate" | "none";
+  done: boolean;
+  runId?: string;
+  refused?: string;
+  proposed?: "draft_reply" | "delegate";
+}
+
+export interface CallInfo {
+  alert: BrainAlert;
+  /** The hub can hear voice (it has a Groq key); otherwise type. */
+  voice: boolean;
+  /** Some model can take the call at all. */
+  available: boolean;
+  lines: { who: "assistant" | "owner"; text: string; at: number }[];
+  ended: boolean;
+}
+
+/** A call's answer the hub refused because it can't hear voice: the app switches to typing. */
+export class NeedsText extends Error {}
+
+export const Calls = {
+  info: (alertId: number) => api<CallInfo>(`/api/calls/${alertId}`),
+  answer: (alertId: number) => api<{ say: string; voice: boolean }>(`/api/calls/${alertId}/answer`, { body: {}, timeoutMs: 45_000 }),
+  say: (alertId: number, text: string) => api<CallTurn>(`/api/calls/${alertId}/turn`, { body: { text }, timeoutMs: 90_000 }),
+  end: (alertId: number) => api(`/api/calls/${alertId}/end`, { body: {} }),
+  /** Sends a recorded clip (a file uri from expo-audio) as multipart; React Native reads the file itself. */
+  async voice(alertId: number, uri: string): Promise<CallTurn> {
+    if (!current) throw new Error("Not connected to a hub yet.");
+    const form = new FormData();
+    const name = uri.split("/").pop() || "turn.m4a";
+    form.append("audio", { uri, name, type: name.endsWith(".3gp") ? "audio/3gpp" : "audio/mp4" } as never);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90_000);
+    try {
+      const res = await fetch(`${current.url}/api/calls/${alertId}/turn`, { method: "POST", headers: authHeaders(), body: form, signal: ctrl.signal });
+      if (res.status === 401) throw new Unauthorized("The hub rejected the access token.");
+      const data = (await res.json().catch(() => ({}))) as CallTurn & { error?: string; fallback?: string };
+      if (res.status === 409 && data.fallback === "text") throw new NeedsText(data.error ?? "Type your answer instead.");
+      if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+      return data;
+    } catch (e) {
+      if ((e as Error).name === "AbortError") throw new Error("The hub took too long to answer.");
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+  },
 };
 
 export const FINISHED = ["done", "failed", "cancelled"];

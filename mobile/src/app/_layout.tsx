@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { loadConnection } from "../lib/api";
-import { routeFor } from "../lib/push";
+import { ensureChannels, routeFor } from "../lib/push";
 import { useColors } from "../lib/theme";
 
 export default function RootLayout() {
@@ -14,13 +14,16 @@ export default function RootLayout() {
   const lastTap = Notifications.useLastNotificationResponse();
 
   useEffect(() => {
+    // The alarm channel must exist before the first alarm arrives, also on phones that turned
+    // notifications on before it was added.
+    ensureChannels().catch(() => {});
     loadConnection().then((conn) => {
       setReady(true);
       if (!conn) router.replace("/connect");
     });
   }, []);
 
-  // Tapping a notification opens the conversation it is about.
+  // Tapping a notification opens the conversation it is about (or the call screen for an alarm).
   useEffect(() => {
     if (!ready || !lastTap || lastTap.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
     const to = routeFor(lastTap);
@@ -51,6 +54,7 @@ export default function RootLayout() {
         <Stack.Screen name="connect" options={{ title: "Connect to your hub" }} />
         <Stack.Screen name="settings" options={{ title: "Settings" }} />
         <Stack.Screen name="t/[id]" options={{ title: "Conversation" }} />
+        <Stack.Screen name="call/[id]" options={{ headerShown: false, gestureEnabled: false, animation: "fade" }} />
       </Stack>
     </SafeAreaProvider>
   );

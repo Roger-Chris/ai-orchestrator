@@ -29,6 +29,8 @@ const config: ExpoConfig = {
   plugins: [
     "expo-router",
     "expo-secure-store",
+    // Calls: push-to-talk needs the microphone (RECORD_AUDIO). Nothing records or plays in the background.
+    ["expo-audio", { microphonePermission: "Lets you talk to your assistant on a call.", recordAudioAndroid: true, enableBackgroundRecording: false, enableBackgroundPlayback: false }],
     ["expo-notifications", { icon: "./assets/notification-icon.png", color: "#4F46E5", defaultChannel: "orchestrator" }],
     // The hub is reached at http://<pc>:4317 over Tailscale, which encrypts the traffic itself.
     ["expo-build-properties", { android: { usesCleartextTraffic: true } }],

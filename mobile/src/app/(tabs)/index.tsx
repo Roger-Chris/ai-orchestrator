@@ -117,6 +117,7 @@ function AlertRow({ a, first, onDone }: { a: BrainAlert; first: boolean; onDone:
         <TextLink title={a.kind === "brief" ? "Got it" : "Done"} onPress={() => void answer("done")} />
         <TextLink title="Snooze 1 h" color={c.muted} onPress={() => void answer("snooze")} />
         <TextLink title="Not important" color={c.muted} onPress={() => void answer("dismiss")} />
+        {a.kind !== "brief" && <TextLink title="Call me" color={c.muted} onPress={() => router.push(`/call/${a.id}?talk=1` as never)} />}
         {busy && <ActivityIndicator color={c.accent} />}
       </View>
       <ErrorText text={err} />
