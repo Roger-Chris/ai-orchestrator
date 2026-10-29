@@ -8,7 +8,7 @@ A brain that routes work across the owner's Claude, ChatGPT (Go), Gemini (Google
 - `web/`: React + Vite web app (PWA), built to `web/dist` by `npm start`.
 - `mobile/`: Expo (SDK 58) React Native Android app, installed from an APK, not the Play Store. It has its own `AGENTS.md`: read it before touching Expo APIs.
 - `agents/`: specialist agent YAML files.
-- `tests/`: vitest with fake providers. `npm test` must stay green (143 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
+- `tests/`: vitest with fake providers. `npm test` must stay green (158 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
 
 ## Running the hub
 
@@ -125,6 +125,12 @@ Hard-won details:
 - Telegram was removed from the brain on 29 Oct 2026; the app is the only remote. `/api/brain/*` (`src/server/brain.ts`) passes an allow-list of brain paths with BRAIN_TOKEN: tasks (list, add, confirm/reject/done, patch), chats + mute, brief, llm/usage, graph, memory/stats. Anything else is 403; keep the list short.
 - App screens: Assistant tab (`(tabs)/assistant.tsx`, conversation kept for the app session), `tasks.tsx` (Keep / Not a task / Done, add), `memory.tsx` (search, kinds, about, remember), `wa-chats.tsx` (mute switches), Settings → Assistant (brief now, model key usage). Brain errors come as `{detail}`; `api()` reads both.
 - To look at the app in a browser: copy `mobile/` aside, swap `expo-secure-store` for localStorage and drop `useLastNotificationResponse` (both native-only), `npm install --no-save react-dom react-native-web`, `npx expo export --platform web`, and serve it on the same origin as the hub's `/api`. That is how the screens were checked before Telegram was removed.
+
+## Talking to Jarvis (voice)
+
+- `POST /api/assistant/voice` (`src/voice/talk.ts`): recognised words or a clip (Groq Whisper) + history -> the brain's thinking loop as `source: "voice"` -> `{heard, answer, say, steps, pending}`; `say` is a short plain line. The app's Assistant tab mic and the hands-free Talk screen (`mobile/src/app/talk.tsx`) use it; listening is on the phone (`expo-speech-recognition`, en-IN, `mobile/src/lib/listen.ts`).
+- Jarvis's voice (`src/voice/tts.ts`, config `tts:`): `POST /api/tts {text, provider?, voice?}` and `GET /api/tts/audio?text=&provider=&voice=` return audio from the first service with a key, in `tts.order`: OpenAI (`OPENAI_API_KEY`, gpt-4o-mini-tts, mp3), Gemini (`GEMINI_API_KEY`, Interactions API `POST /v1beta/interactions`, audio base64 in the `model_output` step; raw PCM is wrapped as 24 kHz WAV), Groq Orpheus (the Groq keys; 200 characters per request, so `splitForLimit` + WAVs joined). A failing service rests (429: 1 min, 400/401/403/404: 1 h, else 30 s) and is skipped until then, the next is tried (all resting: 503 with no call); the last 24 lines are cached. `GET /api/tts` lists services, voices and the default, never keys. Every failure answers `{fallback: "phone"}`: the app then speaks with Android TTS.
+- App side: everything speaks through `mobile/src/lib/voice.ts` `speak()`/`stopSpeaking()` (Assistant tab, Talk, alarm/call screen). It streams `/api/tts/audio` into an expo-audio player (headers carry the token), falls back to `expo-speech` on a player error or nothing loaded in 12 s, and a generation counter stops a line still being fetched when you interrupt. Settings → Voice (`components/VoiceSettings.tsx`) stores `{engine: auto|hub|phone, provider, voice, phoneVoice}` in SecureStore `orc.voice`.
 
 ## Conventions
 

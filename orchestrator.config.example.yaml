@@ -130,6 +130,13 @@ gmail:                       # today's tasks from your mail; off until `orc gmai
   query: "in:inbox newer_than:2d -category:promotions -category:social -category:forums"
   provider: auto             # model that reads the mail: auto (Groq first) | groq | claude | gemini | codex
 
+tts:                         # Jarvis's voice (POST /api/tts); the phone's own voice speaks when none of these can
+  provider: auto             # auto (first of order with a key) | openai | gemini | groq | off
+  order: [openai, gemini, groq]
+  openai: { voice: onyx }    # OPENAI_API_KEY in .env; model gpt-4o-mini-tts
+  gemini: { voice: Charon }  # GEMINI_API_KEY in .env; model gemini-3.8-flash-lite-tts (Interactions API)
+  groq: { voice: troy }      # Groq keys above; Orpheus (accept its terms once in the Groq console)
+
 cluster:
   enabled: true
   tailscale: true            # find other devices running the orchestrator on your tailnet

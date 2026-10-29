@@ -24,7 +24,7 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 - [x] V1 Hub `POST /api/assistant/voice`: text or a voice clip (+ history) -> transcribe (Groq Whisper) -> brain thinking loop -> `{heard, answer, say, steps, pending}`; `say` is a short spoken version.
 - [x] V2 App: mic in the Assistant tab (on-device speech recognition, `expo-speech-recognition` 58.0.0; falls back to sending the clip), spoken answers, approvals still a tap.
 - [x] V3 App: "Talk to Jarvis" call screen any time (not tied to an alert), push-to-talk and hands-free (auto end of speech), barge-in stops speaking.
-- [ ] V4 Better voice: hub `POST /api/tts` (OpenAI / Gemini TTS when configured) with phone TTS as the fallback; voice choice in Settings.
+- [x] V4 Better voice: hub `POST /api/tts` (OpenAI / Gemini TTS when configured) with phone TTS as the fallback; voice choice in Settings.
 - [ ] V5 Wake word on the laptop (node agent, openWakeWord/Porcupine-free) and in-app "Hey Jarvis" while the app is open.
 
 ### Phase 1: model router + AI hub
@@ -54,3 +54,4 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 
 ## Log
 - 2026-10-30: roadmap written; V1 hub voice endpoint; V2-V3 mic in Assistant tab + hands-free Talk screen (needs a new APK: expo-speech-recognition is native).
+- 2026-10-29 (scheduled run): V4 hub `POST /api/tts` + `GET /api/tts/audio` (OpenAI gpt-4o-mini-tts, Gemini Interactions TTS, Groq Orpheus split at 200 chars; failing services rest; cache) and Settings → Voice (auto / hub / phone, service, voice, phone voice, test). Phone TTS stays the fallback. Assumed Gemini model `gemini-3.8-flash-lite-tts` from the current docs; change `tts.gemini.model` if it is renamed. JS-only app change: rebuild the APK.

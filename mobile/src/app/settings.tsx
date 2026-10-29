@@ -2,6 +2,7 @@ import { router } from "expo-router";
 import { useEffect, useState } from "react";
 import { Alert, AppState, Platform, ScrollView, Text, View } from "react-native";
 import { Button, Card, Dot, Muted, Row } from "../components/ui";
+import { VoiceSettings } from "../components/VoiceSettings";
 import { Api, connection } from "../lib/api";
 import { askBatteryExemption, batteryRestricted, isXiaomi, openAppSettings, openAutostart } from "../lib/background";
 import { enablePush, pushBuiltIn } from "../lib/push";
@@ -124,6 +125,8 @@ export default function Settings() {
         {!!briefMsg && <Text style={{ color: c.text }}>{briefMsg}</Text>}
         {!!usage && <Text selectable style={{ color: c.text, fontFamily: "monospace", fontSize: 12 }}>{usage}</Text>}
       </Card>
+
+      <VoiceSettings />
 
       <Card>
         <Text style={h2}>Gmail</Text>

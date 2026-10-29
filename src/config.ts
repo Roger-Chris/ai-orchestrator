@@ -263,6 +263,43 @@ const ConfigSchema = z.object({
       maxContacts: z.number().int().min(1).default(80),
     })
     .prefault({}),
+  /**
+   * Jarvis's voice (src/voice/tts.ts): `POST /api/tts` turns a line into audio with the first service
+   * that has a key; the phone's own TTS speaks whenever none does or all fail.
+   */
+  tts: z
+    .object({
+      /** "auto": the first of `order` with a key; "off": always the phone's voice. */
+      provider: z.enum(["auto", "off", "openai", "gemini", "groq"]).default("auto"),
+      order: z.array(z.enum(["openai", "gemini", "groq"])).default(["openai", "gemini", "groq"]),
+      maxChars: z.number().int().min(50).max(4000).default(600),
+      openai: z
+        .object({
+          apiKey: z.string().optional(),
+          baseUrl: z.string().default("https://api.openai.com/v1"),
+          model: z.string().default("gpt-4o-mini-tts"),
+          voice: z.string().default("onyx"),
+          /** How to speak (gpt-4o-mini-tts only). */
+          instructions: z.string().default("Speak like a calm, friendly personal assistant: clear, natural pace, warm, not theatrical."),
+        })
+        .prefault({}),
+      gemini: z
+        .object({
+          apiKey: z.string().optional(),
+          baseUrl: z.string().default("https://generativelanguage.googleapis.com/v1beta"),
+          model: z.string().default("gemini-3.8-flash-lite-tts"),
+          voice: z.string().default("Charon"),
+        })
+        .prefault({}),
+      /** Uses the Groq provider's keys. Orpheus needs its terms accepted once in the Groq console. */
+      groq: z
+        .object({
+          model: z.string().default("canopylabs/orpheus-v1-english"),
+          voice: z.string().default("troy"),
+        })
+        .prefault({}),
+    })
+    .prefault({}),
   cluster: z
     .object({
       enabled: z.boolean().default(true),
@@ -305,6 +342,8 @@ export function parseConfig(raw: unknown): Config {
   if (!cfg.sharedMemory.hub) cfg.sharedMemory.hub = process.env.MEMORY_HUB || undefined;
   if (!cfg.providers.groq.apiKey) cfg.providers.groq.apiKey = process.env.GROQ_API_KEY || undefined;
   if (!cfg.providers.groq.apiKeys.length) cfg.providers.groq.apiKeys = (process.env.GROQ_API_KEYS ?? "").split(",").map((k) => k.trim()).filter(Boolean);
+  if (!cfg.tts.openai.apiKey) cfg.tts.openai.apiKey = process.env.OPENAI_API_KEY || undefined;
+  if (!cfg.tts.gemini.apiKey) cfg.tts.gemini.apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || undefined;
   return cfg;
 }
 

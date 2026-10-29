@@ -20,6 +20,7 @@ import { letGo } from "../whatsapp/convo.js";
 import type { ReplyDrafter } from "../whatsapp/drafter.js";
 import { CallError, type CallDesk } from "../calls/desk.js";
 import { type AskReply, sayFor, type TalkReply } from "../voice/talk.js";
+import { TTS_PROVIDERS, type Tts, TtsError } from "../voice/tts.js";
 import type { StyleBook } from "../whatsapp/learn.js";
 import type { MemoryReplica } from "../shared/replica.js";
 import { type Ask, AskBody, askBrain, mountSharedMemory } from "./shared-memory.js";
@@ -46,6 +47,8 @@ export interface AppDeps {
   drafter?: ReplyDrafter;
   /** Voice calls about brain alerts; absent in tests that don't need it. */
   calls?: CallDesk;
+  /** Jarvis's voice from a speech service; absent means the phone speaks for itself. */
+  tts?: Tts;
   /** This device's copy of the shared memory pool; absent when sharedMemory.enabled is false. */
   replica?: MemoryReplica;
   /** How /node/memory/* reaches the brain; tests pass a fake. */
@@ -513,6 +516,24 @@ export function createApp(d: AppDeps) {
     if (r.status >= 400) return c.json({ ...reply, heard: text }, r.status as 404 | 502);
     return c.json({ ...reply, heard: text, say: sayFor(reply) } satisfies TalkReply);
   });
+  // ---- Jarvis's voice: a line in, audio out (src/voice/tts.ts). 409 {fallback: "phone"} = use the phone's TTS.
+  // GET /api/tts/audio?text=… exists so the app's audio player can stream it straight from a URL.
+  const TtsBody = z.object({ text: z.string().min(1).max(4000), provider: z.enum(TTS_PROVIDERS).optional(), voice: z.string().max(60).optional() });
+  const speakNow = async (c: Context, body: unknown) => {
+    const parsed = TtsBody.safeParse(body);
+    if (!parsed.success) return c.json({ error: "send {text, provider?, voice?}" }, 400);
+    if (!d.tts) return c.json({ error: "this hub has no speech service; the phone speaks instead", fallback: "phone" }, 409);
+    try {
+      const s = await d.tts.speak(parsed.data.text, parsed.data);
+      return c.body(s.audio.slice().buffer as ArrayBuffer, 200, { "Content-Type": s.mime, "Cache-Control": "private, max-age=3600", "X-Tts-Provider": s.provider, "X-Tts-Voice": s.voice });
+    } catch (e) {
+      const status = e instanceof TtsError ? e.status : 502;
+      return c.json({ error: (e as Error).message, fallback: "phone" }, status === 400 ? 400 : status === 409 ? 409 : status === 503 ? 503 : 502);
+    }
+  };
+  app.get("/api/tts", (c) => c.json(d.tts?.status() ?? { enabled: false, default: null, providers: [] }));
+  app.post("/api/tts", async (c) => speakNow(c, await c.req.json().catch(() => ({}))));
+  app.get("/api/tts/audio", (c) => speakNow(c, { text: c.req.query("text") ?? "", provider: c.req.query("provider") || undefined, voice: c.req.query("voice") || undefined }));
   app.post("/api/calls/:alertId/end", (c) => {
     const id = Number(c.req.param("alertId"));
     if (!Number.isInteger(id)) return c.json({ error: "bad alert id" }, 400);

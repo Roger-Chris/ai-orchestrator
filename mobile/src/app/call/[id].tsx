@@ -1,6 +1,6 @@
 import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from "expo-audio";
 import { router, useLocalSearchParams } from "expo-router";
-import * as Speech from "expo-speech";
+import { speak as say, stopSpeaking } from "../../lib/voice";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, Vibration, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -12,7 +12,7 @@ import { useColors } from "../../lib/theme";
  * The alarm and call screen for one brain alert.
  * - level 3 (alarm): rings; answer with Done / Snooze / Not important, or talk it through.
  * - level 4 (call), or "Call me about this" from Home: Answer / Decline, then a push-to-talk call.
- * The phone speaks with its own text-to-speech; you hold the mic to talk and release to send.
+ * Jarvis speaks with the voice chosen in Settings (the hub's, or the phone's own text-to-speech); you hold the mic to talk and release to send.
  * The hub hears it (Groq Whisper) and can only do safe things (src/calls/desk.ts).
  */
 
@@ -40,10 +40,7 @@ export default function CallScreen() {
   const ended = useRef(false);
 
   const add = (who: Line["who"], text: string) => setLines((l) => [...l, { who, text }]);
-  const speak = (text: string) => {
-    Speech.stop().catch(() => {});
-    Speech.speak(text, { rate: 1.0 });
-  };
+  const speak = (text: string) => void say(text);
 
   // Load the alert. A call (level 4) rings; an alarm (level 3) shows its own buttons; "talk" skips ringing.
   useEffect(() => {
@@ -78,7 +75,7 @@ export default function CallScreen() {
 
   useEffect(
     () => () => {
-      Speech.stop().catch(() => {});
+      stopSpeaking();
       if (!ended.current) Calls.end(alertId).catch(() => {});
     },
     [alertId],
@@ -107,7 +104,7 @@ export default function CallScreen() {
   }, [alertId]);
 
   const finish = async (how: "end" | "done" | "snooze" | "dismiss") => {
-    Speech.stop().catch(() => {});
+    stopSpeaking();
     if (recording) await recorder.stop().catch(() => {});
     setBusy(true);
     setErr("");
@@ -137,7 +134,7 @@ export default function CallScreen() {
   const startTalking = async () => {
     if (busy || phase !== "talking") return;
     setErr("");
-    Speech.stop().catch(() => {});
+    stopSpeaking();
     try {
       await recorder.prepareToRecordAsync();
       recorder.record();

@@ -39,6 +39,7 @@ import { WaStore, type WaMessage } from "./whatsapp/store.js";
 import { ReplyDrafter, replyOptions } from "./whatsapp/drafter.js";
 import { CallDesk } from "./calls/desk.js";
 import { GroqVoice } from "./calls/groq.js";
+import { ttsFromConfig } from "./voice/tts.js";
 import { addTerms } from "./whatsapp/address.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -139,7 +140,8 @@ export function buildSystem(config: Config) {
     task: (taskId) => store.tasksFor(localDay()).find((t) => t.id === `brain:${taskId}`),
   });
   const actions = buildActions(config, { store, pool, replica, cluster, notifier });
-  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls };
+  const tts = ttsFromConfig(config);
+  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */

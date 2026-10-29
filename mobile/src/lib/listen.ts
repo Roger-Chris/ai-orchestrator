@@ -1,6 +1,6 @@
-import * as Speech from "expo-speech";
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import { useCallback, useRef, useState } from "react";
+import { stopSpeaking } from "./voice";
 
 /**
  * Listening on the phone itself (Android's speech recognition): no key, no upload of your voice to
@@ -17,16 +17,8 @@ export function canListen(): boolean {
   }
 }
 
-/** Says `text` aloud; anything still being said is cut off first. Resolves when it finishes or is stopped. */
-export function speak(text: string): Promise<void> {
-  Speech.stop().catch(() => {});
-  return new Promise((done) => {
-    if (!text.trim()) return done();
-    Speech.speak(text, { language: LISTEN_LANG, rate: 1.0, onDone: () => done(), onStopped: () => done(), onError: () => done() });
-  });
-}
-
-export const stopSpeaking = () => void Speech.stop().catch(() => {});
+// Speaking lives in voice.ts (the hub's voice or the phone's, chosen in Settings → Voice).
+export { speak, stopSpeaking } from "./voice";
 
 const MESSAGES: Record<string, string> = {
   "not-allowed": "The microphone or speech recognition is off for this app: allow it in Android Settings.",
