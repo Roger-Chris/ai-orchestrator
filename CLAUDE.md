@@ -44,6 +44,7 @@ Hard-won details:
   For a JS-only change (no new native packages), skip prebuild: mirror `mobile/src` into `C:\orcm\src` (`robocopy ... /MIR`) and rerun gradle.
 - `mobile/metro.config.js` resolves the app's own `node_modules` first (the repo root has a different React for the web app) but keeps nested lookup on (expo-router keeps `@expo/metro-runtime` nested).
 - On Xiaomi phones `adb install` needs Developer options → **Install via USB**.
+- Native packages added for calls: `expo-audio` (push-to-talk, config plugin adds RECORD_AUDIO) and `expo-speech` (the phone's own TTS). The first build after them needs `npx expo prebuild --platform android --clean` (not the JS-only shortcut). Install mobile deps with `npm install --legacy-peer-deps`: the lockfile's peer deps make plain `npm ci` fail.
 
 ## Home screen
 
@@ -52,6 +53,12 @@ Hard-won details:
 - Today is normally filled from the AI_Assistant brain (`src/integrations/assistant.ts`, `assistant:` config, `BRAIN_TOKEN` in `.env`): every `pollMinutes` it copies the brain's tasks due today, overdue and finished-today as `brain:<id>` rows (`upsertTask`/`pruneTasks`), and `POST /api/tasks/brain:<id>/done` calls the brain's `/tasks/<id>/done` (or `/confirm` to reopen) first. The brain is localhost-only, so this runs on the Linux hub. Its `GET /tasks` includes `source` (email/whatsapp/manual) since AI_Assistant added it for this.
 - Alerts from the brain: it decides what is worth interrupting you for and when (levels, quiet hours, snooze: AI_Assistant `brain/app/alerts.py`) and posts each to `POST /api/notify`; the hub pushes it (tag `alert:<id>`) and keeps the open ones in `AssistantTasks` (refreshed from the brain's `GET /alerts` on every sync; an older brain without it is skipped). Home's `alerts` show as "Needs you" in the app; Done / Snooze 1 h / Not important go through `POST /api/alerts/:id/ack` to the brain's `/alerts/<id>/ack`.
 - Gmail: the owner's own OAuth client (`gmail-client.json`, not in git) and a refresh token in `data/gmail-token.json` from `orc gmail connect` (works headless: paste the redirect address). The reader polls every `gmail.pollMinutes`, sends new mail in batches of 10 to the first ready of Claude/Gemini/ChatGPT for JSON tasks, and marks mail seen (`gmail_seen`) only after a batch parses, so failures retry.
+
+## Alarms and calls
+
+- Brain alerts at level 3 (alarm) and 4 (call) go out on the app's `alarm` channel (`ALARM_CHANNEL` in `src/server/fcm.ts`, created by `ensureChannels` in `mobile/src/lib/push.ts`: max importance, alarm audio, long vibration, bypass DND, public on the lock screen) with `data.url = /#/call/<id>`; levels 1-2 are sent exactly as before (`alertPayload` in `src/server/push.ts`). Android fixes a channel's sound/vibration at creation: change the settings by renaming the channel id, never by editing it.
+- No full-screen intent: an FCM *notification* message is drawn by the Firebase SDK when the app is in the background, and expo-notifications has no full-screen option; it would need data-only messages (dropped on the owner's Xiaomi) plus native code. The alarm is a heads-up notification that rings; tapping it opens `mobile/src/app/call/[id].tsx`.
+- Calls (`src/calls/desk.ts`, `CallDesk`; `src/calls/groq.ts` for Whisper + JSON chat): `GET /api/calls/:alertId`, `POST .../answer` (opening line), `POST .../turn` (multipart `audio` field, or JSON `{text}` / `{audio: base64, mime}`), `POST .../end`. Actions are only done/snooze/dismiss (brain ack), draft_reply and delegate (read-only runs, only after the assistant proposed and you said yes) and none; anything else is refused. Call state is in memory per alert (2 h idle). No Groq key: voice gets 409 `{fallback: "text"}`, typed turns go to Claude/Gemini/ChatGPT.
 
 ## WhatsApp style and the context pool
 
