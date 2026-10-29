@@ -175,7 +175,8 @@ export function chatStats(msgs: WaMessage[]): ChatStats {
     address: addressTerms(texts),
     spelling: spellingMap(texts),
     words: topWords(texts),
-    stock: stockMessages(texts),
+    // Typed messages only: a document's file name or a photo caption is not something you "say".
+    stock: stockMessages(mine.filter((m) => !m.mediaType || m.transcript).map((m) => (m.transcript ?? m.text).trim())),
   };
 }
 
