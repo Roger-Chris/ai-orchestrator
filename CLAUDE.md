@@ -8,7 +8,7 @@ A brain that routes work across the owner's Claude, ChatGPT (Go), Gemini (Google
 - `web/`: React + Vite web app (PWA), built to `web/dist` by `npm start`.
 - `mobile/`: Expo (SDK 58) React Native Android app, installed from an APK, not the Play Store. It has its own `AGENTS.md`: read it before touching Expo APIs.
 - `agents/`: specialist agent YAML files.
-- `tests/`: vitest with fake providers. `npm test` must stay green (136 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
+- `tests/`: vitest with fake providers. `npm test` must stay green (143 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
 
 ## Running the hub
 
@@ -76,6 +76,13 @@ Hard-won details:
 - Conversation state (`src/whatsapp/convo.ts`, rules, no model): their acknowledgement of your message ("ok", "seri", 👍, a sticker) = ended (no draft unless asked); a sign-off ("ok da gn") = winding down (options include a "Close"); your last word older than 12 h = died out. Home's `quiet` lists direct chats that died out in the last 3 days ("Went quiet": Follow up drafts a nudge, Let it go hides it until the chat's next message, `wa_quiet_let_go` keeps the last message's ts).
 - People graph (`orc style graph`, `src/whatsapp/graph.ts`): writes `data/style/graph/graphify-out/graph.json` in Graphify's node-link format (you, every person and group, their terms of address, relationship types, shared groups; details per node from `describe`) and runs `graphify cluster-only` (spawned without a shell: the repo path has a space) for `graph.html`; Graphify's panel truncates text, so the full profiles are also in `data/style/graph/people.md`. Totals and frequency come from `WaStore.activity` (all stored messages), not the 400 a profile studies. The owner reviews this before profiles are trusted for new messages.
 - Replies (`src/whatsapp/drafter.ts`, `ReplyDrafter`): the laptop's `orc whatsapp link` forwards live messages to `whatsapp.hub` (`POST /api/whatsapp/messages`, queued and retried while the hub is down); `orc style push` sends the book (`PUT /api/style`) plus the last 60 messages per chat (`live: false`, never drafted). The hub waits `draftDelaySeconds` after their last message in a direct chat, drafts with the first ready of Claude/Gemini/ChatGPT/Groq, stores it in `wa_drafts`, notifies the phone and lists it as `replies` in `/api/home`. Your own message in that chat marks its drafts sent. The phone's "Send in WhatsApp" opens wa.me for phone-number chats and the share sheet for hidden-id chats; nothing is ever sent by the hub. Live voice notes are held by the link until the laptop's Whisper has transcribed them (`onVoice`), then forwarded with the text; a failed download or transcription forwards them as "[voice note]". `orc whatsapp link` counts libsignal's "Bad MAC" decrypt noise instead of printing it and survives Baileys' unawaited `428 Connection Closed` rejections (it reconnects by itself).
+
+## Replies know the person (shared memory) and treat first contacts carefully
+
+- `src/whatsapp/knowledge.ts`: `personKnowledge(replica, {name, chatId, isGroup})` gives the reply prompt what the shared memory knows about them: who they are, facts/decisions/notes about them, relations, and open tasks/events with them (the brain mirrors tasks with the people's names in `tags`). The drafter gets it through `DrafterOptions.knowledge` (wired in `cli.ts` from the local replica) for both `draft()` and the phone's `suggest()`; a memory error never stops a reply.
+- Matching is exact only: the chat id first (the brain's graph keeps it as a slugged alias, `919876543210-s-whatsapp-net`), then the name as `person:<slug>` / `org:<slug>` or an alias. A bare number never matches by name; no search fallback (a wrong person is worse than none). Tasks must name the person exactly in their tags.
+- The prompt section says "from my own notes … background only, never quote it, never mention notes or memory".
+- First contacts (`ContextPool.newContact`: no style card and I never wrote to them; `unknownNumber`: the name is just a number): `newContactRule` makes replies polite, neutral and short, no nicknames or terms of address, nothing personal, no promises to meet/pay/commit, one "Who is this?" option when unclear, and `{"options":[]}` for spam or sales. Groups never get these rules.
 
 ## Agents know the setup
 

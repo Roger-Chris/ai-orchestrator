@@ -42,6 +42,12 @@ export interface ContextPool {
   incoming: WaMessage[];
   /** Where the conversation stands (see convo.ts); "ended" chats get no draft unless you ask. */
   state: ConvoState;
+  /** What the shared memory knows about them (knowledge.ts): background, never quoted. */
+  knowledge: string[];
+  /** I have never written to them and the style book has no card: a first contact. */
+  newContact: boolean;
+  /** No name, only a number: not in my contacts. */
+  unknownNumber: boolean;
 }
 
 export interface PoolOptions {
@@ -51,6 +57,8 @@ export interface PoolOptions {
   minOwn?: number;
   /** Messages of the conversation shown. */
   recent?: number;
+  /** Lines about them from the shared memory (knowledge.ts). */
+  knowledge?: string[];
 }
 
 const words = (s: string) => new Set(s.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? []);
@@ -167,6 +175,9 @@ export function buildPool(book: StyleBook, chat: { chatId: string; name?: string
     recent,
     incoming,
     state: convoState(recent).state,
+    knowledge: o.knowledge ?? [],
+    newContact: !own && !messages.some((m) => m.fromMe),
+    unknownNumber: !chat.isGroup && (!name || /^\+?[\d\s-]{6,}$/.test(name)),
   };
 }
 
@@ -182,6 +193,23 @@ export function addressRule(p: Pick<ContextPool, "address" | "addressBasis">): s
   return p.addressBasis >= 10
     ? "I never use a term of address with them (no sir, ji, bro, machi, da, di): do not add one."
     : "I have not written to them enough to know what I call them: use no term of address (no sir, ji, bro, machi, da, di).";
+}
+
+/**
+ * A first contact: someone I have never written to (and maybe not even a saved contact). Replies
+ * borrowed from my friends' chats would sound over-familiar, and a stranger must not get my
+ * details or a promise. Exported for tests.
+ */
+export function newContactRule(p: Pick<ContextPool, "name" | "unknownNumber" | "knowledge">): string {
+  const who = p.unknownNumber ? `${p.name} is not in my contacts and I have never written to them` : `I have never written to ${p.name} before`;
+  return [
+    `${who}.`,
+    "Be polite, neutral and short. No nicknames, slang or terms of address I use with friends; don't act as if we know each other" +
+      (p.knowledge.length ? " beyond what my notes above say." : "."),
+    "Don't share personal details (address, phone numbers, where I am, my plans) and don't agree to meet, pay, send money or commit to anything.",
+    'If it isn\'t clear who they are or what they want, make one option a short question asking who they are, labelled "Who is this?".',
+    'If it looks like spam, a scam, a sales pitch or a mass message, answer {"options":[]}.',
+  ].join(" ");
 }
 
 /** The pool as instructions for an online model: system = who you are and how you write, prompt = this chat. */
@@ -219,6 +247,12 @@ export function poolPrompt(p: ContextPool, ask?: string): { system: string; prom
   const prompt = [
     `Chat: ${p.isGroup ? `the group "${p.name}"` : `direct chat with ${p.name}`}.`,
     card,
+    p.knowledge.length &&
+      [
+        "What I know about them, from my own notes (background only: use it when it helps the reply, never quote it, never mention notes or memory, and never add anything it doesn't say):",
+        ...p.knowledge.map((k) => `- ${k}`),
+      ].join("\n"),
+    p.newContact && !p.isGroup && newContactRule(p),
     !p.isGroup && addressRule(p),
     s &&
       [

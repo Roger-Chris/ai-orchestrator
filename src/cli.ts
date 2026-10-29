@@ -18,6 +18,7 @@ import { GmailReader } from "./integrations/gmail.js";
 import { Memory } from "./memory/memory.js";
 import { openReplica } from "./shared/setup.js";
 import { buildActions } from "./actions/setup.js";
+import { personKnowledge } from "./whatsapp/knowledge.js";
 import { tailnetDevices, tailscaleIPv4 } from "./cluster/tailscale.js";
 import { type Config, loadConfig } from "./config.js";
 import { probeVersion } from "./providers/base.js";
@@ -106,6 +107,8 @@ export function buildSystem(config: Config) {
       groups: config.whatsapp.draftGroups,
       provider: config.whatsapp.replyProvider,
       node: config.node.name,
+      // who they are, facts and open tasks with them, from the shared memory
+      knowledge: replica ? (who) => personKnowledge(replica, who) : undefined,
     },
     (p) => void notifier.notify(p),
   );

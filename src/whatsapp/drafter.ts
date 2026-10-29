@@ -28,6 +28,8 @@ export interface DrafterOptions {
   groups: boolean;
   provider: "auto" | ProviderId;
   node: string;
+  /** What the shared memory knows about the person a reply is for (knowledge.ts); none when absent. */
+  knowledge?: (who: { name: string; chatId: string; isGroup: boolean }) => string[];
 }
 
 const ORDER: ProviderId[] = ["claude", "gemini", "codex", "groq"];
@@ -169,7 +171,8 @@ export class ReplyDrafter {
     const messages = this.wa.messages(chatId, 200);
     if (!messages.length) throw new Error("no messages from this chat on the hub yet");
     const isGroup = chatId.endsWith("@g.us");
-    const p = buildPool(book, { chatId, name: this.wa.chatName(chatId), isGroup }, messages);
+    const who = { chatId, name: this.wa.chatName(chatId) ?? "", isGroup };
+    const p = buildPool(book, { ...who, name: who.name || undefined }, messages, { knowledge: this.know({ ...who, name: who.name || (book.contacts.find((c) => c.chatId === chatId)?.name ?? "") }) });
     // Nothing to answer: your message is the last one, or they only acknowledged it ("ok", 👍).
     if (!ask && (!p.incoming.length || p.state === "ended")) return undefined;
     const { system, prompt } = poolPrompt(p, ask);
@@ -226,7 +229,9 @@ export class ReplyDrafter {
         ? history
         : [...history, { id: `phone-${Date.now()}`, chatId, chatName: name, senderId: chatId, senderName: name, fromMe: false, isGroup, text, ts: Math.floor(Date.now() / 1000) }];
     if (book) {
-      const p = buildPool(book, { chatId, name: chat?.name ?? name.trim(), isGroup }, messages);
+      const p = buildPool(book, { chatId, name: chat?.name ?? name.trim(), isGroup }, messages, {
+        knowledge: this.know({ chatId, name: chat?.name ?? name.trim(), isGroup }),
+      });
       const { system, prompt } = poolPrompt(p);
       const { provider, text: answer } = await this.generate(system, prompt);
       return { provider, options: replyOptions(answer, p), known: !!chat };
@@ -236,6 +241,15 @@ export class ReplyDrafter {
     const { provider, text: answer } = await this.generate(system, prompt);
     const clean = cleanDraft(answer);
     return { provider, options: clean ? [{ label: "Reply", text: clean }] : [], known: !!chat };
+  }
+
+  /** Memory lines about them; a memory problem never stops a reply. */
+  private know(who: { name: string; chatId: string; isGroup: boolean }): string[] {
+    try {
+      return this.opts.knowledge?.(who) ?? [];
+    } catch {
+      return [];
+    }
   }
 
   /** The first ready model (or the configured one) answers; usage is recorded per try. */

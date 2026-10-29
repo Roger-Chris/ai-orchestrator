@@ -11,6 +11,9 @@ import { addressTerms, addTerms, fixAddress } from "../src/whatsapp/address.js";
 import type { ProviderId, ProviderRequest } from "../src/types.js";
 import { WaStore, type WaMessage } from "../src/whatsapp/store.js";
 import { Store } from "../src/store/db.js";
+import { MemoryReplica } from "../src/shared/replica.js";
+import { findPerson, personKnowledge } from "../src/whatsapp/knowledge.js";
+import { newContactRule } from "../src/whatsapp/pool.js";
 
 const cleanup: (() => void)[] = [];
 afterAll(() => cleanup.forEach((f) => f()));
@@ -170,7 +173,7 @@ describe("context pool", () => {
 });
 
 describe("reply drafter", () => {
-  function setup(answers: Partial<Record<ProviderId, string | null>>) {
+  function setup(answers: Partial<Record<ProviderId, string | null>>, knowledge?: (who: { name: string; chatId: string; isGroup: boolean }) => string[]) {
     const dir = mkdtempSync(join(tmpdir(), "orc-wa-"));
     const store = new Store(dir);
     cleanup.push(() => (store.close(), rmSync(dir, { recursive: true, force: true })));
@@ -185,7 +188,7 @@ describe("reply drafter", () => {
       },
     };
     const notes: string[] = [];
-    const drafter = new ReplyDrafter(store, wa, pool, { dataDir: dir, delaySeconds: 0, auto: true, groups: false, provider: "auto", node: "hub" }, (p) => notes.push(`${p.title}\n${p.body}`));
+    const drafter = new ReplyDrafter(store, wa, pool, { dataDir: dir, delaySeconds: 0, auto: true, groups: false, provider: "auto", node: "hub", knowledge }, (p) => notes.push(`${p.title}\n${p.body}`));
     const book: StyleBook = {
       version: 1,
       builtAt: 1,
@@ -199,6 +202,22 @@ describe("reply drafter", () => {
   }
   const now = () => Math.floor(Date.now() / 1000);
   const tick = () => new Promise((r) => setTimeout(r, 20));
+
+  it("asks memory about the person and puts it in the prompt; a broken memory never stops a reply", async () => {
+    const seen: string[] = [];
+    const answer = JSON.stringify({ options: [{ label: "Yes", text: "seri da" }] });
+    const { drafter, asked } = setup({ claude: answer }, (who) => (seen.push(`${who.name}|${who.chatId}`), ["Arun: college friend; plays cricket on Sundays."]));
+    drafter.ingest([msg(A, false, "match ku varuviya da", now())], false);
+    expect(await drafter.draft(A)).toBeTruthy();
+    expect(seen).toEqual([`Arun|${A}`]);
+    expect(asked[0].req.prompt).toContain("- Arun: college friend; plays cricket on Sundays.");
+
+    const broken = setup({ claude: answer }, () => {
+      throw new Error("memory db locked");
+    });
+    broken.drafter.ingest([msg(A, false, "match ku varuviya da", now())], false);
+    expect(await broken.drafter.draft(A)).toBeTruthy();
+  });
 
   it("cleans the model's answer and treats SKIP as no reply", () => {
     expect(cleanDraft('"okk da"')).toBe("okk da");
@@ -345,5 +364,83 @@ describe("your spelling and reply options", () => {
     expect(prompt).toContain("Words as I spell them (use these spellings): okk, pannalam.");
     expect(prompt).toContain("ok → okk");
     expect(prompt).toContain('Messages I often send, word for word (reuse them when they fit): "okk da".');
+  });
+});
+
+
+describe("what memory knows about the person a reply is for", () => {
+  const J = "919876543210@s.whatsapp.net";
+  function memoryWithJayesh() {
+    const dir = mkdtempSync(join(tmpdir(), "orc-know-"));
+    cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+    const r = new MemoryReplica(join(dir, "m.db"), "hub");
+    // as the brain mirrors him: the chat id is a slugged alias
+    r.put({ uid: "person:jayesh-daga", kind: "person", title: "Jayesh Daga", body: "Classmate; co-inventor on the patent.", aliases: ["919876543210-s-whatsapp-net", "jd"] });
+    r.put({ kind: "fact", title: "calls", body: "Jayesh prefers calls after 6 pm on weekdays.", subject: "person:jayesh-daga" });
+    r.put({ uid: "relation:jayesh-daga~co_inventor_of~water-patent", kind: "relation", title: "Jayesh Daga co inventor of Water patent", data: { src: "person:jayesh-daga", rel: "co_inventor_of", dst: "project:water-patent" } });
+    r.put({ uid: "task:7", kind: "task", title: "Send the patent draft to Jayesh", tags: "Jayesh Daga", data: { status: "open", due_at: "2026-10-31T12:30:00+00:00" } });
+    r.put({ uid: "task:8", kind: "task", title: "Old thing with Jayesh", tags: "Jayesh Daga", data: { status: "done" } });
+    r.put({ uid: "task:9", kind: "task", title: "Pay Jayaraman", tags: "Jayaraman", data: { status: "open" } });
+    return r;
+  }
+
+  it("finds them by chat id even under another name, and by exact name; never by a near miss", () => {
+    const r = memoryWithJayesh();
+    expect(findPerson(r, { name: "JD College", chatId: J, isGroup: false })?.uid).toBe("person:jayesh-daga");
+    expect(findPerson(r, { name: "Jayesh Daga", chatId: "1@s.whatsapp.net", isGroup: false })?.uid).toBe("person:jayesh-daga");
+    expect(findPerson(r, { name: "Jayesh", chatId: "1@s.whatsapp.net", isGroup: false })).toBeUndefined();
+    expect(findPerson(r, { name: "+91 98765 43210", chatId: "2@s.whatsapp.net", isGroup: false })).toBeUndefined();
+  });
+
+  it("gives who they are, facts, links and only their open tasks", () => {
+    const lines = personKnowledge(memoryWithJayesh(), { name: "Jayesh Daga", chatId: J, isGroup: false });
+    expect(lines[0]).toBe("Jayesh Daga: Classmate; co-inventor on the patent.");
+    expect(lines).toContain("Jayesh prefers calls after 6 pm on weekdays.");
+    expect(lines).toContain("Jayesh Daga co inventor of Water patent");
+    expect(lines).toContain("Open task with them: Send the patent draft to Jayesh (due 2026-10-31)");
+    expect(lines.join("\n")).not.toMatch(/Old thing|Jayaraman/);
+  });
+
+  it("goes into the reply prompt as background, and the drafter asks for it", async () => {
+    const r = memoryWithJayesh();
+    const book: StyleBook = { version: 1, builtAt: 0, model: "m", owner: { stats: chatStats([]) }, contacts: [], graph: buildGraph([], new Map()) };
+    const p = buildPool(book, { chatId: J, name: "Jayesh Daga", isGroup: false }, [msg(J, true, "hi", 1), msg(J, false, "bro can you send it today?", 2)], {
+      knowledge: personKnowledge(r, { name: "Jayesh Daga", chatId: J, isGroup: false }),
+    });
+    const { prompt } = poolPrompt(p);
+    expect(prompt).toContain("What I know about them, from my own notes");
+    expect(prompt).toContain("- Open task with them: Send the patent draft to Jayesh (due 2026-10-31)");
+    expect(p.newContact).toBe(false); // I have written to him
+    expect(prompt).not.toContain("never written to");
+  });
+});
+
+describe("first contacts", () => {
+  const book: StyleBook = { version: 1, builtAt: 0, model: "m", owner: { stats: chatStats([]) }, contacts: [], graph: buildGraph([], new Map()) };
+  const N = "4455@s.whatsapp.net";
+
+  it("an unknown number gets the stranger rules: neutral, nothing personal, ask who, skip spam", () => {
+    const p = buildPool(book, { chatId: N, name: "+91 44 5566 7788", isGroup: false }, [msg(N, false, "hi is this the hackathon team lead?", 1)]);
+    expect(p).toMatchObject({ newContact: true, unknownNumber: true });
+    const { prompt } = poolPrompt(p);
+    expect(prompt).toContain("is not in my contacts and I have never written to them");
+    expect(prompt).toContain('labelled "Who is this?"');
+    expect(prompt).toContain("don't agree to meet, pay, send money or commit");
+    expect(prompt).toContain('answer {"options":[]}');
+  });
+
+  it("a saved contact I never wrote to is new but not unknown, and my notes about them still count", () => {
+    const p = buildPool(book, { chatId: N, name: "Prof. Om Kumar", isGroup: false }, [msg(N, false, "Please send the report", 1)], {
+      knowledge: ["Prof. Om Kumar: professor; co-inventor on the patent."],
+    });
+    expect(p).toMatchObject({ newContact: true, unknownNumber: false });
+    expect(newContactRule(p)).toContain("I have never written to Prof. Om Kumar before");
+    expect(newContactRule(p)).toContain("beyond what my notes above say");
+  });
+
+  it("groups never get the stranger rules", () => {
+    const G = "999@g.us";
+    const p = buildPool(book, { chatId: G, name: "New hackathon group", isGroup: true }, [msg(G, false, "welcome all", 1)]);
+    expect(poolPrompt(p).prompt).not.toContain("never written to");
   });
 });
