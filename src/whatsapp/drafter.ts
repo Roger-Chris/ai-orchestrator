@@ -151,7 +151,8 @@ export class ReplyDrafter {
     if (!messages.length) throw new Error("no messages from this chat on the hub yet");
     const isGroup = chatId.endsWith("@g.us");
     const p = buildPool(book, { chatId, name: this.wa.chatName(chatId), isGroup }, messages);
-    if (!ask && !p.incoming.length) return undefined; // your message is the last one: nothing to answer
+    // Nothing to answer: your message is the last one, or they only acknowledged it ("ok", 👍).
+    if (!ask && (!p.incoming.length || p.state === "ended")) return undefined;
     const { system, prompt } = poolPrompt(p, ask);
 
     const ready = await this.pool.available();

@@ -220,6 +220,18 @@ export interface Home {
   recent: { runId: string; threadId?: string; task: string; status: string; at: number }[];
   /** WhatsApp replies drafted in your style, waiting for you to send or dismiss. */
   replies: ReplyDraft[];
+  /** Direct chats that went quiet after your message (WhatsApp); absent from an older hub. */
+  quiet?: QuietChat[];
+}
+
+/** A direct chat where you had the last word and nothing came back. */
+export interface QuietChat {
+  chatId: string;
+  name: string;
+  /** Your last message, a few words of it. */
+  last: string;
+  /** When you sent it (ms). */
+  since: number;
 }
 
 /** A WhatsApp reply written in your style. The hub never sends it; you do. */

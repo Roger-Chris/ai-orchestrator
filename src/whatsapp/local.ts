@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { WaStore } from "./store.js";
@@ -13,6 +14,8 @@ import type { WaStore } from "./store.js";
 export interface LocalModelOptions {
   ollamaUrl: string;
   model: string;
+  /** Ollama model that can see images, for photos people send you. */
+  visionModel: string;
   whisperModel: string;
   /** Whisper language code, e.g. "ta"; empty detects it per voice note. */
   whisperLanguage: string;
@@ -65,6 +68,47 @@ export async function ollamaProblem(o: Pick<LocalModelOptions, "ollamaUrl" | "mo
   } catch {
     return `Ollama is not running at ${o.ollamaUrl} (install it from ollama.com and start it)`;
   }
+}
+
+/**
+ * Says in a sentence or two what a photo someone sent shows, with the local vision model, so a
+ * reply can answer the photo and not just "[image]". Copies short visible text (a price, a time).
+ */
+export async function describeImage(o: Pick<LocalModelOptions, "ollamaUrl" | "visionModel">, path: string, http: typeof fetch = fetch): Promise<string> {
+  const res = await http(`${o.ollamaUrl.replace(/\/$/, "")}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: o.visionModel,
+      messages: [
+        {
+          role: "user",
+          content:
+            "Someone sent me this photo on WhatsApp. In one or two short sentences, say what it shows so I can reply to it: what or who is in it, and any short visible text copied exactly (prices, times, names). Plain text only.",
+          images: [readFileSync(path).toString("base64")],
+        },
+      ],
+      stream: false,
+      options: { temperature: 0.2, num_predict: 160 },
+    }),
+  });
+  if (!res.ok) throw new Error(`Ollama ${res.status}: ${(await res.text()).slice(0, 200)}${res.status === 404 ? ` (run \`ollama pull ${o.visionModel}\`)` : ""}`);
+  const text = ((await res.json()) as { message?: { content?: string } }).message?.content?.trim() ?? "";
+  return text.replace(/\s+/g, " ").slice(0, 400);
+}
+
+/** Describes the downloaded photos that have no description yet; returns how many were done. */
+export async function describeImages(store: WaStore, o: Pick<LocalModelOptions, "ollamaUrl" | "visionModel">, http: typeof fetch = fetch): Promise<number> {
+  let done = 0;
+  for (const m of store.undescribed()) {
+    try {
+      store.setTranscript(m.id, await describeImage(o, m.mediaPath!, http));
+      done++;
+    } catch {
+      // Ollama down or the model missing: the photo stays "[image]" for the reply.
+    }
+  }
+  return done;
 }
 
 /** Transcribes every downloaded voice note that has no transcript yet. */

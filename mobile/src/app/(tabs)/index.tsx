@@ -3,7 +3,7 @@ import { type ReactNode, useCallback, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Linking, Pressable, RefreshControl, ScrollView, Share, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ErrorText } from "../../components/ui";
-import { type AlertAction, Api, type Attention, type BrainAlert, type DayTask, type Decision, type Home as HomeData, type ReplyDraft, type Running, Unauthorized } from "../../lib/api";
+import { type AlertAction, Api, type Attention, type BrainAlert, type DayTask, type Decision, type Home as HomeData, type QuietChat, type ReplyDraft, type Running, Unauthorized } from "../../lib/api";
 import { useColors } from "../../lib/theme";
 
 function ago(ts: number): string {
@@ -255,6 +255,39 @@ function ReplyRow({ r, first, onDone }: { r: ReplyDraft; first: boolean; onDone:
   );
 }
 
+/** A chat that went quiet after your message: nudge it (a draft in your style) or let it go. */
+function QuietRow({ q, first, onDone }: { q: QuietChat; first: boolean; onDone: () => void }) {
+  const c = useColors();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const act = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    setErr("");
+    try {
+      await fn();
+      onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Row first={first}>
+      <Text style={{ color: c.muted, fontSize: 13 }}>{[q.name, `quiet since ${ago(q.since)}`].join(" · ")}</Text>
+      <Text style={{ color: c.text, fontSize: 15, marginTop: 3 }} numberOfLines={2}>
+        You: {q.last}
+      </Text>
+      <View style={{ flexDirection: "row", gap: 20, marginTop: 8, alignItems: "center" }}>
+        <TextLink title="Follow up" onPress={() => void act(() => Api.redraft(q.chatId))} />
+        <TextLink title="Let it go" color={c.muted} onPress={() => void act(() => Api.letGo(q.chatId))} />
+        {busy && <ActivityIndicator color={c.accent} />}
+      </View>
+      <ErrorText text={err} />
+    </Row>
+  );
+}
+
 function RunningRow({ r, first }: { r: Running; first: boolean }) {
   const c = useColors();
   const share = r.stepsTotal ? r.stepsDone / r.stepsTotal : 0;
@@ -417,6 +450,14 @@ export default function Home() {
               <Section label="Replies" right={home.replies.length}>
                 {home.replies.map((r, i) => (
                   <ReplyRow key={r.id} r={r} first={i === 0} onDone={() => void load()} />
+                ))}
+              </Section>
+            )}
+
+            {(home.quiet?.length ?? 0) > 0 && (
+              <Section label="Went quiet" right={home.quiet!.length}>
+                {home.quiet!.map((q, i) => (
+                  <QuietRow key={q.chatId} q={q} first={i === 0} onDone={() => void load()} />
                 ))}
               </Section>
             )}

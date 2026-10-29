@@ -5,6 +5,17 @@ import type { AssistantTasks } from "../integrations/assistant.js";
 import type { GmailReader } from "../integrations/gmail.js";
 import type { Store } from "../store/db.js";
 import type { ReplyDrafter } from "../whatsapp/drafter.js";
+import { quietChats } from "../whatsapp/convo.js";
+import type { StyleBook } from "../whatsapp/learn.js";
+
+/** A chat's name: its WhatsApp name, else the style book's, else the number. */
+function chatNamer(store: Store, book?: StyleBook) {
+  const q = store.db.prepare("SELECT name FROM wa_chats WHERE id = ?");
+  return (id: string) => {
+    const name = (q.get(id) as { name?: string } | undefined)?.name;
+    return [name, book?.contacts.find((c) => c.chatId === id)?.name].find((n) => n && !n.startsWith("+")) ?? `+${id.split("@")[0]}`;
+  };
+}
 import type { Attention, Decision, Home, Insights, ProviderId, Running } from "../types.js";
 
 export const PROVIDER_NAME: Record<ProviderId, string> = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity", groq: "Groq" };
@@ -96,6 +107,7 @@ export async function buildHome(d: {
       .slice(0, 3)
       .map((r) => ({ runId: r.id, threadId: r.threadId, task: short(r.task, 60), status: r.status, at: r.finishedAt! })),
     replies: d.drafter?.drafts(10) ?? [],
+    quiet: d.drafter ? quietChats(d.store.db, chatNamer(d.store, d.drafter.book())) : [],
   };
 }
 
