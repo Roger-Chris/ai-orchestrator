@@ -6,6 +6,7 @@ import { Api, connection } from "../lib/api";
 import { askBatteryExemption, batteryRestricted, isXiaomi, openAppSettings, openAutostart } from "../lib/background";
 import { enablePush, pushBuiltIn } from "../lib/push";
 import { useColors } from "../lib/theme";
+import { WaReply } from "../lib/wareply";
 
 /** Xiaomi's Autostart can't be requested by an app: explain, then open the screen where it lives. */
 function promptAutostart(): Promise<void> {
@@ -28,6 +29,7 @@ export default function Settings() {
   const [busy, setBusy] = useState("");
 
   const [restricted, setRestricted] = useState(false);
+  const [waOn, setWaOn] = useState(false);
   const [gmail, setGmail] = useState<Awaited<ReturnType<typeof Api.gmail>>>();
   const [gmailMsg, setGmailMsg] = useState("");
   const [brain, setBrain] = useState<Awaited<ReturnType<typeof Api.assistant>>>();
@@ -53,7 +55,10 @@ export default function Settings() {
 
   // Re-check when you come back from Android's settings screens.
   useEffect(() => {
-    const check = () => batteryRestricted().then(setRestricted);
+    const check = () => {
+      setWaOn(WaReply.isEnabled());
+      return batteryRestricted().then(setRestricted);
+    };
     void check();
     const sub = AppState.addEventListener("change", (s) => s === "active" && void check());
     return () => sub.remove();
@@ -156,6 +161,27 @@ export default function Settings() {
           </View>
         )}
       </Card>
+
+      {WaReply.available && (
+        <Card>
+          <Text style={h2}>WhatsApp replies</Text>
+          <Muted small>
+            When a WhatsApp message arrives, Orchestrator shows who wrote, what they said and a suggested reply in your style. Tap Send suggestion, or Reply to type your own: WhatsApp itself sends it, only when you tap. It works while WhatsApp's notification for that chat is still showing.
+          </Muted>
+          <Row style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
+            <Row style={{ flex: 1, flexWrap: "nowrap" }}>
+              <Dot color={waOn ? c.ok : c.muted} />
+              <Text style={{ color: c.text, flex: 1 }}>{waOn ? "Reading WhatsApp notifications" : "Needs Notification access"}</Text>
+            </Row>
+            {!waOn && <Button small title="Allow" onPress={() => WaReply.openSettings()} />}
+          </Row>
+          {!waOn && (
+            <Muted small>
+              On the next screen turn on Orchestrator. If Android says it's a restricted setting: App info → ⋮ (top right) → Allow restricted settings, then try again.
+            </Muted>
+          )}
+        </Card>
+      )}
 
     </ScrollView>
   );

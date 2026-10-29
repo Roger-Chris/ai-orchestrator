@@ -185,7 +185,7 @@ describe("reply drafter", () => {
       },
     };
     const notes: string[] = [];
-    const drafter = new ReplyDrafter(store, wa, pool, { dataDir: dir, delaySeconds: 0, auto: true, groups: false, provider: "auto", node: "hub" }, (p) => notes.push(p.title));
+    const drafter = new ReplyDrafter(store, wa, pool, { dataDir: dir, delaySeconds: 0, auto: true, groups: false, provider: "auto", node: "hub" }, (p) => notes.push(`${p.title}\n${p.body}`));
     const book: StyleBook = {
       version: 1,
       builtAt: 1,
@@ -214,7 +214,31 @@ describe("reply drafter", () => {
     expect(asked).toHaveLength(1);
     expect(asked[0].req.prompt).toContain("match ku varuviya");
     expect(drafter.drafts()).toMatchObject([{ chatId: A, name: "Arun", phone: "111", text: "seri da varen", incoming: "match ku varuviya", provider: "claude" }]);
-    expect(notes).toEqual(["Reply to Arun"]);
+    // Who wrote, what they said, and what you might answer.
+    expect(notes).toEqual(["WhatsApp · Arun\nThey: match ku varuviya\nYou: seri da varen"]);
+  });
+
+  it("suggests a reply for a message the phone saw, by contact name, without storing or sending", async () => {
+    const { drafter, asked, notes } = setup({ claude: "varen da, 6 ku" });
+    drafter.ingest([msg(A, false, "earlier", now() - 7200)], false);
+    const s = await drafter.suggest("arun", "match ku varuviya?");
+    expect(s).toMatchObject({ provider: "claude", known: true });
+    expect(s.options).toHaveLength(1);
+    expect(s.options[0].text).toMatch(/^varen.*6 ku$/); // in your style for Arun
+    expect(asked[0].req.prompt).toContain("match ku varuviya?");
+    expect(drafter.drafts()).toEqual([]);
+    // The phone now shows WhatsApp replies itself: the hub's own draft notifications stop.
+    drafter.ingest([msg(A, false, "seri ah", now())]);
+    await tick();
+    expect(drafter.drafts()).toHaveLength(1);
+    expect(notes).toEqual([]);
+  });
+
+  it("suggests from the conversation alone for someone the hub has never seen", async () => {
+    const { drafter, asked } = setup({ claude: "Sure, see you at 5" });
+    const s = await drafter.suggest("Priya Office", "Can we meet at 5?");
+    expect(s).toMatchObject({ known: false, options: [{ text: "Sure, see you at 5" }] });
+    expect(asked[0].req.prompt).toContain("Can we meet at 5?");
   });
 
   it("retires the draft when you reply yourself, and ignores history", async () => {

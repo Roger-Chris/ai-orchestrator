@@ -64,6 +64,25 @@ export function replyOptions(answer: string, p: ContextPool): ReplyOption[] {
 
 const phoneOf = (chatId: string) => (chatId.endsWith("@s.whatsapp.net") ? chatId.split("@")[0] : undefined);
 
+/** How long after a phone's last suggestion request the hub leaves WhatsApp notifications to it. */
+const PHONE_HANDLES_MS = 24 * 3600_000;
+
+/** Who wrote, what they said, and what you might answer: the notification for a new draft. */
+export function draftNotice(name: string, incoming: string, options: ReplyOption[]): PushPayload & { tag: string } {
+  const answer = options.length > 1 ? options.map((o) => `${o.label}: ${o.text}`).join(" / ") : (options[0]?.text ?? "");
+  const said = incoming.replace(/\s+/g, " ").trim();
+  return { title: `WhatsApp · ${name}`, body: `They: ${said.slice(0, 120)}\nYou: ${answer}`.slice(0, 240), url: "/", tag: `wa:${name}` };
+}
+
+/** Without a style book: the conversation so far, and a plain instruction to answer the last message. */
+export function plainPrompt(name: string, messages: WaMessage[]): { system: string; prompt: string } {
+  const lines = messages.slice(-12).map((m) => `${m.fromMe ? "Me" : name}: ${spoken(m)}`);
+  return {
+    system: "You write WhatsApp replies for the phone's owner, as the owner. One short message in the language and tone of the chat. No quotes, no explanations. If no reply is needed, answer SKIP.",
+    prompt: `Chat with ${name}:\n${lines.join("\n")}\n\nWrite my reply to the last message.`,
+  };
+}
+
 export class ReplyDrafter {
   private cached?: { mtime: number; book: StyleBook };
   private timers = new Map<string, NodeJS.Timeout>();
@@ -154,7 +173,73 @@ export class ReplyDrafter {
     // Nothing to answer: your message is the last one, or they only acknowledged it ("ok", 👍).
     if (!ask && (!p.incoming.length || p.state === "ended")) return undefined;
     const { system, prompt } = poolPrompt(p, ask);
+    const { provider, text: answer } = await this.generate(system, prompt);
+    const options = replyOptions(answer, p);
+    if (!options.length) return undefined;
+    const text = options[0].text;
+    this.retire(chatId, "replaced");
+    const draft: ReplyDraft = {
+      id: `${chatId.split("@")[0]}-${Date.now().toString(36)}`,
+      chatId,
+      name: p.name,
+      isGroup,
+      phone: phoneOf(chatId),
+      incoming: (p.incoming.length ? p.incoming : p.recent.slice(-1)).map(spoken).join("\n").slice(0, 500),
+      text,
+      options,
+      provider,
+      createdAt: Date.now(),
+    };
+    this.store.db
+      .prepare("INSERT INTO wa_drafts (id, chat_id, incoming, text, options, provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(draft.id, chatId, draft.incoming, text, JSON.stringify(options), provider, draft.createdAt);
+    this.lastError = undefined;
+    // A phone that reads WhatsApp's own notifications shows its own, clearer one (with Send); don't double up.
+    if (Date.now() - this.phoneAt > PHONE_HANDLES_MS) this.notify?.(draftNotice(p.name, draft.incoming, options));
+    return draft;
+  }
 
+  /** When a phone last asked for a suggestion (`suggest`): it then shows WhatsApp replies itself. */
+  private phoneAt = 0;
+
+  /**
+   * A reply for a WhatsApp message the phone saw in WhatsApp's own notification. The phone knows the
+   * person by the name your contacts give them; it is matched exactly (never fuzzily) to a chat here
+   * for its history and style card, else the reply is written from your voice alone. Nothing is
+   * stored or sent: the phone shows the options, and WhatsApp itself sends the one you pick.
+   */
+  async suggest(name: string, text: string, isGroup = false): Promise<{ provider: ProviderId; options: ReplyOption[]; known: boolean }> {
+    this.phoneAt = Date.now();
+    const key = name.trim().toLowerCase();
+    const book = this.book();
+    const same = (n?: string) => n?.trim().toLowerCase() === key;
+    // A chat this hub has seen under that name, or a contact the style book knows by it.
+    const chat =
+      this.wa.chats().find((c) => same(c.name) && c.isGroup === isGroup) ??
+      book?.contacts.filter((c) => same(c.name) && c.isGroup === isGroup).map((c) => ({ id: c.chatId, name: c.name }))[0];
+    const chatId = chat?.id ?? `phone:${name.trim()}`;
+    const history = chat ? this.wa.messages(chat.id, 200) : [];
+    const last = history.at(-1);
+    // The hub's own link may already have this message; add it only when it does not.
+    const messages =
+      last && !last.fromMe && last.text.trim() === text.trim()
+        ? history
+        : [...history, { id: `phone-${Date.now()}`, chatId, chatName: name, senderId: chatId, senderName: name, fromMe: false, isGroup, text, ts: Math.floor(Date.now() / 1000) }];
+    if (book) {
+      const p = buildPool(book, { chatId, name: chat?.name ?? name.trim(), isGroup }, messages);
+      const { system, prompt } = poolPrompt(p);
+      const { provider, text: answer } = await this.generate(system, prompt);
+      return { provider, options: replyOptions(answer, p), known: !!chat };
+    }
+    // No style book on this hub yet: a short, plain reply in the conversation's own language.
+    const { system, prompt } = plainPrompt(name.trim(), messages);
+    const { provider, text: answer } = await this.generate(system, prompt);
+    const clean = cleanDraft(answer);
+    return { provider, options: clean ? [{ label: "Reply", text: clean }] : [], known: !!chat };
+  }
+
+  /** The first ready model (or the configured one) answers; usage is recorded per try. */
+  private async generate(system: string, prompt: string): Promise<{ provider: ProviderId; text: string }> {
     const ready = await this.pool.available();
     const order = this.opts.provider === "auto" ? ORDER.filter((id) => ready.includes(id)) : [this.opts.provider];
     if (!order.length) throw new Error("no online model is ready to draft (Claude, Gemini, ChatGPT or Groq)");
@@ -162,33 +247,8 @@ export class ReplyDrafter {
     for (const provider of order) {
       const r = await this.pool.run(provider, { system, prompt, permission: "read", timeoutMs: 120_000 });
       this.store.recordUsage(provider, this.opts.node, r.ok, r.durationMs);
-      if (!r.ok) {
-        error = `${provider}: ${r.error ?? "failed"}`;
-        continue;
-      }
-      const options = replyOptions(r.text, p);
-      if (!options.length) return undefined;
-      const text = options[0].text;
-      this.retire(chatId, "replaced");
-      const draft: ReplyDraft = {
-        id: `${chatId.split("@")[0]}-${Date.now().toString(36)}`,
-        chatId,
-        name: p.name,
-        isGroup,
-        phone: phoneOf(chatId),
-        incoming: (p.incoming.length ? p.incoming : p.recent.slice(-1)).map(spoken).join("\n").slice(0, 500),
-        text,
-        options,
-        provider,
-        createdAt: Date.now(),
-      };
-      this.store.db
-        .prepare("INSERT INTO wa_drafts (id, chat_id, incoming, text, options, provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
-        .run(draft.id, chatId, draft.incoming, text, JSON.stringify(options), provider, draft.createdAt);
-      this.lastError = undefined;
-      const body = options.length > 1 ? options.map((o) => `${o.label}: ${o.text}`).join("\n") : text;
-      this.notify?.({ title: `Reply to ${p.name}`, body: body.slice(0, 240), url: "/", tag: `wa:${chatId}` });
-      return draft;
+      if (r.ok) return { provider, text: r.text };
+      error = `${provider}: ${r.error ?? "failed"}`;
     }
     throw new Error(`could not draft: ${error}`);
   }

@@ -1,4 +1,5 @@
 import * as SecureStore from "expo-secure-store";
+import { WaReply } from "./wareply";
 import type { BrainAlert, Home, Insights, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
 
 export type { AlertAction, Attention, BrainAlert, DayTask, Decision, Home, Insights, QuietChat, ReplyDraft, RunEvent, RunOptions, RunRecord, Running, StepRecord, Thread } from "../../../src/types";
@@ -15,6 +16,7 @@ export async function loadConnection(): Promise<Connection | null> {
   const url = await SecureStore.getItemAsync("orc.hub");
   const token = await SecureStore.getItemAsync("orc.token");
   current = url ? { url, token: token ?? "" } : null;
+  if (current) WaReply.configure(current.url, current.token);
   return current;
 }
 
@@ -23,6 +25,7 @@ export async function saveConnection(c: Connection) {
   await SecureStore.setItemAsync("orc.hub", url);
   await SecureStore.setItemAsync("orc.token", c.token.trim());
   current = { url, token: c.token.trim() };
+  WaReply.configure(url, current.token);
 }
 
 export function connection(): Connection | null {

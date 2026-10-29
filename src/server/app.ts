@@ -265,6 +265,17 @@ export function createApp(d: AppDeps) {
       return c.json({ error: (e as Error).message }, 409);
     }
   });
+  // The phone saw a WhatsApp message in WhatsApp's own notification and wants reply options for it.
+  // Nothing is stored or sent here: the phone shows them and WhatsApp itself sends your pick.
+  app.post("/api/whatsapp/suggest", async (c) => {
+    if (!d.drafter) return noDrafter(c);
+    const { name, text, isGroup } = z.object({ name: z.string().min(1).max(200), text: z.string().min(1).max(4000), isGroup: z.boolean().default(false) }).parse(await c.req.json());
+    try {
+      return c.json(await d.drafter.suggest(name, text, isGroup));
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 409);
+    }
+  });
   app.post("/api/whatsapp/drafts/:id/:status{sent|dismissed}", (c) =>
     d.drafter ? c.json({ ok: d.drafter.close(c.req.param("id"), c.req.param("status") as "sent" | "dismissed") }) : noDrafter(c),
   );
