@@ -68,6 +68,13 @@ export interface SyncStatus {
 
 type Fetch = typeof fetch;
 
+/** Question words carry no meaning in a search. Kept in step with STOPWORDS in the brain's memory.py. */
+const STOPWORDS = new Set(
+  ("a an and are as at be but by can did do does for from had has have how i in is it its me my " +
+    "of on or our so that the their them then there these this to was we were what when where which " +
+    "who whom why will with you your about any all also into just than use uses used using").split(" "),
+);
+
 const slugRe = /[^a-z0-9]+/g;
 export const slug = (s: string) => (s ?? "").toLowerCase().replace(slugRe, "-").replace(/^-+|-+$/g, "").slice(0, 80);
 export const namedUid = (kind: string, name: string) => `${kind}:${slug(name)}`;
@@ -127,7 +134,9 @@ export class MemoryReplica {
   /** Ranked full-text search; all words first, then any word. Deleted records never match. */
   search(q: string, opts: { kind?: string; limit?: number; anyWord?: boolean } = {}): MemoryRecord[] {
     const limit = Math.max(1, Math.min(opts.limit ?? 10, 50));
-    const words = (q.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? []).filter((w) => w.length > 1).slice(0, 12);
+    const all = (q.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? []).filter((w) => w.length > 1);
+    const kept = all.filter((w) => !STOPWORDS.has(w));
+    const words = (kept.length ? kept : all).slice(0, 12); // only stop words: search for them anyway
     if (!words.length) return [];
     for (const joiner of opts.anyWord === false ? ["AND"] : ["AND", "OR"]) {
       const expr = words.map((w) => `"${w}"*`).join(` ${joiner} `);

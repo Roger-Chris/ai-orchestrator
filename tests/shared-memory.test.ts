@@ -70,7 +70,7 @@ describe("shared memory replica", () => {
     await laptop.sync();
     expect(laptop.syncStatus().pending).toBe(0);
     await mac.sync();
-    const hits = mac.search("jayesh calls");
+    const hits = mac.search("when does jayesh want calls");
     expect(hits).toHaveLength(1);
     expect(hits[0].device).toBe("omen");
   });
