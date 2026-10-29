@@ -222,6 +222,19 @@ export interface Home {
   replies: ReplyDraft[];
   /** Direct chats that went quiet after your message (WhatsApp); absent from an older hub. */
   quiet?: QuietChat[];
+  /** Device actions the assistant wants to take, waiting for Approve or Deny; absent from an older hub. */
+  approvals?: PendingApproval[];
+}
+
+/** One action waiting for the owner (src/actions). */
+export interface PendingApproval {
+  id: string;
+  node: string;
+  action: string;
+  summary: string;
+  reason?: string;
+  since: number;
+  expiresAt: number;
 }
 
 /** A direct chat where you had the last word and nothing came back. */

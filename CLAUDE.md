@@ -8,7 +8,7 @@ A brain that routes work across the owner's Claude, ChatGPT (Go), Gemini (Google
 - `web/`: React + Vite web app (PWA), built to `web/dist` by `npm start`.
 - `mobile/`: Expo (SDK 58) React Native Android app, installed from an APK, not the Play Store. It has its own `AGENTS.md`: read it before touching Expo APIs.
 - `agents/`: specialist agent YAML files.
-- `tests/`: vitest with fake providers. `npm test` must stay green (121 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
+- `tests/`: vitest with fake providers. `npm test` must stay green (133 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
 
 ## Running the hub
 
@@ -101,6 +101,15 @@ Hard-won details:
 - Every finished run becomes a `work` record (`Memory.remember`), so what any device did is searchable everywhere.
 - `orc mcp` adds `memory_search`, `memory_about`, `memory_remember`, `memory_recent`. They go through the local `orc serve`; if it is not running they open the replica file directly (writes sync later). Register once per AI tool: `claude mcp add orchestrator -- npx tsx <repo>/src/cli.ts mcp`, and the same command in Codex, Gemini CLI and Antigravity's MCP settings.
 - Records the brain mirrors from its graph and tasks (`source` graph/tasks) are owned by the brain: add knowledge about a person as a `fact` with `subject` = their uid instead of editing the person record.
+
+## Device actions and approvals
+
+- `src/actions/registry.ts`: what the assistant can do on a device (`system.info`, `files.list/find/read/write/copy/move`, `shell.run`, `apps.list/open`, `ai.run`, `memory.search`). Each call has a risk: safe runs, ask waits for the owner, never is refused. `actions.safe` / `actions.never` in config override per action; `actions.safeCommands` is the shell safe list (anything with `; | & > < $ \``, or not on the list, asks).
+- The owner's rule: nothing old is lost before the new version is checked. So there is no delete action, `files.write` backs an existing file up as `<name>.bak-<time>` first, and copy/move refuse to replace anything. Keep it that way.
+- Files only inside `actions.roots` (default: `node.workRoot`), links resolved first; secret-looking names (.env, keys, tokens, credentials, service accounts) are never read, listed or written. Every output goes through `redact()` (GitHub/OpenAI/Groq/Google/Slack tokens, `user:pass@` in URLs): a git remote with an embedded token was found on the owner's laptop.
+- `ai.run` drives the subscriptions' CLIs through the provider pool: claude, codex (ChatGPT), gemini (Antigravity/agy), perplexity, groq. `write: true` (permission edit) asks.
+- Flow (`src/actions/desk.ts`): `POST /api/act {node, action, args, reason}` on the hub → the device's `POST /node/act`. Safe: done. Ask: the device answers `needs_approval`, the hub stores an approval (`approvals` table, 30 min), pushes "Approve on <device>?" and lists it in `/api/home` `approvals` (the app's "Approve?" section). `POST /api/approvals/:id/approve` sends the call again with the approval id; the device claims it with the hub that holds it (`/node/approvals/:id/claim`: same action, same args hash, unused, unexpired; claiming uses it up). Approved actions are written to shared memory as `work`.
+- Approve/Deny endpoints are for the owner's own apps; the thinking loop must never be given a tool that calls them.
 
 ## Conventions
 

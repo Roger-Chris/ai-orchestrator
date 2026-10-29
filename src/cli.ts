@@ -17,6 +17,7 @@ import { AssistantTasks } from "./integrations/assistant.js";
 import { GmailReader } from "./integrations/gmail.js";
 import { Memory } from "./memory/memory.js";
 import { openReplica } from "./shared/setup.js";
+import { buildActions } from "./actions/setup.js";
 import { tailnetDevices, tailscaleIPv4 } from "./cluster/tailscale.js";
 import { type Config, loadConfig } from "./config.js";
 import { probeVersion } from "./providers/base.js";
@@ -134,7 +135,8 @@ export function buildSystem(config: Config) {
     setup,
     task: (taskId) => store.tasksFor(localDay()).find((t) => t.id === `brain:${taskId}`),
   });
-  return { store, pool, cluster, router, orchestrator, agents, memory, replica, notifier, gmail, assistant, drafter, calls };
+  const actions = buildActions(config, { store, pool, replica, cluster, notifier });
+  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */

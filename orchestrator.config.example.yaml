@@ -74,6 +74,14 @@ memory:
     notebook: ""             # id from `notebooklm create "AI Orchestrator memory" --json`
     ask: true                # also ask the notebook about each new planned task
 
+actions:                     # what the assistant may do on this device (safe ones run, the rest ask on the phone)
+  enabled: true
+  roots: []                  # folders it may use, e.g. ["C:/development"]; empty = node.workRoot only
+  # safeCommands: [...]      # shell commands that never ask; the default list is read-only (git status, nvidia-smi…)
+  safe: []                   # action names that never ask on this device, e.g. ["apps.open"]
+  never: []                  # action names always refused here, e.g. ["shell.run"]
+  approvalMinutes: 30
+
 sharedMemory:                # one memory pool for every device (AI_Assistant docs/JARVIS.md)
   enabled: true              # this device keeps a full copy in data/shared-memory.db; works offline
   # The Linux machine (BRAIN_TOKEN set) syncs with its brain directly. Every other device: the Linux

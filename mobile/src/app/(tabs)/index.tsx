@@ -3,7 +3,7 @@ import { type ReactNode, useCallback, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Linking, Pressable, RefreshControl, ScrollView, Share, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ErrorText } from "../../components/ui";
-import { type AlertAction, Api, type Attention, type BrainAlert, type DayTask, type Decision, type Home as HomeData, type QuietChat, type ReplyDraft, type Running, Unauthorized } from "../../lib/api";
+import { type AlertAction, Api, type Attention, type BrainAlert, type DayTask, type Decision, type Home as HomeData, type PendingApproval, type QuietChat, type ReplyDraft, type Running, Unauthorized } from "../../lib/api";
 import { useColors } from "../../lib/theme";
 
 function ago(ts: number): string {
@@ -23,7 +23,9 @@ function headline(h: HomeData): string {
   const decisions = h.decisions.length;
   const replies = h.replies?.length ?? 0; // an older hub sends none
   const alerts = h.alerts?.length ?? 0;
+  const approvals = h.approvals?.length ?? 0; // an older hub sends none
   const parts = [
+    approvals && `${approvals} ${approvals === 1 ? "action" : "actions"} to approve`,
     alerts && `${alerts} ${alerts === 1 ? "thing needs" : "things need"} you`,
     tasks && `${tasks} ${tasks === 1 ? "task" : "tasks"} today`,
     replies && `${replies} ${replies === 1 ? "reply" : "replies"} to send`,
@@ -86,6 +88,42 @@ function TaskRow({ t, first, onToggle }: { t: DayTask; first: boolean; onToggle:
 const ALERT_KIND: Record<string, string> = { brief: "Morning brief", question: "Someone is waiting", overdue: "Overdue", new_task: "New task" };
 
 /** Something the brain decided needs you. Your answer goes back to the brain; done also finishes the task. */
+/** Something the assistant wants to do on one of your devices. Nothing happens until Approve. */
+function ApprovalRow({ a, first, onDone }: { a: PendingApproval; first: boolean; onDone: () => void }) {
+  const c = useColors();
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [out, setOut] = useState("");
+  const decide = async (approve: boolean) => {
+    setBusy(true);
+    setErr("");
+    try {
+      const r = await Api.decideApproval(a.id, approve);
+      if (approve && r.result) setOut(`${r.result.ok ? "Done" : "Failed"}: ${r.result.output.slice(0, 300)}`);
+      onDone();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const left = Math.max(0, Math.round((a.expiresAt - Date.now()) / 60_000));
+  return (
+    <Row first={first}>
+      <Text style={{ color: c.muted, fontSize: 13 }}>{`On ${a.node} · ${ago(a.since)} · ${left} min left`}</Text>
+      <Text style={{ color: c.text, fontSize: 16, marginTop: 3 }}>{a.summary}</Text>
+      {!!a.reason && <Text style={{ color: c.muted, fontSize: 14, lineHeight: 20, marginTop: 3 }}>{`Why: ${a.reason}`}</Text>}
+      <View style={{ flexDirection: "row", gap: 20, marginTop: 10, alignItems: "center" }}>
+        <TextLink title="Approve" onPress={() => void decide(true)} />
+        <TextLink title="Deny" color={c.muted} onPress={() => void decide(false)} />
+        {busy && <ActivityIndicator color={c.accent} />}
+      </View>
+      {!!out && <Text style={{ color: c.muted, fontSize: 13, marginTop: 6 }}>{out}</Text>}
+      <ErrorText text={err} />
+    </Row>
+  );
+}
+
 function AlertRow({ a, first, onDone }: { a: BrainAlert; first: boolean; onDone: () => void }) {
   const c = useColors();
   const [busy, setBusy] = useState(false);
@@ -426,6 +464,14 @@ export default function Home() {
         ) : (
           <>
             <Text style={{ color: c.text, fontFamily: "serif", fontSize: 30, lineHeight: 38, marginTop: 10 }}>{headline(home)}</Text>
+
+            {(home.approvals?.length ?? 0) > 0 && (
+              <Section label="Approve?" right={home.approvals!.length}>
+                {home.approvals!.map((a, i) => (
+                  <ApprovalRow key={a.id} a={a} first={i === 0} onDone={() => void load()} />
+                ))}
+              </Section>
+            )}
 
             {(home.alerts?.length ?? 0) > 0 && (
               <Section label="Needs you" right={home.alerts.length}>

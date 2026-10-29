@@ -1,3 +1,4 @@
+import type { ActionHub } from "../actions/desk.js";
 import type { Cluster } from "../cluster/cluster.js";
 import type { Orchestrator } from "../brain/orchestrator.js";
 import type { ProviderPool } from "../providers/registry.js";
@@ -38,6 +39,7 @@ export async function buildHome(d: {
   gmail?: GmailReader;
   assistant?: AssistantTasks;
   drafter?: ReplyDrafter;
+  actions?: ActionHub;
 }): Promise<Home> {
   const decisions: Decision[] = [];
   const running: Running[] = [];
@@ -108,6 +110,9 @@ export async function buildHome(d: {
       .map((r) => ({ runId: r.id, threadId: r.threadId, task: short(r.task, 60), status: r.status, at: r.finishedAt! })),
     replies: d.drafter?.drafts(10) ?? [],
     quiet: d.drafter ? quietChats(d.store.db, chatNamer(d.store, d.drafter.book())) : [],
+    approvals: (d.actions?.desk.list("pending") ?? []).map((a) => ({
+      id: a.id, node: a.node, action: a.action, summary: a.summary, reason: a.reason, since: a.createdAt, expiresAt: a.expiresAt,
+    })),
   };
 }
 

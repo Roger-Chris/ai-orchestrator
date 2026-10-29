@@ -163,6 +163,34 @@ const ConfigSchema = z.object({
     })
     .prefault({}),
   /**
+   * What the assistant may do on this device (src/actions). Safe actions run on their own; the
+   * rest wait for Approve on the phone. There is no delete action.
+   */
+  actions: z
+    .object({
+      enabled: z.boolean().default(true),
+      /** Folders the assistant may read and change, e.g. ["C:/development"]. Empty: node.workRoot only. */
+      roots: z.array(z.string()).default([]),
+      /** Commands that run without asking (exact, or followed by arguments). Anything chained (; | && > $) asks. */
+      safeCommands: z
+        .array(z.string())
+        .default([
+          "git status", "git log", "git diff", "git branch", "git show", "git remote -v",
+          "nvidia-smi", "tailscale status", "tailscale ip", "df", "free", "uptime", "whoami", "hostname",
+          "ls", "dir", "pwd", "node --version", "npm --version", "python --version", "python3 --version",
+          "uv --version", "flutter --version", "ollama list", "ollama ps", "docker ps", "systemctl --user status",
+          "Get-ChildItem", "Get-Process", "Get-PSDrive",
+        ]),
+      /** Action names that never ask (e.g. "apps.open"). Your call; the defaults ask. */
+      safe: z.array(z.string()).default([]),
+      /** Action names that are always refused on this device. */
+      never: z.array(z.string()).default([]),
+      approvalMinutes: z.number().min(1).default(30),
+      timeoutSeconds: z.number().min(5).default(120),
+      outputChars: z.number().min(500).default(20_000),
+    })
+    .prefault({}),
+  /**
    * Shared memory: one pool every device reads and writes (AI_Assistant docs/JARVIS.md). The master
    * copy is in the brain on the Linux machine; every device keeps a replica in `dataDir/file`.
    * The machine that runs the brain (BRAIN_TOKEN set) syncs with it directly; other devices sync

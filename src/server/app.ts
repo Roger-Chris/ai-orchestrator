@@ -22,6 +22,8 @@ import { CallError, type CallDesk } from "../calls/desk.js";
 import type { StyleBook } from "../whatsapp/learn.js";
 import type { MemoryReplica } from "../shared/replica.js";
 import { mountSharedMemory } from "./shared-memory.js";
+import type { ActionHub } from "../actions/desk.js";
+import { mountActions } from "./actions.js";
 
 export interface AppDeps {
   config: Config;
@@ -46,6 +48,8 @@ export interface AppDeps {
   replica?: MemoryReplica;
   /** How /node/memory/* reaches the brain; tests pass a fake. */
   brainFetch?: typeof fetch;
+  /** Device actions and their approvals; absent in tests that don't need them. */
+  actions?: ActionHub;
 }
 
 const Provider = z.enum(PROVIDER_IDS as [ProviderId, ...ProviderId[]]);
@@ -179,6 +183,7 @@ export function createApp(d: AppDeps) {
 
   app.get("/api/health", (c) => c.json({ ok: true, node: d.cluster.name }));
   mountSharedMemory(app, d);
+  mountActions(app, d);
 
   // ---- providers & devices
   app.get("/api/providers", async (c) => c.json(await d.pool.status(c.req.query("refresh") === "1")));
