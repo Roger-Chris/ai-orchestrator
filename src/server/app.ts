@@ -19,9 +19,10 @@ import { type Notifier, alertPayload } from "./push.js";
 import { letGo } from "../whatsapp/convo.js";
 import type { ReplyDrafter } from "../whatsapp/drafter.js";
 import { CallError, type CallDesk } from "../calls/desk.js";
+import { type AskReply, sayFor, type TalkReply } from "../voice/talk.js";
 import type { StyleBook } from "../whatsapp/learn.js";
 import type { MemoryReplica } from "../shared/replica.js";
-import { mountSharedMemory } from "./shared-memory.js";
+import { type Ask, AskBody, askBrain, mountSharedMemory } from "./shared-memory.js";
 import type { ActionHub } from "../actions/desk.js";
 import { mountActions } from "./actions.js";
 import { mountBrain } from "./brain.js";
@@ -465,6 +466,52 @@ export function createApp(d: AppDeps) {
     } catch (e) {
       return callFailed(c, e);
     }
+  });
+  // ---- talking to Jarvis (any time, not about one alert): voice or text -> the brain's thinking loop
+  // -> the full answer for the screen and `say` for the phone to speak (src/voice/talk.ts).
+  app.post("/api/assistant/voice", async (c) => {
+    let text = "";
+    let audio: { data: Blob; filename: string } | undefined;
+    let history: Ask["history"] = [];
+    if ((c.req.header("content-type") ?? "").startsWith("multipart/form-data")) {
+      const form = await c.req.parseBody();
+      const file = form.audio;
+      if (file instanceof File) {
+        if (file.size > MAX_CLIP) return c.json({ error: "that voice clip is too long" }, 413);
+        audio = { data: file, filename: file.name || `clip.${CLIP_EXT[file.type] ?? "m4a"}` };
+      }
+      if (typeof form.text === "string") text = form.text;
+      if (typeof form.history === "string") history = AskBody.shape.history.parse(JSON.parse(form.history));
+    } else {
+      const b = TurnBody.extend({ history: AskBody.shape.history }).parse(await c.req.json());
+      text = b.text ?? "";
+      history = b.history;
+      if (b.audio) {
+        const bytes = Buffer.from(b.audio, "base64");
+        if (bytes.length > MAX_CLIP) return c.json({ error: "that voice clip is too long" }, 413);
+        const mime = b.mime ?? "audio/mp4";
+        audio = { data: new Blob([bytes], { type: mime }), filename: `clip.${CLIP_EXT[mime] ?? "m4a"}` };
+      }
+    }
+    if (audio) {
+      if (!d.calls) return c.json({ error: "this hub can't hear voice clips; use the phone's speech recognition or type" }, 409);
+      try {
+        text = await d.calls.hear(audio);
+      } catch (e) {
+        return callFailed(c, e);
+      }
+    }
+    text = text.trim();
+    if (!text) return c.json({ heard: "", answer: "", say: "Sorry, I didn't catch that. Could you say it again?", steps: [], pending: [] } satisfies TalkReply);
+    const r = await askBrain(d, { text, source: "voice", history });
+    let reply: AskReply;
+    try {
+      reply = JSON.parse(r.body);
+    } catch {
+      return c.json({ error: "the brain answered something unreadable" }, 502);
+    }
+    if (r.status >= 400) return c.json({ ...reply, heard: text }, r.status as 404 | 502);
+    return c.json({ ...reply, heard: text, say: sayFor(reply) } satisfies TalkReply);
   });
   app.post("/api/calls/:alertId/end", (c) => {
     const id = Number(c.req.param("alertId"));

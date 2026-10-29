@@ -153,6 +153,16 @@ export class CallDesk {
     return { say };
   }
 
+  /** Your words from a voice clip (Groq Whisper); throws a CallError when the hub can't hear. */
+  async hear(audio: { data: Blob; filename: string }): Promise<string> {
+    if (!this.voice) throw new CallError("The hub has no Groq key, so it can't hear voice clips. Use the phone's own speech recognition, type, or add GROQ_API_KEY to the hub's .env.", 409);
+    try {
+      return (await this.deps.voice!.transcribe(audio.data, audio.filename)).trim();
+    } catch (e) {
+      throw new CallError(`Couldn't transcribe that: ${(e as Error).message}`, 502);
+    }
+  }
+
   /** One exchange: your words (typed, or a voice clip to transcribe) in, what to say and do out. */
   async turn(alert: BrainAlert, input: { text?: string; audio?: { data: Blob; filename: string } }): Promise<TurnResult> {
     if (input.audio && !this.voice) throw new CallError("The hub has no Groq key, so it can't hear voice. Type your answer instead (or add GROQ_API_KEY to the hub's .env).", 409);

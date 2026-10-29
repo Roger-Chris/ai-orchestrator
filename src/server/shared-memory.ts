@@ -3,6 +3,31 @@ import { z } from "zod";
 import type { Config } from "../config.js";
 import { KINDS, type MemoryReplica } from "../shared/replica.js";
 
+export const AskBody = z.object({
+  text: z.string().min(1),
+  source: z.string().default("app"),
+  // the last few turns of this conversation, so follow-ups ("open it") make sense
+  history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).max(12).default([]),
+});
+export type Ask = z.infer<typeof AskBody>;
+
+/** One request to the brain's thinking loop; `body` is its JSON text (or an {error}). */
+export async function askBrain(d: { config: Config; brainFetch?: typeof fetch }, body: Ask): Promise<{ status: number; body: string }> {
+  const { url, token } = d.config.assistant;
+  if (!token) return { status: 404, body: JSON.stringify({ error: `device ${d.config.node.name} does not run the brain` }) };
+  try {
+    const res = await (d.brainFetch ?? fetch)(`${url.replace(/\/$/, "")}/agent/ask`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15 * 60_000),
+    });
+    return { status: res.status, body: await res.text() };
+  } catch (e) {
+    return { status: 502, body: JSON.stringify({ error: `brain not reachable: ${(e as Error).message}` }) };
+  }
+}
+
 /**
  * Shared memory over HTTP.
  *
@@ -94,27 +119,9 @@ export function mountSharedMemory(app: Hono, d: { config: Config; replica?: Memo
 
   // ---- the brain's thinking loop (AI_Assistant agent.py), for the phone app and the web app
   app.post("/api/assistant/ask", async (c) => {
-    const { url, token } = d.config.assistant;
-    if (!token) return c.json({ error: `device ${d.config.node.name} does not run the brain` }, 404);
-    const body = z
-      .object({
-        text: z.string().min(1),
-        source: z.string().default("app"),
-        // the last few turns of this conversation, so follow-ups ("open it") make sense
-        history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).max(12).default([]),
-      })
-      .parse(await c.req.json());
-    try {
-      const res = await (d.brainFetch ?? fetch)(`${url.replace(/\/$/, "")}/agent/ask`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(15 * 60_000),
-      });
-      return new Response(await res.text(), { status: res.status, headers: { "Content-Type": "application/json" } });
-    } catch (e) {
-      return c.json({ error: `brain not reachable: ${(e as Error).message}` }, 502);
-    }
+    const body = AskBody.parse(await c.req.json());
+    const r = await askBrain(d, body);
+    return new Response(r.body, { status: r.status, headers: { "Content-Type": "application/json" } });
   });
 
   // ---- the memory hub: other devices' replicas sync through here

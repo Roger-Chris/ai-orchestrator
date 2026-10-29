@@ -218,3 +218,52 @@ describe("alarms and calls on the phone", () => {
     expect(parseDecision("not json")).toBeUndefined();
   });
 });
+
+describe("talking to Jarvis any time", () => {
+  function talkHub(heard: string, answer: object, noKey = false) {
+    const s = hub();
+    const groq = fakeGroq(heard, []);
+    const calls = new CallDesk({
+      voice: noKey ? new GroqVoice({ baseUrl: "x", keys: [], model: "m", transcribeModel: "w" }) : groq.voice,
+      ack: async () => undefined,
+      start: () => "run",
+      setup: async () => "",
+    });
+    const sent: any[] = [];
+    const brainFetch = (async (input: string | URL, init?: RequestInit) => {
+      sent.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+      return Response.json(answer);
+    }) as typeof fetch;
+    const config = { ...s.config, assistant: { ...s.config.assistant, token: "brain-token" } };
+    const app = createApp({ ...s, config, calls, brainFetch, publicDir: "web/dist" });
+    return { app, sent, groq };
+  }
+
+  it("hears a clip, asks the thinking loop as a voice request, and speaks a short plain answer", async () => {
+    const t = talkHub("where is my thrust sheet", {
+      answer: "## Found it\n\n- **thrust.xlsx** is on the omen laptop at `D:/evtol/thrust.xlsx`.\n- I opened it for you.",
+      steps: [{ tool: "memory_search", args: {}, result: "…" }],
+      pending: [],
+    });
+    const form = new FormData();
+    form.append("audio", new Blob([new Uint8Array(64)], { type: "audio/mp4" }), "clip.m4a");
+    form.append("history", JSON.stringify([{ role: "user", content: "hi" }, { role: "assistant", content: "Hello." }]));
+    const r = await (await t.app.request("/api/assistant/voice", { method: "POST", headers: { Authorization: "Bearer secret-token" }, body: form })).json();
+    expect(r.heard).toBe("where is my thrust sheet");
+    expect(r.say).toBe("Found it. thrust.xlsx is on the omen laptop at D:/evtol/thrust.xlsx. I opened it for you.");
+    expect(r.answer).toContain("## Found it");
+    expect(t.sent[0]).toEqual({ url: "http://127.0.0.1:8000/agent/ask", body: { text: "where is my thrust sheet", source: "voice", history: [{ role: "user", content: "hi" }, { role: "assistant", content: "Hello." }] } });
+  });
+
+  it("takes words the phone already recognised, and says when an action waits for a tap", async () => {
+    const t = talkHub("", { answer: "I'll open VS Code on the laptop once you allow it.", steps: [], pending: [{ device: "omen", action: "apps.open", status: "pending" }] }, true);
+    const r = await (await t.app.request("/api/assistant/voice", { method: "POST", headers: auth, body: JSON.stringify({ text: "open vs code on my laptop" }) })).json();
+    expect(r.heard).toBe("open vs code on my laptop");
+    expect(r.say).toBe("I'll open VS Code on the laptop once you allow it. I need your OK for apps.open on omen: tap Approve on the screen.");
+    const clip = await t.app.request("/api/assistant/voice", { method: "POST", headers: auth, body: JSON.stringify({ audio: "AAAA", mime: "audio/mp4" }) });
+    expect(clip.status).toBe(409); // no Groq key: the phone must recognise speech itself
+    const empty = await (await t.app.request("/api/assistant/voice", { method: "POST", headers: auth, body: JSON.stringify({ text: "  " }) })).json();
+    expect(empty.say).toMatch(/didn't catch that/);
+    expect(t.sent).toHaveLength(1);
+  });
+});
