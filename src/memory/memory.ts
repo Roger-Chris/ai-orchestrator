@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Config } from "../config.js";
 import { runProcess, tryParseJson } from "../providers/base.js";
+import type { MemoryReplica } from "../shared/replica.js";
 import type { Store } from "../store/db.js";
 import type { RunRecord } from "../types.js";
 
@@ -19,6 +20,8 @@ export class Memory {
     private config: Config,
     private store: Store,
     private exec: Exec = runProcess,
+    /** The shared memory pool: every finished run also goes there as a `work` record. */
+    private shared?: MemoryReplica,
   ) {}
 
   private get nlm() {
@@ -31,6 +34,19 @@ export class Memory {
     if (!this.config.memory.enabled || run.status !== "done") return;
     const summary = summarize(run);
     this.store.addMemory({ runId: run.id, task: run.task, kind: run.classification?.kind ?? "", summary, ts: run.finishedAt ?? Date.now() });
+    try {
+      this.shared?.put({
+        uid: `work:run-${run.id}`,
+        kind: "work",
+        title: run.task.split(/\s+/).join(" ").slice(0, 160),
+        body: summary,
+        data: { runId: run.id, kind: run.classification?.kind, finishedAt: run.finishedAt },
+        source: "run",
+        tags: run.classification?.kind ?? "",
+      });
+    } catch (e) {
+      onWarn?.(`shared memory: could not save run ${run.id}: ${(e as Error).message}`);
+    }
 
     const nlm = this.nlm;
     if (!nlm) return;

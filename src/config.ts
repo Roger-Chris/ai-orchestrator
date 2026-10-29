@@ -162,6 +162,21 @@ const ConfigSchema = z.object({
       pollMinutes: z.number().min(1).default(2),
     })
     .prefault({}),
+  /**
+   * Shared memory: one pool every device reads and writes (AI_Assistant docs/JARVIS.md). The master
+   * copy is in the brain on the Linux machine; every device keeps a replica in `dataDir/file`.
+   * The machine that runs the brain (BRAIN_TOKEN set) syncs with it directly; other devices sync
+   * through that machine's hub (`hub`, e.g. http://100.104.185.17:4317, with the same ORC_TOKEN).
+   */
+  sharedMemory: z
+    .object({
+      enabled: z.boolean().default(true),
+      file: z.string().default("shared-memory.db"),
+      /** The Linux hub's address, for devices that don't run the brain. Empty: memory stays on this device. */
+      hub: z.string().optional(),
+      pollSeconds: z.number().min(10).default(60),
+    })
+    .prefault({}),
   /** Picks today's tasks out of your Gmail (read-only). Off until you run `orc gmail connect`. */
   gmail: z
     .object({
@@ -259,6 +274,7 @@ export function parseConfig(raw: unknown): Config {
   if (!cfg.providers.perplexity.apiKey) cfg.providers.perplexity.apiKey = process.env.PERPLEXITY_API_KEY || undefined;
   if (!cfg.profile.name) cfg.profile.name = process.env.OWNER_NAME || undefined;
   if (!cfg.assistant.token) cfg.assistant.token = process.env.BRAIN_TOKEN || undefined;
+  if (!cfg.sharedMemory.hub) cfg.sharedMemory.hub = process.env.MEMORY_HUB || undefined;
   if (!cfg.providers.groq.apiKey) cfg.providers.groq.apiKey = process.env.GROQ_API_KEY || undefined;
   if (!cfg.providers.groq.apiKeys.length) cfg.providers.groq.apiKeys = (process.env.GROQ_API_KEYS ?? "").split(",").map((k) => k.trim()).filter(Boolean);
   return cfg;

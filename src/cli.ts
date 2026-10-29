@@ -16,6 +16,7 @@ import { workspaceMap } from "./context/graphify.js";
 import { AssistantTasks } from "./integrations/assistant.js";
 import { GmailReader } from "./integrations/gmail.js";
 import { Memory } from "./memory/memory.js";
+import { openReplica } from "./shared/setup.js";
 import { tailnetDevices, tailscaleIPv4 } from "./cluster/tailscale.js";
 import { type Config, loadConfig } from "./config.js";
 import { probeVersion } from "./providers/base.js";
@@ -46,7 +47,8 @@ export function buildSystem(config: Config) {
   const cluster = new Cluster(config, pool);
   const router = new Router(buildCapabilities(config.routing.overrides), { localBias: config.cluster.localBias, learn: config.brain.learnFromFeedback }, store);
   const agents = loadAgents([resolve(ROOT, "agents"), resolve(process.cwd(), "agents")]);
-  const memory = new Memory(config, store);
+  const replica = openReplica(config);
+  const memory = new Memory(config, store, undefined, replica);
   const notifier = new Notifier(store, resolve(config.dataDir), undefined, loadFcm(config));
   const orchestrator = new Orchestrator(config, store, cluster, router, agents, {
     memory,
@@ -132,7 +134,7 @@ export function buildSystem(config: Config) {
     setup,
     task: (taskId) => store.tasksFor(localDay()).find((t) => t.id === `brain:${taskId}`),
   });
-  return { store, pool, cluster, router, orchestrator, agents, memory, notifier, gmail, assistant, drafter, calls };
+  return { store, pool, cluster, router, orchestrator, agents, memory, replica, notifier, gmail, assistant, drafter, calls };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */
@@ -173,6 +175,7 @@ async function cmdServe(config: Config) {
   sys.cluster.start();
   sys.gmail.start(config.gmail.pollMinutes);
   sys.assistant?.start();
+  sys.replica?.start(config.sharedMemory.pollSeconds);
 
   const status = await sys.pool.status();
   console.log(`\n  AI Orchestrator · device "${config.node.name}"`);
@@ -580,6 +583,112 @@ function cmdInit() {
 }
 
 /** Minimal MCP (stdio) server that forwards to the running orchestrator, so Claude Code, Codex or Gemini can delegate to it. */
+/** Shared memory for every AI tool on this device (Claude Code, Codex, Gemini CLI, Antigravity). */
+const MEMORY_TOOLS = [
+  {
+    name: "memory_search",
+    description:
+      "Search the owner's shared memory (the same on all his devices): people, projects, past work and decisions, facts, tasks, files on every device. Use it before answering anything about his life, work, people or files.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        kind: { type: "string", description: "Optional filter: person, project, org, fact, note, decision, work, task, event, file, relation" },
+        limit: { type: "number" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "memory_about",
+    description: "Everything shared memory holds about one person, project, place or device: the record, its relations, and facts/decisions/work about it.",
+    inputSchema: { type: "object", properties: { name: { type: "string", description: "A name or a uid like person:jayesh-daga" } }, required: ["name"] },
+  },
+  {
+    name: "memory_remember",
+    description:
+      "Save something to the owner's shared memory so every device and AI tool knows it: a fact, a note, or a decision (with its reason). Set `subject` to the person/project it is about.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string" },
+        kind: { type: "string", enum: ["fact", "note", "decision"] },
+        subject: { type: "string", description: "Name or uid of what it is about" },
+        title: { type: "string" },
+      },
+      required: ["text"],
+    },
+  },
+  {
+    name: "memory_recent",
+    description: "The most recently added or changed memory records (optionally one kind), e.g. recent work done on any device.",
+    inputSchema: { type: "object", properties: { kind: { type: "string" }, limit: { type: "number" } } },
+  },
+];
+
+function formatMemory(records: { uid: string; kind: string; title: string; body: string; device?: string; updated_at?: string }[]): string {
+  if (!records.length) return "Nothing in memory matches.";
+  return records
+    .map((r) => `[${r.kind}] ${r.title}  (${r.uid}${r.device ? `, from ${r.device}` : ""}${r.updated_at ? `, ${r.updated_at.slice(0, 10)}` : ""})${r.body ? `\n${r.body.slice(0, 800)}` : ""}`)
+    .join("\n\n");
+}
+
+function formatAbout(a: { record: any; relations: { src: string; rel: string; dst: string; title: string }[]; linked: any[] }): string {
+  const parts = [formatMemory([a.record])];
+  if (a.relations.length) parts.push("Relations:\n" + a.relations.map((r) => `- ${r.title}`).join("\n"));
+  if (a.linked.length) parts.push("About it:\n" + formatMemory(a.linked));
+  return parts.join("\n\n");
+}
+
+async function memoryViaServer(base: string, name: string, args: any): Promise<string> {
+  const get = async (path: string) => {
+    const res = await fetch(`${base}/api/shared-memory/${path}`);
+    if (res.status === 404) return undefined;
+    if (!res.ok) throw new Error(`orc serve: HTTP ${res.status}`);
+    return res.json() as Promise<any>;
+  };
+  if (name === "memory_search") {
+    const q = new URLSearchParams({ q: String(args.query ?? ""), limit: String(args.limit ?? 8), ...(args.kind ? { kind: args.kind } : {}) });
+    return formatMemory((await get(`search?${q}`)) ?? []);
+  }
+  if (name === "memory_about") {
+    const a = await get(`about?name=${encodeURIComponent(String(args.name ?? ""))}`);
+    return a ? formatAbout(a) : `Nothing in memory about ${args.name}.`;
+  }
+  if (name === "memory_recent") {
+    const q = new URLSearchParams({ limit: String(args.limit ?? 15), ...(args.kind ? { kind: args.kind } : {}) });
+    return formatMemory((await get(`recent?${q}`)) ?? []);
+  }
+  if (name === "memory_remember") {
+    const res = await fetch(`${base}/api/shared-memory/remember`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: args.text, kind: args.kind ?? "note", subject: args.subject, title: args.title }),
+    });
+    if (!res.ok) throw new Error(`orc serve: HTTP ${res.status} ${await res.text()}`);
+    const rec = (await res.json()) as { uid: string };
+    return `Saved to shared memory as ${rec.uid}.`;
+  }
+  return `unknown memory tool ${name}`;
+}
+
+function memoryDirect(r: NonNullable<ReturnType<typeof openReplica>>, name: string, args: any): string {
+  if (name === "memory_search") return formatMemory(r.search(String(args.query ?? ""), { kind: args.kind, limit: args.limit ?? 8 }));
+  if (name === "memory_about") {
+    const a = r.about(String(args.name ?? ""));
+    return a ? formatAbout(a) : `Nothing in memory about ${args.name}.`;
+  }
+  if (name === "memory_recent") return formatMemory(r.recent({ kind: args.kind, limit: args.limit ?? 15 }));
+  if (name === "memory_remember") {
+    const subject = args.subject ? r.resolve(String(args.subject))?.uid : undefined;
+    const kind = ["fact", "note", "decision"].includes(args.kind) ? args.kind : "note";
+    const text = String(args.text ?? "");
+    const rec = r.put({ kind, title: args.title ?? text.split(/\s+/).join(" ").slice(0, 80), body: text, subject: subject ?? null, source: "mcp" });
+    return `Saved to this device's memory as ${rec.uid}; it syncs when \`orc serve\` runs.`;
+  }
+  return `unknown memory tool ${name}`;
+}
+
 async function cmdMcp(config: Config) {
   const base = `http://127.0.0.1:${config.server.port}`;
   const headers = { "Content-Type": "application/json" };
@@ -600,7 +709,21 @@ async function cmdMcp(config: Config) {
       },
     },
     { name: "list_agents", description: "List the orchestrator's specialist agents.", inputSchema: { type: "object", properties: {} } },
+    ...MEMORY_TOOLS,
   ];
+  // Memory tools answer from this device's replica: through `orc serve` when it runs (it also
+  // syncs), else straight from the replica file (writes are pushed when serve next syncs).
+  let direct: ReturnType<typeof openReplica> | null = null;
+  const memoryCall = async (name: string, args: any): Promise<string> => {
+    try {
+      return await memoryViaServer(base, name, args);
+    } catch (e) {
+      if (!(e instanceof TypeError)) throw e; // a real answer from serve (e.g. 404) is not "offline"
+      direct ??= openReplica(config) ?? null;
+      if (!direct) return "Shared memory is off on this device (sharedMemory.enabled).";
+      return memoryDirect(direct, name, args);
+    }
+  };
   const send = (msg: unknown) => process.stdout.write(JSON.stringify(msg) + "\n");
   const rl = createInterface({ input: process.stdin });
   for await (const line of rl) {
@@ -623,7 +746,9 @@ async function cmdMcp(config: Config) {
       } else if (msg.method === "tools/call") {
         const { name, arguments: args } = msg.params;
         let text: string;
-        if (name === "list_agents") {
+        if (name.startsWith("memory_")) {
+          text = await memoryCall(name, args ?? {});
+        } else if (name === "list_agents") {
           const agents = (await (await fetch(`${base}/api/agents`)).json()) as { name: string; kind: string; description: string }[];
           text = agents.map((a) => `${a.name} (${a.kind}): ${a.description}`).join("\n");
         } else {

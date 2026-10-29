@@ -8,7 +8,7 @@ A brain that routes work across the owner's Claude, ChatGPT (Go), Gemini (Google
 - `web/`: React + Vite web app (PWA), built to `web/dist` by `npm start`.
 - `mobile/`: Expo (SDK 58) React Native Android app, installed from an APK, not the Play Store. It has its own `AGENTS.md`: read it before touching Expo APIs.
 - `agents/`: specialist agent YAML files.
-- `tests/`: vitest with fake providers. `npm test` must stay green (109 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
+- `tests/`: vitest with fake providers. `npm test` must stay green (121 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
 
 ## Running the hub
 
@@ -91,6 +91,16 @@ Hard-won details:
 - The hub sends **notification** messages (with `android.notification.channel_id = "orchestrator"` and `data.url`). Data-only messages were accepted by Google but silently dropped on the owner's Xiaomi (HyperOS) phone; do not switch back.
 - Xiaomi also needs **Autostart** for the app; the app opens that screen itself after Turn on (`mobile/src/lib/background.ts`).
 - The phone connects at `http://<hub's Tailscale IP>:4317` with `ORC_TOKEN`. Requests through `tailscale serve` or any local proxy still need the token.
+
+## Shared memory (every device)
+
+- One memory pool for all devices (plan: `../AI_Assistant/docs/JARVIS.md`). The master copy is the brain's `memory_record` table; every device keeps a full replica in `data/shared-memory.db` (`src/shared/replica.ts`, `MemoryReplica`) so search is local and works offline.
+- Sync (`sync()`, every `sharedMemory.pollSeconds`): push dirty rows to `<upstream>/batch`, then pull `<upstream>/changes?since=<last_seq>` in pages. Newer `updated_at` wins on both sides. When the brain refuses an older edit it returns its copy and the replica takes it; without that, a device that already pulled that record would keep its stale edit for ever (found by a real-brain run, covered by a test). Deletes are tombstones.
+- Upstream (`src/shared/setup.ts`): on the machine with `BRAIN_TOKEN` it is the brain itself (`assistant.url/memory`); elsewhere `sharedMemory.hub` (or `MEMORY_HUB`) + `/node/memory`, which that hub passes to the brain (`src/server/shared-memory.ts`). The brain stays on 127.0.0.1.
+- `/api/shared-memory/*` (status, sync, search, recent, about, record, remember, PUT/DELETE record) answers from the local replica.
+- Every finished run becomes a `work` record (`Memory.remember`), so what any device did is searchable everywhere.
+- `orc mcp` adds `memory_search`, `memory_about`, `memory_remember`, `memory_recent`. They go through the local `orc serve`; if it is not running they open the replica file directly (writes sync later). Register once per AI tool: `claude mcp add orchestrator -- npx tsx <repo>/src/cli.ts mcp`, and the same command in Codex, Gemini CLI and Antigravity's MCP settings.
+- Records the brain mirrors from its graph and tasks (`source` graph/tasks) are owned by the brain: add knowledge about a person as a `fact` with `subject` = their uid instead of editing the person record.
 
 ## Conventions
 
