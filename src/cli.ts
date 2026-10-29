@@ -115,10 +115,10 @@ export function buildSystem(config: Config) {
   const groq = config.providers.groq;
   const calls = new CallDesk({
     voice: new GroqVoice({ baseUrl: groq.baseUrl, keys: [...groq.apiKeys, groq.apiKey ?? ""], model: groq.model, transcribeModel: groq.transcribeModel }),
-    // Without Groq, typed answers on a call are decided by the first ready of Claude, Gemini, ChatGPT.
+    // Without Groq, typed answers on a call are decided by the first ready of Claude, ChatGPT, Gemini (Gemini last: it is often busy).
     think: async (system, prompt) => {
       const ready = await pool.available();
-      const order = (["claude", "gemini", "codex"] as ProviderId[]).filter((id) => ready.includes(id));
+      const order = (["claude", "codex", "gemini"] as ProviderId[]).filter((id) => ready.includes(id));
       if (!order.length) throw new Error("no model is ready (Claude, Gemini or ChatGPT)");
       let error = "";
       for (const id of order) {
@@ -472,7 +472,7 @@ async function cmdStyle(config: Config, sub = "show", opts: { who?: string; ask?
       if (opts.draft) {
         const providers = new ProviderPool(config, store);
         const ready = await providers.available();
-        const id = (["claude", "gemini", "codex", "groq"] as ProviderId[]).find((p) => ready.includes(p));
+        const id = (["claude", "codex", "groq", "gemini"] as ProviderId[]).find((p) => ready.includes(p));
         if (!id) throw new Error("no online model is ready (Claude, Gemini, ChatGPT or Groq)");
         const r = await providers.run(id, { system, prompt, permission: "read", timeoutMs: 180_000 });
         if (!r.ok) throw new Error(`${id} failed: ${r.error}`);

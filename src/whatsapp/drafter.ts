@@ -32,7 +32,8 @@ export interface DrafterOptions {
   knowledge?: (who: { name: string; chatId: string; isGroup: boolean }) => string[];
 }
 
-const ORDER: ProviderId[] = ["claude", "gemini", "codex", "groq"];
+/** Gemini last: its free tier is often busy; ChatGPT (codex) and Groq answer first. */
+const ORDER: ProviderId[] = ["claude", "codex", "groq", "gemini"];
 
 /** The model's answer as message text: no quotes, fences or "Me:" prefix. Undefined for SKIP. */
 export function cleanDraft(text: string): string | undefined {
