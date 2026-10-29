@@ -31,6 +31,8 @@ const config: ExpoConfig = {
     "expo-secure-store",
     // Calls: push-to-talk needs the microphone (RECORD_AUDIO). Nothing records or plays in the background.
     ["expo-audio", { microphonePermission: "Lets you talk to your assistant on a call.", recordAudioAndroid: true, enableBackgroundRecording: false, enableBackgroundPlayback: false }],
+    // Talking to Jarvis: Android's own speech recognition (Google), words recognised on the phone.
+    ["expo-speech-recognition", { microphonePermission: "Lets you talk to your assistant.", speechRecognitionPermission: "Turns what you say into text for your assistant.", androidSpeechServicePackages: ["com.google.android.googlequicksearchbox"] }],
     ["expo-notifications", { icon: "./assets/notification-icon.png", color: "#4F46E5", defaultChannel: "orchestrator" }],
     // The hub is reached at http://<pc>:4317 over Tailscale, which encrypts the traffic itself.
     ["expo-build-properties", { android: { usesCleartextTraffic: true } }],

@@ -117,6 +117,12 @@ export interface AssistantReply {
   pending: { device: string; action: string; status: string }[];
 }
 
+/** A spoken exchange: what the hub heard, the full answer for the screen, and `say` to speak. */
+export interface TalkReply extends AssistantReply {
+  heard: string;
+  say: string;
+}
+
 const q = (o: Record<string, string | number | undefined>) =>
   new URLSearchParams(Object.entries(o).filter(([, v]) => v !== undefined && v !== "") as [string, string][]).toString();
 
@@ -125,6 +131,21 @@ export const Api = {
   /** `history`: the last few turns, oldest first, so a follow-up like "open it" makes sense. */
   ask: (text: string, history: { role: "user" | "assistant"; content: string }[] = []) =>
     api<AssistantReply>("/api/assistant/ask", { body: { text, source: "app", history }, timeoutMs: 900_000 }),
+  /** Words you said (recognised on the phone) to the thinking loop as a voice request: short spoken answers. */
+  talk: (text: string, history: { role: "user" | "assistant"; content: string }[] = []) =>
+    api<TalkReply>("/api/assistant/voice", { body: { text, history }, timeoutMs: 900_000 }),
+  /** A recorded clip instead, for phones without speech recognition; the hub transcribes it (needs its Groq key). */
+  async talkClip(uri: string, history: { role: "user" | "assistant"; content: string }[] = []): Promise<TalkReply> {
+    if (!current) throw new Error("Not connected to a hub yet.");
+    const form = new FormData();
+    const name = uri.split("/").pop() || "talk.m4a";
+    form.append("audio", { uri, name, type: name.endsWith(".3gp") ? "audio/3gpp" : "audio/mp4" } as never);
+    form.append("history", JSON.stringify(history));
+    const res = await fetch(`${current.url}/api/assistant/voice`, { method: "POST", headers: authHeaders(), body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`);
+    return data as TalkReply;
+  },
   brainTasks: (status?: BrainTask["status"]) => api<BrainTask[]>(`/api/brain/tasks?${q({ status, limit: 200 })}`),
   /** keep (confirm), drop (reject) or done; keep also reopens a finished one. */
   taskAction: (id: number, action: "confirm" | "reject" | "done") => api<BrainTask>(`/api/brain/tasks/${id}/${action}`, { body: {} }),

@@ -22,7 +22,10 @@ export default function TabsLayout() {
       }}
     >
       <Tabs.Screen name="index" options={{ title: "Home", headerShown: false }} />
-      <Tabs.Screen name="assistant" options={{ title: "Assistant" }} />
+      <Tabs.Screen
+        name="assistant"
+        options={{ title: "Assistant", headerRight: () => <Button small kind="primary" title="Talk" onPress={() => router.push("/talk" as never)} />, headerRightContainerStyle: { paddingRight: 12 } }}
+      />
       <Tabs.Screen
         name="chats"
         options={{ title: "Chats", headerRight: () => <Button small kind="primary" title="New" onPress={() => router.push("/t/new")} />, headerRightContainerStyle: { paddingRight: 12 } }}

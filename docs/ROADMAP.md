@@ -22,8 +22,8 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 
 ### Voice (owner asked first, 2026-10-30)
 - [x] V1 Hub `POST /api/assistant/voice`: text or a voice clip (+ history) -> transcribe (Groq Whisper) -> brain thinking loop -> `{heard, answer, say, steps, pending}`; `say` is a short spoken version.
-- [ ] V2 App: mic in the Assistant tab (on-device speech recognition, `expo-speech-recognition` 58.0.0; falls back to sending the clip), spoken answers, approvals still a tap.
-- [ ] V3 App: "Talk to Jarvis" call screen any time (not tied to an alert), push-to-talk and hands-free (auto end of speech), barge-in stops speaking.
+- [x] V2 App: mic in the Assistant tab (on-device speech recognition, `expo-speech-recognition` 58.0.0; falls back to sending the clip), spoken answers, approvals still a tap.
+- [x] V3 App: "Talk to Jarvis" call screen any time (not tied to an alert), push-to-talk and hands-free (auto end of speech), barge-in stops speaking.
 - [ ] V4 Better voice: hub `POST /api/tts` (OpenAI / Gemini TTS when configured) with phone TTS as the fallback; voice choice in Settings.
 - [ ] V5 Wake word on the laptop (node agent, openWakeWord/Porcupine-free) and in-app "Hey Jarvis" while the app is open.
 
@@ -53,4 +53,4 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 - [ ] U1 Home: approvals from builds and agents; spoken notices toggle. (Other screens land with their phases.)
 
 ## Log
-- 2026-10-30: roadmap written; voice work started on `jarvis/next`.
+- 2026-10-30: roadmap written; V1 hub voice endpoint; V2-V3 mic in Assistant tab + hands-free Talk screen (needs a new APK: expo-speech-recognition is native).

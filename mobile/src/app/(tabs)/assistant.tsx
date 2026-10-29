@@ -1,20 +1,11 @@
 import { router } from "expo-router";
-import { type ComponentRef, useRef, useState } from "react";
+import { type ComponentRef, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { ErrorText } from "../../components/ui";
-import { Api, type AssistantReply } from "../../lib/api";
+import { Api } from "../../lib/api";
+import { convo, type Turn } from "../../lib/convo";
+import { canListen, speak, stopSpeaking, useListen } from "../../lib/listen";
 import { useColors } from "../../lib/theme";
-
-interface Turn {
-  id: number;
-  you: string;
-  reply?: AssistantReply;
-  error?: string;
-}
-
-/** Kept for the whole app session, so switching tabs doesn't lose the conversation. */
-let log: Turn[] = [];
-let nextId = 1;
 
 const SUGGESTIONS = ["What's on my plate today?", "Where is my thrust test sheet?", "What did I decide about Zapprise's colours?", "Which devices are online?"];
 
@@ -24,38 +15,44 @@ const SUGGESTIONS = ["What's on my plate today?", "Where is my thrust test sheet
  */
 export default function Assistant() {
   const c = useColors();
-  const [turns, setTurns] = useState<Turn[]>(log);
+  const [turns, setTurns] = useState<Turn[]>(convo.get());
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const scroll = useRef<ComponentRef<typeof ScrollView>>(null);
+  const mic = canListen();
+  const listen = useListen((heard) => {
+    if (heard) void send(heard, true);
+  });
 
-  const update = (t: Turn[]) => {
-    log = t;
-    setTurns(t);
-    setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 50);
-  };
+  useEffect(
+    () =>
+      convo.subscribe((t) => {
+        setTurns(t);
+        setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 50);
+      }),
+    [],
+  );
+  useEffect(() => () => stopSpeaking(), []);
 
-  const send = async (said = text) => {
+  /** Typed: the full answer on screen. Spoken: a voice request, and the short answer is said aloud. */
+  const send = async (said = text, spoken = false) => {
     const you = said.trim();
     if (!you || busy) return;
-    setText("");
+    if (!spoken) setText("");
     setBusy(true);
-    // the last three exchanges go along, so "open it" or "and the other one?" work
-    const history = log
-      .filter((t) => t.reply)
-      .slice(-3)
-      .flatMap((t) => [
-        { role: "user" as const, content: t.you },
-        { role: "assistant" as const, content: t.reply!.answer },
-      ]);
-    const turn: Turn = { id: nextId++, you };
-    update([...log, turn]);
+    const history = convo.history();
+    const turn = convo.add(you, spoken);
     try {
-      turn.reply = await Api.ask(you, history);
+      if (spoken) {
+        const r = await Api.talk(you, history);
+        turn.reply = r;
+        convo.touch();
+        void speak(r.say);
+      } else turn.reply = await Api.ask(you, history);
     } catch (e) {
       turn.error = (e as Error).message;
     } finally {
-      update([...log]);
+      convo.touch();
       setBusy(false);
     }
   };
@@ -68,12 +65,16 @@ export default function Assistant() {
             <Text style={{ color: c.text, fontFamily: "serif", fontSize: 26, lineHeight: 34 }}>Ask me anything,{"\n"}or tell me what to do.</Text>
             <Text style={{ color: c.muted, fontSize: 15, lineHeight: 21 }}>
               I check your memory first, then use your devices. Anything that changes a file, runs a command or opens an app waits for your Approve on Home.
+              {mic ? " Tap Speak to talk instead of typing, or Talk for a hands-free conversation." : ""}
             </Text>
             {SUGGESTIONS.map((s) => (
               <Pressable key={s} onPress={() => void send(s)} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, paddingVertical: 6 })}>
                 <Text style={{ color: c.accent, fontSize: 16 }}>{s}</Text>
               </Pressable>
             ))}
+            <Pressable onPress={() => router.push("/talk" as never)} style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1, paddingVertical: 6 })}>
+              <Text style={{ color: c.accent, fontSize: 16, fontWeight: "600" }}>Talk to Jarvis (hands-free) →</Text>
+            </Pressable>
           </View>
         )}
         {turns.map((t) => (
@@ -86,18 +87,31 @@ export default function Assistant() {
           </View>
         )}
       </ScrollView>
+      <ErrorText text={listen.error} />
       <View style={{ flexDirection: "row", gap: 10, padding: 12, borderTopWidth: 1, borderTopColor: c.border, alignItems: "flex-end" }}>
         <TextInput
-          value={text}
+          value={listen.listening ? listen.partial : text}
           onChangeText={setText}
-          placeholder="Message the assistant"
+          editable={!listen.listening}
+          placeholder={listen.listening ? "Listening…" : "Message the assistant"}
           placeholderTextColor={c.muted}
           multiline
-          style={{ flex: 1, color: c.text, backgroundColor: c.surface, borderColor: c.border, borderWidth: 1, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 9, fontSize: 16, maxHeight: 140 }}
+          style={{ flex: 1, color: c.text, backgroundColor: c.surface, borderColor: listen.listening ? c.accent : c.border, borderWidth: 1, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 9, fontSize: 16, maxHeight: 140 }}
         />
-        <Pressable disabled={busy || !text.trim()} onPress={() => void send()} style={({ pressed }) => ({ opacity: busy || !text.trim() ? 0.4 : pressed ? 0.6 : 1, paddingVertical: 10 })}>
-          <Text style={{ color: c.accent, fontSize: 16, fontWeight: "600" }}>Send</Text>
-        </Pressable>
+        {mic && !text.trim() ? (
+          <Pressable
+            disabled={busy}
+            onPress={() => (listen.listening ? listen.stop() : void listen.start())}
+            onLongPress={() => router.push("/talk" as never)}
+            style={({ pressed }) => ({ opacity: busy ? 0.4 : pressed ? 0.6 : 1, paddingVertical: 10 })}
+          >
+            <Text style={{ color: c.accent, fontSize: 16, fontWeight: "600" }}>{listen.listening ? "Done" : "Speak"}</Text>
+          </Pressable>
+        ) : (
+          <Pressable disabled={busy || !text.trim()} onPress={() => void send()} style={({ pressed }) => ({ opacity: busy || !text.trim() ? 0.4 : pressed ? 0.6 : 1, paddingVertical: 10 })}>
+            <Text style={{ color: c.accent, fontSize: 16, fontWeight: "600" }}>Send</Text>
+          </Pressable>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -109,7 +123,7 @@ function TurnView({ t }: { t: Turn }) {
   return (
     <View style={{ gap: 8 }}>
       <View style={{ alignSelf: "flex-end", maxWidth: "85%", backgroundColor: c.surface, borderColor: c.border, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 8 }}>
-        <Text style={{ color: c.text, fontSize: 16 }}>{t.you}</Text>
+        <Text style={{ color: c.text, fontSize: 16, fontStyle: t.spoken ? "italic" : "normal" }}>{t.you}</Text>
       </View>
       <ErrorText text={t.error} />
       {t.reply && (
