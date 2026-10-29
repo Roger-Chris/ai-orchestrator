@@ -181,6 +181,8 @@ const ConfigSchema = z.object({
       history: z.enum(["off", "recent", "full"]).default("full"),
       /** Download voice notes so the local Whisper can transcribe them. */
       voiceNotes: z.boolean().default(true),
+      /** Download photos sent to you in direct chats so the local vision model can describe them. */
+      images: z.boolean().default(true),
       /** Chat ids to leave alone, e.g. 9190000…@s.whatsapp.net or …@g.us. */
       ignore: z.array(z.string()).default([]),
       /**
@@ -204,6 +206,8 @@ const ConfigSchema = z.object({
       ollamaUrl: z.string().default("http://127.0.0.1:11434"),
       /** Ollama model that reads your chats and writes the style notes. */
       model: z.string().default("qwen3:8b"),
+      /** Ollama model that can see images: describes photos people send you before a reply is drafted. */
+      visionModel: z.string().default("gemma3:4b"),
       /** faster-whisper model for voice notes. */
       whisperModel: z.string().default("large-v3-turbo"),
       /** Whisper language code (e.g. "ta"); empty detects it per voice note. */

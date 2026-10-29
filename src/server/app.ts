@@ -16,6 +16,7 @@ import { buildHome, buildInsights, localDay } from "./home.js";
 import type { AssistantTasks } from "../integrations/assistant.js";
 import type { GmailReader } from "../integrations/gmail.js";
 import { type Notifier, alertPayload } from "./push.js";
+import { letGo } from "../whatsapp/convo.js";
 import type { ReplyDrafter } from "../whatsapp/drafter.js";
 import { CallError, type CallDesk } from "../calls/desk.js";
 import type { StyleBook } from "../whatsapp/learn.js";
@@ -249,6 +250,11 @@ export function createApp(d: AppDeps) {
     return c.json(d.drafter.ingest(body.messages, body.live));
   });
   app.get("/api/whatsapp/drafts", (c) => (d.drafter ? c.json(d.drafter.drafts()) : noDrafter(c)));
+  // A chat that went quiet after your message: hide it from Home until it moves again.
+  app.post("/api/whatsapp/quiet/:chatId/let-go", (c) => {
+    letGo(d.store.db, c.req.param("chatId"));
+    return c.json({ ok: true });
+  });
   app.post("/api/whatsapp/drafts", async (c) => {
     if (!d.drafter) return noDrafter(c);
     const { chatId, ask } = z.object({ chatId: z.string(), ask: z.string().max(1000).optional() }).parse(await c.req.json());

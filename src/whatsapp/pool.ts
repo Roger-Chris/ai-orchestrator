@@ -1,6 +1,7 @@
 import type { ChatStats, ContactStyle, ReplyPair, StyleBook, StyleCard, Voice } from "./learn.js";
 import { spoken, type WaMessage } from "./store.js";
 import { addressTerms, type AddressUse } from "./address.js";
+import { convoState, type ConvoState } from "./convo.js";
 
 /**
  * The context pool a reply is written from. Every analysed person in the style book feeds it:
@@ -39,6 +40,8 @@ export interface ContextPool {
   recent: WaMessage[];
   /** Their messages since your last one: what the reply answers. Empty means a follow-up from you. */
   incoming: WaMessage[];
+  /** Where the conversation stands (see convo.ts); "ended" chats get no draft unless you ask. */
+  state: ConvoState;
 }
 
 export interface PoolOptions {
@@ -163,6 +166,7 @@ export function buildPool(book: StyleBook, chat: { chatId: string; name?: string
     sharedGroups,
     recent,
     incoming,
+    state: convoState(recent).state,
   };
 }
 
@@ -239,9 +243,13 @@ export function poolPrompt(p: ContextPool, ask?: string): { system: string; prom
     `The conversation so far, oldest first:\n${p.recent.map((m) => line(m, p.isGroup ? "Someone" : p.name)).join("\n")}`,
     ask
       ? `Write my next message, as two or three ways I might put it. What I want to say: ${ask}`
-      : p.incoming.length
-        ? "Give my reply options to their last message(s)."
-        : 'My last message has no answer yet. Give follow-up options from me, or {"options":[]} if I would not send anything.',
+      : p.state === "winding_down"
+        ? `They are signing off. Give options for a short, clean ending the way I end chats (reuse one of my own sign-offs or messages I often send when one fits), labelled "Close", plus one that answers anything they still said, if they did.`
+        : p.incoming.length
+          ? 'Give my reply options to their last message(s). If the chat could naturally end here, add one short option labelled "Close" that ends it the way I do.'
+          : p.state === "died_out"
+            ? 'This chat went quiet after my last message. Give one or two light follow-ups I might send (labelled "Follow up"), or {"options":[]} if I would just let it go.'
+            : 'My last message has no answer yet. Give follow-up options from me, or {"options":[]} if I would not send anything.',
   ]
     .filter(Boolean)
     .join("\n\n");

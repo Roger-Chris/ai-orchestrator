@@ -123,7 +123,16 @@ export class WaStore {
 
   /** Voice notes downloaded but not yet transcribed, newest first. */
   untranscribed(limit = 2000): WaMessage[] {
-    return (this.store.db.prepare("SELECT * FROM wa_messages WHERE media_path IS NOT NULL AND transcript IS NULL ORDER BY ts DESC LIMIT ?").all(limit) as any[]).map(row);
+    return (
+      this.store.db.prepare("SELECT * FROM wa_messages WHERE media_type = 'audio' AND media_path IS NOT NULL AND transcript IS NULL ORDER BY ts DESC LIMIT ?").all(limit) as any[]
+    ).map(row);
+  }
+
+  /** Photos downloaded but not yet described (the description goes in `transcript`), newest first. */
+  undescribed(limit = 50): WaMessage[] {
+    return (
+      this.store.db.prepare("SELECT * FROM wa_messages WHERE media_type = 'image' AND media_path IS NOT NULL AND transcript IS NULL ORDER BY ts DESC LIMIT ?").all(limit) as any[]
+    ).map(row);
   }
 
   setTranscript(id: string, text: string) {
@@ -159,6 +168,8 @@ function row(r: any): WaMessage {
 
 /** What a message says, voice notes included, as one line for a prompt. */
 export function spoken(m: WaMessage): string {
+  // For a photo, `transcript` is what the local vision model saw in it.
+  if (m.mediaType === "image" && m.transcript) return `[photo: ${m.transcript}]${m.text ? ` ${m.text}` : ""}`;
   if (m.transcript) return `[voice note] ${m.transcript}`;
   if (m.mediaType === "audio") return "[voice note, not transcribed]";
   if (!m.mediaType) return m.text;

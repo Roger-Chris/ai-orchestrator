@@ -20,8 +20,10 @@ export interface LinkOptions {
   ignore: string[];
   /** New messages, including ones caught up after a reconnect (not the history sync). */
   onLive?: (messages: WaMessage[]) => void;
-  /** A queued voice note was downloaded (`ok`) or could not be. Fired for history ones too. */
-  onVoice?: (message: WaMessage, ok: boolean) => void;
+  /** Download photos people send you in direct chats (live ones only), so they can be described. */
+  images: boolean;
+  /** A queued voice note or photo was downloaded (`ok`) or could not be. Fired for history voice notes too. */
+  onMedia?: (message: WaMessage, ok: boolean) => void;
   print: (s: string) => void;
 }
 
@@ -34,7 +36,7 @@ export interface LinkStatus {
   undecrypted: { direct: number; group: number; recovered: number };
 }
 
-const MAX_VOICE_BYTES = 6 * 1024 * 1024;
+const MAX_MEDIA_BYTES = 6 * 1024 * 1024;
 /** proto.WebMessageInfo.StubType.CIPHERTEXT: a message Baileys could not decrypt. */
 const CIPHERTEXT = 2;
 
@@ -91,7 +93,7 @@ export class WhatsAppLink {
   private lidToPn = new Map<string, string>();
   private pnToLid = new Map<string, string>();
   private names = new Map<string, string>();
-  private voiceQueue: { msg: WAMessage; out: WaMessage }[] = [];
+  private mediaQueue: { msg: WAMessage; out: WaMessage }[] = [];
   private downloading = false;
   private sock?: ReturnType<typeof makeWASocket>;
   private stopped = false;
@@ -114,6 +116,7 @@ export class WhatsAppLink {
     const authDir = join(this.opts.dataDir, "whatsapp", "auth");
     mkdirSync(authDir, { recursive: true });
     mkdirSync(join(this.opts.dataDir, "whatsapp", "voice"), { recursive: true });
+    mkdirSync(join(this.opts.dataDir, "whatsapp", "images"), { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
     const sock = makeWASocket({
@@ -188,7 +191,7 @@ export class WhatsAppLink {
         else noteContact({ id: c.id, name: c.name, lid: (c as any).lidJid });
       }
       for (const c of contacts ?? []) noteContact(c);
-      this.state.historyMessages += this.keep(messages).length;
+      this.state.historyMessages += this.keep(messages, false).length;
       this.opts.print(`history: ${this.state.historyMessages} messages so far`);
     });
 
@@ -196,7 +199,7 @@ export class WhatsAppLink {
     // passed on: the hub only drafts for messages under an hour old, so old ones just add context.
     sock.ev.on("messages.upsert", ({ messages }) => {
       this.noteUndecrypted(messages);
-      const kept = this.keep(messages);
+      const kept = this.keep(messages, true);
       if (kept.length) this.opts.onLive?.(kept);
     });
   }
@@ -225,22 +228,26 @@ export class WhatsAppLink {
     }
   }
 
-  /** Whether a voice note in this chat gets downloaded (and so `onVoice` will fire for it). */
-  wantsVoice(m: WaMessage): boolean {
-    return this.opts.voiceNotes && m.mediaType === "audio" && (m.fromMe || !m.isGroup);
+  /**
+   * Whether this message's media gets downloaded (and so `onMedia` will fire for it): voice notes
+   * (yours anywhere, everyone's in direct chats) and, when live, photos sent to you in direct chats.
+   */
+  wantsMedia(m: WaMessage, live = true): boolean {
+    if (m.mediaType === "audio") return this.opts.voiceNotes && (m.fromMe || !m.isGroup);
+    return m.mediaType === "image" && live && this.opts.images && !m.fromMe && !m.isGroup;
   }
 
-  /** Converts, stores and queues voice notes for download; returns what was kept. */
-  private keep(messages: WAMessage[]): WaMessage[] {
+  /** Converts, stores and queues media for download; returns what was kept. */
+  private keep(messages: WAMessage[], live: boolean): WaMessage[] {
     const out: WaMessage[] = [];
     for (const msg of messages) {
       const m = this.convert(msg);
       if (!m) continue;
       out.push(m);
-      if (this.wantsVoice(m)) this.voiceQueue.push({ msg, out: m });
+      if (this.wantsMedia(m, live)) this.mediaQueue.push({ msg, out: m });
     }
     this.store.save(out);
-    void this.downloadVoice();
+    void this.downloadMedia();
     return out;
   }
 
@@ -286,28 +293,30 @@ export class WhatsAppLink {
     return { id: key.id, chatId, senderId, senderName, fromMe, isGroup, text: c.text, mediaType: c.mediaType, quoted: c.quoted, ts };
   }
 
-  /** Downloads queued voice notes one at a time; old ones WhatsApp no longer has are skipped. */
-  private async downloadVoice() {
+  /** Downloads queued voice notes and photos one at a time; old ones WhatsApp no longer has are skipped. */
+  private async downloadMedia() {
     if (this.downloading || !this.sock) return;
     this.downloading = true;
     try {
-      while (this.voiceQueue.length) {
-        const { msg, out } = this.voiceQueue.shift()!;
-        const len = Number(unwrap(msg.message).audioMessage?.fileLength ?? 0);
-        if (len > MAX_VOICE_BYTES) {
-          this.opts.onVoice?.(out, false);
+      while (this.mediaQueue.length) {
+        const { msg, out } = this.mediaQueue.shift()!;
+        const inner = unwrap(msg.message);
+        const len = Number((inner.audioMessage ?? inner.imageMessage)?.fileLength ?? 0);
+        if (len > MAX_MEDIA_BYTES) {
+          this.opts.onMedia?.(out, false);
           continue;
         }
         try {
           const buf = await downloadMediaMessage(msg, "buffer", {}, { logger: silent as any, reuploadRequest: this.sock.updateMediaMessage });
-          const path = join(this.opts.dataDir, "whatsapp", "voice", `${out.id.replace(/[^\w-]/g, "_")}.ogg`);
+          const [dir, ext] = out.mediaType === "image" ? ["images", "jpg"] : ["voice", "ogg"];
+          const path = join(this.opts.dataDir, "whatsapp", dir, `${out.id.replace(/[^\w-]/g, "_")}.${ext}`);
           writeFileSync(path, buf);
           this.store.save([{ ...out, mediaPath: path }]);
-          this.state.voiceDownloaded++;
-          this.opts.onVoice?.({ ...out, mediaPath: path }, true);
+          if (out.mediaType === "audio") this.state.voiceDownloaded++;
+          this.opts.onMedia?.({ ...out, mediaPath: path }, true);
         } catch {
-          // Expired on WhatsApp's servers and gone from the phone: nothing to transcribe.
-          this.opts.onVoice?.(out, false);
+          // Expired on WhatsApp's servers and gone from the phone: nothing to read.
+          this.opts.onMedia?.(out, false);
         }
       }
     } finally {

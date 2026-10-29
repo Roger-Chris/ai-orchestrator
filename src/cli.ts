@@ -31,7 +31,7 @@ import { buildPool, poolPrompt } from "./whatsapp/pool.js";
 import { describe, peopleGraph } from "./whatsapp/graph.js";
 import { spawnSync } from "node:child_process";
 import { WhatsAppLink } from "./whatsapp/link.js";
-import { ollamaProblem, transcribe } from "./whatsapp/local.js";
+import { describeImages, ollamaProblem, transcribe } from "./whatsapp/local.js";
 import { WaStore, type WaMessage } from "./whatsapp/store.js";
 import { ReplyDrafter, replyOptions } from "./whatsapp/drafter.js";
 import { CallDesk } from "./calls/desk.js";
@@ -349,8 +349,8 @@ async function cmdWhatsApp(config: Config, sub = "status") {
   const forward = hubForwarder(config);
   console.log(`New messages go to the hub at ${hubUrl(config)} for reply drafts.`);
 
-  // A live voice note waits for this device's Whisper, so the hub drafts from what was said.
-  // If the download or the transcriber fails it goes on as "[voice note]" after all.
+  // A live voice note or photo waits for this device's Whisper / vision model, so the hub drafts
+  // from what was said or shown. If that fails it goes on as "[voice note]" / "[image]" after all.
   const held = new Map<string, WaMessage>();
   let whisper = Promise.resolve();
   const release = (id: string) => {
@@ -358,32 +358,33 @@ async function cmdWhatsApp(config: Config, sub = "status") {
     if (!m) return;
     held.delete(id);
     const transcript = wa.messages(m.chatId, 50).find((x) => x.id === id)?.transcript;
-    if (transcript) console.log(`voice note transcribed: "${transcript.slice(0, 60)}${transcript.length > 60 ? "…" : ""}"`);
+    if (transcript) console.log(`${m.mediaType === "image" ? "photo described" : "voice note transcribed"}: "${transcript.slice(0, 60)}${transcript.length > 60 ? "…" : ""}"`);
     forward.send([{ ...m, transcript }]);
   };
   const link: WhatsAppLink = new WhatsAppLink(wa, {
     dataDir: resolve(config.dataDir),
     history: config.whatsapp.history,
     voiceNotes: config.whatsapp.voiceNotes,
+    images: config.whatsapp.images,
     ignore: config.whatsapp.ignore,
     print: (s) => console.log(s),
     onLive: (ms) => {
       console.log(`new: ${ms.length} message(s)`);
-      const voice = ms.filter((m) => link.wantsVoice(m) && !m.transcript);
-      forward.send(ms.filter((m) => !voice.includes(m)));
-      for (const m of voice) {
+      const media = ms.filter((m) => link.wantsMedia(m) && !m.transcript);
+      forward.send(ms.filter((m) => !media.includes(m)));
+      for (const m of media) {
         held.set(m.id, m);
         setTimeout(() => release(m.id), 180_000).unref(); // never hold one for ever
       }
     },
-    onVoice: (m, ok) => {
+    onMedia: (m, ok) => {
       if (!held.has(m.id)) return; // a history note: `orc style learn` transcribes those
       if (!ok) return release(m.id);
       whisper = whisper
-        .then(() => transcribe(wa, config.style, () => {}, ROOT))
+        .then(async () => void (m.mediaType === "image" ? await describeImages(wa, config.style) : await transcribe(wa, config.style, () => {}, ROOT)))
         .then(
           () => {},
-          (e) => console.warn(`! voice note not transcribed: ${(e as Error).message}`),
+          (e) => console.warn(`! ${m.mediaType === "image" ? "photo not described" : "voice note not transcribed"}: ${(e as Error).message}`),
         )
         .then(() => release(m.id));
     },
