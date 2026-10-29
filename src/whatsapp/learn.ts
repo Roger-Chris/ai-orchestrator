@@ -1,4 +1,4 @@
-import { addressTerms, type AddressUse } from "./address.js";
+import { studyAddress, type AddressUse, type Moment } from "./address.js";
 import { ollamaJson, type LocalModelOptions } from "./local.js";
 import { spellingMap, stockMessages, topWords } from "./spelling.js";
 import { groundCard } from "./pool.js";
@@ -36,6 +36,8 @@ export interface ChatStats {
   replyMinutes?: number;
   /** What you call them (sir, ji, bro, machi, da, di…), counted from your messages; most used first. */
   address: AddressUse[];
+  /** Moments where you call them nothing (see address.ts `studyAddress`). */
+  addressNone?: Partial<Record<Moment, number>>;
   /** Your spelling of words with several spellings: { ok: "okk", because: "bcoz" }. */
   spelling: Record<string, string>;
   /** Your most used words, spelt your way. */
@@ -172,7 +174,10 @@ export function chatStats(msgs: WaMessage[]): ChatStats {
     burst: round(mine.length / (runs || 1), 1),
     voiceNotes: mine.filter((m) => m.mediaType === "audio").length,
     replyMinutes: gaps.length ? Math.round(gaps[Math.floor(gaps.length / 2)]) : undefined,
-    address: addressTerms(texts),
+    ...(() => {
+      const a = studyAddress(texts, replyPairs(msgs, 1000));
+      return { address: a.terms, addressNone: a.none };
+    })(),
     spelling: spellingMap(texts),
     words: topWords(texts),
     // Typed messages only: a document's file name or a photo caption is not something you "say".

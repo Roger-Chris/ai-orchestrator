@@ -1,6 +1,7 @@
 import type { ChatStats, ContactStyle, ReplyPair, StyleBook, StyleCard, Voice } from "./learn.js";
 import { spoken, type WaMessage } from "./store.js";
-import { addressTerms, type AddressUse } from "./address.js";
+import { addressTerms, MOMENT_LABEL, MOMENTS, studyAddress, type AddressUse, type Moment } from "./address.js";
+import { replyPairs } from "./learn.js";
 import { convoState, type ConvoState } from "./convo.js";
 
 /**
@@ -28,6 +29,8 @@ export interface ContextPool {
   address: AddressUse[];
   /** How many of your messages that count is based on. */
   addressBasis: number;
+  /** Moments (asking, joking…) where you use no term with them: moment -> count. */
+  addressNone: Partial<Record<Moment, number>>;
   /** Your spellings (yours over all chats, this chat's on top), your words and stock messages. */
   spelling: Record<string, string>;
   words: string[];
@@ -149,7 +152,13 @@ export function buildPool(book: StyleBook, chat: { chatId: string; name?: string
     .sort((a, b) => a.ts - b.ts);
 
   // The book's count covers far more of your messages than the hub keeps; fall back to what is here.
-  const address = own?.stats.address ?? addressTerms(mine);
+  // Which term when (favour, joke, thanks…): the book's study, else studied here from the hub's
+  // messages and the book's examples, for the terms the book counted.
+  const counted = own?.stats.address ?? addressTerms(mine);
+  const studied = counted.some((a) => a.when)
+    ? { terms: counted, none: own?.stats.addressNone ?? {} }
+    : studyAddress(mine, [...replyPairs(messages, 1000), ...ownExamples], counted);
+  const address = studied.terms;
   const addressBasis = own?.stats.address ? own.stats.mine : mine.length;
 
   const groupName = new Map(book.graph.nodes.filter((n) => n.kind === "group").map((n) => [n.id, n.label]));
@@ -164,6 +173,7 @@ export function buildPool(book: StyleBook, chat: { chatId: string; name?: string
     stats: own?.stats,
     address,
     addressBasis,
+    addressNone: studied.none,
     // A book learnt before these were counted has none; the prompt then just leaves them out.
     spelling: { ...(book.owner.stats.spelling ?? {}), ...(own?.stats.spelling ?? {}) },
     words: own?.stats.words?.length ? own.stats.words : (book.owner.stats.words ?? []),
@@ -184,11 +194,46 @@ export function buildPool(book: StyleBook, chat: { chatId: string; name?: string
 const pct = (n: number) => `${Math.round(n * 100)}%`;
 const line = (m: WaMessage, who: string) => `${m.fromMe ? "Me" : m.isGroup ? (m.senderName ?? "Someone") : who}: ${spoken(m).replace(/\s*\n\s*/g, " / ")}`;
 
-/** What to call them, as a rule the model must not bend: the term is how they know it is you. */
-export function addressRule(p: Pick<ContextPool, "address" | "addressBasis">): string {
+const momentList = (o: Partial<Record<Moment, number>> = {}) =>
+  MOMENTS.filter((m) => (o[m] ?? 0) > 0)
+    .sort((a, b) => (o[b] ?? 0) - (o[a] ?? 0))
+    .map((m) => `${MOMENT_LABEL[m]} (${o[m]})`)
+    .join(", ");
+
+/**
+ * What to call them, as a rule the model must not bend: the term is how they know it is you. With
+ * several terms, the rule says which one goes with which moment (favour, joke, thanks…), learnt
+ * from your own messages, so each option gets the term you would use for what it is doing.
+ */
+export function addressRule(p: Pick<ContextPool, "address" | "addressBasis"> & { addressNone?: ContextPool["addressNone"] }): string {
   if (p.address.length) {
-    const used = p.address.map((a) => `"${a.term}" (in ${a.n} of my messages)`).join(", ");
-    return `What I call them: ${used}. Use ${p.address.length > 1 ? "these, mostly the first," : `"${p.address[0].term}"`} wherever I would address them, and never any other term (no sir, ji, bro, machi, da, di or the like unless listed here).`;
+    const studied = p.address.some((a) => a.when && Object.keys(a.when).length);
+    if (p.address.length === 1 || !studied) {
+      const used = p.address.map((a) => `"${a.term}" (in ${a.n} of my messages)`).join(", ");
+      const one = p.address.length === 1 ? [`What I call them: ${used}. Use "${p.address[0].term}" wherever I would address them, and never any other term (no sir, ji, bro, machi, da, di or the like).`] : [`What I call them: ${used}. Use these, mostly the first, wherever I would address them, and never any other term (no sir, ji, bro, machi, da, di or the like unless listed here).`];
+      const a = p.address[0];
+      if (studied && a.examples?.length) one.push(`For example:\n${a.examples.map((e) => `  ${e}`).join("\n")}`);
+      return one.join("\n");
+    }
+    const out = [
+      "What I call them changes with the moment, so choose the term for each option separately, from what that option is doing and what they just said. Measured from my own messages:",
+    ];
+    for (const a of p.address) {
+      const at = a.at && (a.at.alone || a.at.start || a.at.end) ? `; usually ${a.at.start >= a.at.end && a.at.start >= a.at.alone ? "first word" : a.at.end >= a.at.alone ? "last word" : "on its own"}` : "";
+      out.push(`- "${a.term}" (${a.n} messages): when ${momentList(a.when) || "—"}${a.after && Object.keys(a.after).length ? `; after they were ${momentList(a.after)}` : ""}${at}.`);
+      for (const e of a.examples ?? []) out.push(`    ${e}`);
+    }
+    // Per moment, the split; only moments with something to go on.
+    const rows = MOMENTS.map((m) => {
+      const split = p.address.map((a) => ({ t: a.term, n: a.when?.[m] ?? 0 })).filter((x) => x.n);
+      const none = p.addressNone?.[m] ?? 0;
+      const total = split.reduce((x, y) => x + y.n, 0) + none;
+      if (total < 2 || !split.length) return undefined;
+      return `${MOMENT_LABEL[m]}: ${split.sort((x, y) => y.n - x.n).map((x) => `${x.t} ${x.n}`).join(", ")}${none ? `, no term ${none}` : ""}`;
+    }).filter(Boolean);
+    if (rows.length) out.push(`By moment (how many of my messages): ${rows.join("; ")}.`);
+    out.push(`Use the term I use most for that kind of message; where I mostly use none, use none. Never mix two terms in one message unless my examples do, and never use any other term (no sir, ji, bro, machi, da, di or the like unless listed here).`);
+    return out.join("\n");
   }
   return p.addressBasis >= 10
     ? "I never use a term of address with them (no sir, ji, bro, machi, da, di): do not add one."

@@ -7,13 +7,13 @@ import { content } from "../src/whatsapp/link.js";
 import { buildPool, groundCard, poolPrompt } from "../src/whatsapp/pool.js";
 import { cleanDraft, ReplyDrafter, replyOptions } from "../src/whatsapp/drafter.js";
 import { mimic, spellingMap, stockMessages } from "../src/whatsapp/spelling.js";
-import { addressTerms, addTerms, fixAddress } from "../src/whatsapp/address.js";
+import { addressTerms, addTerms, fitAddress, fixAddress, momentOf, studyAddress } from "../src/whatsapp/address.js";
 import type { ProviderId, ProviderRequest } from "../src/types.js";
 import { WaStore, type WaMessage } from "../src/whatsapp/store.js";
 import { Store } from "../src/store/db.js";
 import { MemoryReplica } from "../src/shared/replica.js";
 import { findPerson, personKnowledge } from "../src/whatsapp/knowledge.js";
-import { newContactRule } from "../src/whatsapp/pool.js";
+import { addressRule, newContactRule } from "../src/whatsapp/pool.js";
 
 const cleanup: (() => void)[] = [];
 afterAll(() => cleanup.forEach((f) => f()));
@@ -318,6 +318,51 @@ describe("terms of address", () => {
     drafter.saveBook({ version: 1, builtAt: 1, model: "m", owner: { stats: chatStats(chatA) }, contacts: [{ chatId: A, name: "Arun", isGroup: false, stats: chatStats(chatA), card: card(), examples: [], lastTs: 1 }], graph: buildGraph([], new Map()) });
     wa.save([...chatA, msg(A, false, "varuviya", 9999)]);
     expect((await drafter.draft(A))?.text).toBe("seri da varen");
+  });
+});
+
+describe("terms of address by moment", () => {
+  // How I write to Varun: ji when asking a favour or thanking, machi when joking or excited, da otherwise.
+  const mine = [
+    "ji can you send the file pls", "pls check once ji", "konjam help pannunga ji", "thanks ji", "thank you ji", "tq ji",
+    "machi semma!!", "lol machi", "haha machi loosu", "machi vera level", "super machi",
+    "seri da", "naan varen da", "office la irukken da", "ok da", "da enga irukka?",
+  ];
+  const pairs = [
+    { them: "enna aachu", me: "ji can you send the file pls" },
+    { them: "I got the job!", me: "machi semma!!" },
+    { them: "varuviya", me: "naan varen da" },
+  ];
+
+  it("reads what a message is doing", () => {
+    expect(momentOf("ji can you send it pls")).toBe("ask");
+    expect(momentOf("lol machi")).toBe("tease");
+    expect(momentOf("thanks da")).toBe("thanks");
+    expect(momentOf("enga irukka?")).toBe("question");
+    expect(momentOf("naan varen da")).toBe("inform");
+  });
+
+  it("learns which term goes with which moment, with real examples", () => {
+    const s = studyAddress(mine, pairs);
+    const by = Object.fromEntries(s.terms.map((t) => [t.term, t]));
+    expect(by.ji.when).toMatchObject({ ask: 3, thanks: 3 });
+    expect(by.machi.when).toMatchObject({ tease: 2, excited: 3 });
+    expect(by.da.when).toMatchObject({ agree: 2, inform: 2 });
+    expect(by.machi.after).toMatchObject({ excited: 1 });
+    expect(by.machi.examples?.[0]).toBe("Them: I got the job! → Me: machi semma!!");
+  });
+
+  it("puts the moment rule in the prompt and fixes a draft that uses the wrong term for the moment", () => {
+    const s = studyAddress(mine, pairs);
+    const rule = addressRule({ address: s.terms, addressBasis: mine.length, addressNone: s.none });
+    expect(rule).toContain("changes with the moment");
+    expect(rule).toContain("\"ji\" (6 messages): when thanking (3), asking a favour or for something (3)");
+    expect(rule).toContain("asking a favour or for something: ji 3");
+    expect(fitAddress("machi can you send it pls", s.terms).text).toBe("ji can you send it pls");
+    expect(fitAddress("Thanks da", s.terms).text).toBe("Thanks ji");
+    expect(fitAddress("seri da", s.terms).fixed).toEqual([]); // no clear habit for "agree": left alone
+    expect(fitAddress("semma da", s.terms).text).toBe("semma machi");
+    expect(fitAddress("haha da", s.terms).fixed).toEqual([]); // two jokes are not a habit yet
   });
 });
 

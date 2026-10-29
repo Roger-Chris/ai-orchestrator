@@ -4,7 +4,7 @@ import type { ProviderPool } from "../providers/registry.js";
 import type { PushPayload } from "../server/push.js";
 import type { Store } from "../store/db.js";
 import type { ProviderId, ReplyDraft, ReplyOption } from "../types.js";
-import { fixAddress } from "./address.js";
+import { fitAddress, fixAddress } from "./address.js";
 import type { StyleBook } from "./learn.js";
 import { parseJson } from "./local.js";
 import { buildPool, type ContextPool, poolPrompt } from "./pool.js";
@@ -58,7 +58,7 @@ export function replyOptions(answer: string, p: ContextPool): ReplyOption[] {
   for (const o of raw) {
     const clean = cleanDraft(o.text);
     if (!clean) continue;
-    const text = mimic(p.isGroup ? clean : fixAddress(clean, p.address.map((a) => a.term)).text, habits);
+    const text = mimic(p.isGroup ? clean : fitAddress(fixAddress(clean, p.address.map((a) => a.term)).text, p.address).text, habits);
     if (text && !out.some((x) => x.text === text)) out.push({ label: o.label, text });
   }
   return out.slice(0, 4);
