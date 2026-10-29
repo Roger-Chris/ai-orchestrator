@@ -5,7 +5,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { buildGraph, chatStats, learnStyle, normalizeCard, replyPairs, type StyleBook, type StyleCard } from "../src/whatsapp/learn.js";
 import { content } from "../src/whatsapp/link.js";
 import { buildPool, groundCard, poolPrompt } from "../src/whatsapp/pool.js";
-import { cleanDraft, ReplyDrafter } from "../src/whatsapp/drafter.js";
+import { cleanDraft, ReplyDrafter, replyOptions } from "../src/whatsapp/drafter.js";
+import { mimic, spellingMap, stockMessages } from "../src/whatsapp/spelling.js";
 import { addressTerms, addTerms, fixAddress } from "../src/whatsapp/address.js";
 import type { ProviderId, ProviderRequest } from "../src/types.js";
 import { WaStore, type WaMessage } from "../src/whatsapp/store.js";
@@ -154,7 +155,7 @@ describe("context pool", () => {
     expect(prompt).toContain('What I call them: "da" (in 3 of my messages)');
     expect(prompt).toContain("0.25 emoji per message");
     expect(prompt).toContain("I never write Tamil script here");
-    expect(prompt).toContain("Write my reply to their last message(s)");
+    expect(prompt).toContain("Give my reply options to their last message(s).");
   });
 
   it("borrows from the most similar character for a chat never studied", () => {
@@ -274,5 +275,51 @@ describe("terms of address", () => {
     drafter.saveBook({ version: 1, builtAt: 1, model: "m", owner: { stats: chatStats(chatA) }, contacts: [{ chatId: A, name: "Arun", isGroup: false, stats: chatStats(chatA), card: card(), examples: [], lastTs: 1 }], graph: buildGraph([], new Map()) });
     wa.save([...chatA, msg(A, false, "varuviya", 9999)]);
     expect((await drafter.draft(A))?.text).toBe("seri da varen");
+  });
+});
+
+describe("your spelling and reply options", () => {
+  it("learns the spellings you mostly use and your stock messages", () => {
+    const mine = ["okk da", "okk bro", "ok fine", "ok seri", "okk", "okk", "okk", "okay", "bcoz busy", "bcoz", "bcoz", "bcoz", "bcoz", "bcoz", "because", "u coming?", "u there", "okk da", "Seri da."];
+    const map = spellingMap(mine);
+    expect(map.okay).toBe("okk"); // 1 of 9: not your spelling
+    expect(map.ok).toBeUndefined(); // 2 of 9: both are yours, both stay
+    expect(map.because).toBe("bcoz");
+    expect(map.you).toBeUndefined(); // two uses of "u" are not enough to call it a habit
+    expect(stockMessages(mine)).toEqual(["bcoz", "okk", "okk da"]);
+  });
+
+  it("rewrites a tidy draft into your habits and keeps the words", () => {
+    const h = { spelling: { ok: "okk", because: "bcoz", you: "u" }, lowercaseStart: 0.9, fullStops: 0 };
+    expect(mimic("Ok da, I can't come because of exam.\nWill call you.", h)).toBe("okk da, I can't come bcoz of exam\nwill call u");
+    expect(mimic("Ok sir.", { ...h, lowercaseStart: 0.1, fullStops: 0.8 })).toBe("Okk sir.");
+  });
+
+  const pool = (over: Partial<ReturnType<typeof buildPool>> = {}) => ({
+    ...buildPool({ version: 1, builtAt: 0, model: "m", owner: { stats: chatStats([]) }, contacts: [], graph: buildGraph([], new Map()) }, { chatId: A, isGroup: false }, []),
+    address: [{ term: "da", n: 9 }],
+    spelling: { ok: "okk" },
+    stats: { ...chatStats(chatA), lowercaseStart: 1, fullStops: 0 },
+    ...over,
+  });
+
+  it("turns the model's JSON into accept / decline options in your style", () => {
+    const answer = 'Sure:\n{"options":[{"label":"Yes","text":"Ok bro, varen."},{"label":"No","text":"Illa da, mudiyadhu"},{"label":"Later","text":"Ok bro, varen."}]}';
+    expect(replyOptions(answer, pool())).toEqual([
+      { label: "Yes", text: "okk da, varen" },
+      { label: "No", text: "illa da, mudiyadhu" },
+    ]);
+    expect(replyOptions("Ok bro", pool())).toEqual([{ label: "Reply", text: "okk da" }]);
+    expect(replyOptions('{"options":[]}', pool())).toEqual([]);
+  });
+
+  it("asks the model for options and to copy your spelling, words and stock messages", () => {
+    const p = { ...pool(), words: ["okk", "pannalam"], stock: ["okk da"] };
+    const { system, prompt } = poolPrompt(p);
+    expect(system).toContain("copy my spellings, shortcuts, slang and mistakes exactly");
+    expect(system).toContain('{"options":[{"label":"…","text":"…"}]}');
+    expect(prompt).toContain("Words as I spell them (use these spellings): okk, pannalam.");
+    expect(prompt).toContain("ok → okk");
+    expect(prompt).toContain('Messages I often send, word for word (reuse them when they fit): "okk da".');
   });
 });

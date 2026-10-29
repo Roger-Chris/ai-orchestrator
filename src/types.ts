@@ -232,9 +232,18 @@ export interface ReplyDraft {
   phone?: string;
   /** What they said that this answers. */
   incoming: string;
+  /** The first option's text. */
   text: string;
+  /** Ways to answer: agree, say no, something in between; each written the way you type. */
+  options: ReplyOption[];
   provider: ProviderId;
   createdAt: number;
+}
+
+export interface ReplyOption {
+  /** One or two words: Yes, No, Later, Ask why… */
+  label: string;
+  text: string;
 }
 
 export interface Insights {

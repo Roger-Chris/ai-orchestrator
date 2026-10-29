@@ -1,5 +1,6 @@
 import { addressTerms, type AddressUse } from "./address.js";
 import { ollamaJson, type LocalModelOptions } from "./local.js";
+import { spellingMap, stockMessages, topWords } from "./spelling.js";
 import { groundCard } from "./pool.js";
 import { spoken, type WaChat, type WaMessage, type WaStore } from "./store.js";
 
@@ -35,6 +36,12 @@ export interface ChatStats {
   replyMinutes?: number;
   /** What you call them (sir, ji, bro, machi, da, di…), counted from your messages; most used first. */
   address: AddressUse[];
+  /** Your spelling of words with several spellings: { ok: "okk", because: "bcoz" }. */
+  spelling: Record<string, string>;
+  /** Your most used words, spelt your way. */
+  words: string[];
+  /** Short messages you send again and again, exactly as typed. */
+  stock: string[];
 }
 
 /** A real exchange: what they said, then what you sent back. */
@@ -166,6 +173,9 @@ export function chatStats(msgs: WaMessage[]): ChatStats {
     voiceNotes: mine.filter((m) => m.mediaType === "audio").length,
     replyMinutes: gaps.length ? Math.round(gaps[Math.floor(gaps.length / 2)]) : undefined,
     address: addressTerms(texts),
+    spelling: spellingMap(texts),
+    words: topWords(texts),
+    stock: stockMessages(texts),
   };
 }
 

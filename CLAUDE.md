@@ -8,7 +8,7 @@ A brain that routes work across the owner's Claude, ChatGPT (Go), Gemini (Google
 - `web/`: React + Vite web app (PWA), built to `web/dist` by `npm start`.
 - `mobile/`: Expo (SDK 58) React Native Android app, installed from an APK, not the Play Store. It has its own `AGENTS.md`: read it before touching Expo APIs.
 - `agents/`: specialist agent YAML files.
-- `tests/`: vitest with fake providers. `npm test` must stay green (90 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
+- `tests/`: vitest with fake providers. `npm test` must stay green (96 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
 
 ## Running the hub
 
@@ -45,6 +45,7 @@ Hard-won details:
 - `mobile/metro.config.js` resolves the app's own `node_modules` first (the repo root has a different React for the web app) but keeps nested lookup on (expo-router keeps `@expo/metro-runtime` nested).
 - On Xiaomi phones `adb install` needs Developer options → **Install via USB**.
 - Native packages added for calls: `expo-audio` (push-to-talk, config plugin adds RECORD_AUDIO) and `expo-speech` (the phone's own TTS). The first build after them needs `npx expo prebuild --platform android --clean` (not the JS-only shortcut). Install mobile deps with `npm install --legacy-peer-deps`: the lockfile's peer deps make plain `npm ci` fail.
+- GitHub builds it too: `.github/workflows/android-release.yml` publishes a release `app-<run>` with the APK for every push to `main` that touches `mobile/` (or Actions → Android release → Run workflow). It signs with the Expo template's debug keystore, like local builds, so it installs over the phone's app. Latest APK to Downloads: `gh release download --repo Roger-Chris/ai-orchestrator --pattern "*.apk" -D ~/Downloads`.
 
 ## Home screen
 
@@ -68,6 +69,8 @@ Hard-won details:
 - `buildPool`/`poolPrompt` (`orc style pool <name|number> [--ask "…"] [--draft]`) is what every reply is written from: your voice, this chat's card and stats, the examples closest to their message, look-alike characters' examples when the chat has few (or was never studied; never their terms of address), shared groups and the last 30 messages. The hub drafts from it (`src/whatsapp/drafter.ts`, below).
 
 - Terms of address (`src/whatsapp/address.ts`): what you call each person (sir, ji, bro, machi, da, di, amma, madam…, ~150 spellings in `TERMS`, plus `style.addressTerms` in config) is counted from your own messages into `stats.address`, stated as a hard rule in the prompt for direct chats, and `fixAddress` swaps any other term in a draft for the main one. Family words (anna, akka, mama, appa…) and pa/ma are never rewritten: they are also ordinary words. Never borrowed from look-alike chats.
+- Your spelling (`src/whatsapp/spelling.ts`): `stats.spelling` maps spellings you hardly ever use (<15%) to the one you mostly use (okk/ok, bcoz/because, ila/illa…), so variants you really mix both stay; `stats.words` and `stats.stock` (messages you send again and again) go into the prompt word for word, and `mimic` applies your spellings, lowercase start and missing full stops to every draft. The owner wants drafts that copy their shortcuts and mistakes, never tidier English.
+- Options: the model answers JSON `{"options":[{label,text}]}` (agree / decline / in between when they ask or invite, else 2-4 natural replies); `replyOptions` cleans each, fixes the term of address and applies `mimic`. Drafts keep them in `wa_drafts.options`; the phone shows them as chips that fill the editable text.
 - Replies (`src/whatsapp/drafter.ts`, `ReplyDrafter`): the laptop's `orc whatsapp link` forwards live messages to `whatsapp.hub` (`POST /api/whatsapp/messages`, queued and retried while the hub is down); `orc style push` sends the book (`PUT /api/style`) plus the last 60 messages per chat (`live: false`, never drafted). The hub waits `draftDelaySeconds` after their last message in a direct chat, drafts with the first ready of Claude/Gemini/ChatGPT/Groq, stores it in `wa_drafts`, notifies the phone and lists it as `replies` in `/api/home`. Your own message in that chat marks its drafts sent. The phone's "Send in WhatsApp" opens wa.me for phone-number chats and the share sheet for hidden-id chats; nothing is ever sent by the hub. Live voice notes reach the hub untranscribed.
 
 ## Agents know the setup

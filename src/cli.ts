@@ -31,10 +31,10 @@ import { buildPool, poolPrompt } from "./whatsapp/pool.js";
 import { WhatsAppLink } from "./whatsapp/link.js";
 import { ollamaProblem, transcribe } from "./whatsapp/local.js";
 import { WaStore, type WaMessage } from "./whatsapp/store.js";
-import { ReplyDrafter } from "./whatsapp/drafter.js";
+import { ReplyDrafter, replyOptions } from "./whatsapp/drafter.js";
 import { CallDesk } from "./calls/desk.js";
 import { GroqVoice } from "./calls/groq.js";
-import { addTerms, fixAddress } from "./whatsapp/address.js";
+import { addTerms } from "./whatsapp/address.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -362,7 +362,7 @@ async function cmdWhatsApp(config: Config, sub = "status") {
 }
 
 /** Learns your writing style from the saved chats with the local models; the book goes to data/style/. */
-async function cmdStyle(config: Config, sub = "show", opts: { who?: string; ask?: string; draft?: boolean } = {}) {
+async function cmdStyle(config: Config, sub = "show", opts: { who?: string; ask?: string; draft?: boolean; raw?: boolean } = {}) {
   addTerms(config.style.addressTerms);
   const store = new Store(resolve(config.dataDir));
   const wa = new WaStore(store);
@@ -409,9 +409,12 @@ async function cmdStyle(config: Config, sub = "show", opts: { who?: string; ask?
         const id = (["claude", "gemini", "codex", "groq"] as ProviderId[]).find((p) => ready.includes(p));
         if (!id) throw new Error("no online model is ready (Claude, Gemini, ChatGPT or Groq)");
         const r = await providers.run(id, { system, prompt, permission: "read", timeoutMs: 180_000 });
-        const fixed = r.ok && !pool.isGroup ? fixAddress(r.text.trim(), pool.address.map((a) => a.term)) : undefined;
-        console.log(r.ok ? `\n=== Draft from ${id} ===\n${fixed?.text ?? r.text.trim()}` : `\n${id} failed: ${r.error}`);
-        if (fixed?.fixed.length) console.log(`(corrected what it called them: ${fixed.fixed.join(", ")})`);
+        if (!r.ok) throw new Error(`${id} failed: ${r.error}`);
+        const options = replyOptions(r.text, pool);
+        console.log(`\n=== Options from ${id} (as the phone shows them) ===`);
+        for (const o of options) console.log(`[${o.label}] ${o.text}`);
+        if (!options.length) console.log(`(none: ${pool.incoming.length ? "the model saw nothing worth answering" : "your message is the last one, so there is nothing to answer; add --ask to write one anyway"})`);
+        if (opts.raw) console.log(`\n--- model's own answer ---\n${r.text.trim()}`);
       }
     } else if (!previous) console.log("No style book yet: link WhatsApp (`orc whatsapp link`), then run `orc style learn`.");
     else {
@@ -586,6 +589,7 @@ async function main() {
       live: { type: "boolean" },
       ask: { type: "string" },
       draft: { type: "boolean" },
+      raw: { type: "boolean" },
     },
   });
   const [cmd = "serve", ...rest] = positionals;
@@ -613,7 +617,7 @@ async function main() {
     case "whatsapp":
       return cmdWhatsApp(config, rest[0]);
     case "style":
-      return cmdStyle(config, rest[0], { who: rest.slice(1).join(" "), ask: v.ask as string | undefined, draft: !!v.draft });
+      return cmdStyle(config, rest[0], { who: rest.slice(1).join(" "), ask: v.ask as string | undefined, draft: !!v.draft, raw: !!v.raw });
     default:
       console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|check|status|disconnect]|whatsapp [link|status]|style [learn|push|show|pool <name> [--ask "…"] [--draft]]|init|mcp>`);
       process.exitCode = 1;
