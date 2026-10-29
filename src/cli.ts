@@ -28,6 +28,8 @@ import { Store } from "./store/db.js";
 import type { Permission, ProviderId, RunEvent, RunMode } from "./types.js";
 import { learnStyle, type StyleBook } from "./whatsapp/learn.js";
 import { buildPool, poolPrompt } from "./whatsapp/pool.js";
+import { describe, peopleGraph } from "./whatsapp/graph.js";
+import { spawnSync } from "node:child_process";
 import { WhatsAppLink } from "./whatsapp/link.js";
 import { ollamaProblem, transcribe } from "./whatsapp/local.js";
 import { WaStore, type WaMessage } from "./whatsapp/store.js";
@@ -328,10 +330,12 @@ async function cmdWhatsApp(config: Config, sub = "status") {
   const store = new Store(resolve(config.dataDir));
   const wa = new WaStore(store);
   let undecryptableCount = () => 0;
+  let linked: WhatsAppLink | undefined;
   const show = () => {
     const n = wa.counts();
-    const lost = undecryptableCount();
-    console.log(`${n.messages} messages (${n.mine} yours) in ${n.chats} chats · ${n.voice} voice notes, ${n.transcribed} transcribed${lost ? ` · ${lost} WhatsApp could not decrypt` : ""}`);
+    const u = linked?.status().undecrypted;
+    const lost = u && u.direct + u.group ? ` · undecryptable: ${u.direct} direct, ${u.group} group, ${u.recovered} recovered by retry (${undecryptableCount()} decrypt errors)` : "";
+    console.log(`${n.messages} messages (${n.mine} yours) in ${n.chats} chats · ${n.voice} voice notes, ${n.transcribed} transcribed${lost}`);
   };
   if (sub !== "link") {
     show();
@@ -386,6 +390,7 @@ async function cmdWhatsApp(config: Config, sub = "status") {
   });
   await link.start();
   console.log("Keep this running while history arrives (Ctrl+C to stop; run it again any time to catch up).");
+  linked = link;
   const timer = setInterval(show, 60_000);
   process.once("SIGINT", () => {
     clearInterval(timer);
@@ -428,6 +433,23 @@ async function cmdStyle(config: Config, sub = "show", opts: { who?: string; ask?
       writeFileSync(file, JSON.stringify(book, null, 2));
       console.log(`\nStyle book saved to ${file}: ${book.contacts.filter((c) => c.card).length} of ${book.contacts.length} chats described.`);
       if (book.owner.voice) console.log(`\nYour voice: ${book.owner.voice.summary}`);
+    } else if (sub === "graph") {
+      // orc style graph: every person as a node (what you call them, how often, tone…), drawn by Graphify.
+      if (!previous) throw new Error("No style book yet: run `orc style learn` first.");
+      const dir = join(resolve(config.dataDir), "style", "graph");
+      mkdirSync(join(dir, "graphify-out"), { recursive: true });
+      const graph = peopleGraph(previous, (id) => wa.activity(id));
+      writeFileSync(join(dir, "graphify-out", "graph.json"), JSON.stringify(graph, null, 1));
+      // Graphify's panel shows only the start of a profile, so the whole of each one is also in people.md.
+      const people = [...previous.contacts].sort((a, b) => b.stats.mine + b.stats.theirs - (a.stats.mine + a.stats.theirs));
+      writeFileSync(
+        join(dir, "people.md"),
+        [`# Your WhatsApp people (${people.length})`, "", ...people.flatMap((c) => [`## ${c.name}${c.isGroup ? " (group)" : ""}`, "", ...describe(c, wa.activity(c.chatId)).slice(1).map((l) => `- ${l}`), ""])].join("\n"),
+      );
+      console.log(`${graph.nodes.length} nodes, ${graph.links.length} links → ${join(dir, "graphify-out", "graph.json")}`);
+      const r = spawnSync(config.context.graphifyCommand, ["cluster-only", dir, "--no-label"], { stdio: "inherit" }); // no shell: the path has a space
+      if (r.status !== 0) throw new Error(`graphify cluster-only failed (${r.error?.message ?? `exit ${r.status}`}); install it with \`uv tool install graphifyy\``);
+      console.log(`\nOpen ${join(dir, "graphify-out", "graph.html")} to check every person. Nothing here leaves this machine.`);
     } else if (sub === "pool") {
       // orc style pool <name or number> [--ask "what to say"] [--draft]: the context the next reply is written from.
       if (!previous) throw new Error("No style book yet: run `orc style learn` first.");
@@ -675,7 +697,7 @@ async function main() {
     case "style":
       return cmdStyle(config, rest[0], { who: rest.slice(1).join(" "), ask: v.ask as string | undefined, draft: !!v.draft, raw: !!v.raw });
     default:
-      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|check|status|disconnect]|whatsapp [link|status]|style [learn|push|show|pool <name> [--ask "…"] [--draft]]|init|mcp>`);
+      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|check|status|disconnect]|whatsapp [link|status]|style [learn|push|show|graph|pool <name> [--ask "…"] [--draft]]|init|mcp>`);
       process.exitCode = 1;
   }
 }

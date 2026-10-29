@@ -82,6 +82,19 @@ export class WaStore {
       .run(id, name, isGroup ? 1 : 0);
   }
 
+  /** First and last message (seconds), all messages, yours, and how many the last 30 days had. */
+  activity(chatId: string): { first: number; last: number; total: number; mine: number; last30: number } | undefined {
+    const r = this.store.db
+      .prepare("SELECT MIN(ts) AS first, MAX(ts) AS last, COUNT(*) AS total, SUM(from_me) AS mine, SUM(ts > ?) AS last30 FROM wa_messages WHERE chat_id = ?")
+      .get(Math.floor(Date.now() / 1000) - 30 * 86400, chatId) as any;
+    return r?.first ? { first: Number(r.first), last: Number(r.last), total: Number(r.total), mine: Number(r.mine ?? 0), last30: Number(r.last30 ?? 0) } : undefined;
+  }
+
+  /** Whether any message is stored under this chat id. */
+  hasChat(id: string): boolean {
+    return !!this.store.db.prepare("SELECT 1 FROM wa_messages WHERE chat_id = ? LIMIT 1").get(id);
+  }
+
   chatName(id: string): string | undefined {
     return (this.store.db.prepare("SELECT name FROM wa_chats WHERE id = ?").get(id) as { name?: string } | undefined)?.name ?? undefined;
   }
