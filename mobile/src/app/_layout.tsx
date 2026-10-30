@@ -62,6 +62,7 @@ export default function RootLayout() {
         <Stack.Screen name="builds" options={{ title: "Builds" }} />
         <Stack.Screen name="phone" options={{ title: "Phone" }} />
         <Stack.Screen name="agents" options={{ title: "Outside agents" }} />
+        <Stack.Screen name="update" options={{ title: "Update this app" }} />
         <Stack.Screen name="t/[id]" options={{ title: "Conversation" }} />
         <Stack.Screen name="talk" options={{ headerShown: false, animation: "fade" }} />
         <Stack.Screen name="call/[id]" options={{ headerShown: false, gestureEnabled: false, animation: "fade" }} />

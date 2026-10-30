@@ -1,7 +1,9 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import type { ApkRequest, ApkResult } from "../builds/preview.js";
 import type { Config } from "../config.js";
 import type { Candidate } from "../brain/router.js";
 import type { ProviderPool } from "../providers/registry.js";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import type { BranchJob, BranchResult, ProviderId, ProviderRequest, ProviderResult } from "../types.js";
 import { runBranchJob } from "./branchwork.js";
 import { tailnetDevices } from "./tailscale.js";
@@ -180,6 +182,27 @@ export class Cluster {
       return "error" in r && !("branch" in r) ? failed(r.error) : (r as BranchResult);
     } finally {
       if (slot) slot.load = Math.max(0, slot.load - 0.5);
+    }
+  }
+
+  /**
+   * Builds an Android APK on a peer that has the Android SDK (POST /node/apk-build, streamed so a
+   * long Gradle build keeps the connection alive), then copies the APK to `dest` on this device.
+   */
+  async buildApk(node: string, req: ApkRequest, dest: string): Promise<ApkResult> {
+    const peer = this.peers.get(node);
+    if (!peer?.online) return { ok: false, error: `device ${node} is offline (the APK is built there)`, log: "" };
+    const r = await this.stream<ApkResult>(peer, "/node/apk-build", req, {});
+    if (!("ok" in r)) return { ok: false, error: r.error, log: "" };
+    if (!r.ok) return r;
+    try {
+      const res = await fetch(`${peer.url}/node/apk-build/${encodeURIComponent(req.id)}/app.apk`, { headers: this.headers(), signal: AbortSignal.timeout(10 * 60_000) });
+      if (!res.ok) return { ...r, ok: false, error: `copying the APK from ${node}: HTTP ${res.status}` };
+      mkdirSync(dirname(dest), { recursive: true });
+      writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
+      return { ...r, apkFile: dest };
+    } catch (e) {
+      return { ...r, ok: false, error: `copying the APK from ${node}: ${(e as Error).message}` };
     }
   }
 

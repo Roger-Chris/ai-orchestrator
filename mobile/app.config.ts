@@ -1,10 +1,20 @@
 /// <reference types="node" />
+import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import type { ExpoConfig } from "expo/config";
 
 // Notifications need Firebase Cloud Messaging. Put your project's google-services.json next
 // to this file to switch them on; without it the app builds and works, just without push.
 const firebase = existsSync("./google-services.json");
+
+// Which commit this APK was built from and when, shown in Settings → Update this app.
+const commit = (() => {
+  try {
+    return execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+  } catch {
+    return "";
+  }
+})();
 
 const config: ExpoConfig = {
   name: "Orchestrator",
@@ -39,7 +49,7 @@ const config: ExpoConfig = {
     ["expo-build-properties", { android: { usesCleartextTraffic: true } }],
   ],
   experiments: { typedRoutes: true },
-  extra: { firebase },
+  extra: { firebase, commit, builtAt: new Date().toISOString() },
 };
 
 export default config;

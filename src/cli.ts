@@ -174,7 +174,19 @@ export function buildSystem(config: Config) {
     onReady: (b) => void (config.builds.autoPreview ? preview?.(b) : undefined),
     node: config.node.name,
   });
-  preview = previewer(builds, new PreviewMaker({ dataDir: resolve(config.dataDir), remote: config.branches.remote, timeoutMs: config.builds.previewTimeoutMinutes * 60_000 }));
+  // Android APKs are built on the device with the Android SDK (builds.androidNode, the laptop) when it isn't this one.
+  const androidNode = config.builds.androidNode && config.builds.androidNode !== config.node.name ? config.builds.androidNode : "";
+  preview = previewer(
+    builds,
+    new PreviewMaker({
+      dataDir: resolve(config.dataDir),
+      remote: config.branches.remote,
+      timeoutMs: config.builds.previewTimeoutMinutes * 60_000,
+      android: androidNode
+        ? { node: androidNode, build: (req) => cluster.buildApk(androidNode, { ...req, timeoutMs: config.builds.apkTimeoutMinutes * 60_000 }, resolve(config.dataDir, "previews-apk", `${req.id}.apk`)) }
+        : undefined,
+    }),
+  );
   return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts, tools, models, builds, preview, fileIndex, files, phone: new PhoneDesk(store, config, (p) => void notifier.notify(p)), outside: new OutsideAgents(store, replica) };
 }
 

@@ -1,12 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { afterAll, describe, expect, it } from "vitest";
 import { BuildDesk, type BuildRunner, buildTask } from "../src/builds/desk.js";
-import { newestApk, PreviewMaker } from "../src/builds/preview.js";
-import { mountBuilds, previewer } from "../src/server/builds.js";
+import { buildApkHere, findApps, newestApk, PreviewMaker } from "../src/builds/preview.js";
+import { appUpdate, mountApkNode, mountBuilds, previewer } from "../src/server/builds.js";
 import { MemoryReplica } from "../src/shared/replica.js";
 import { Store } from "../src/store/db.js";
 import type { PushPayload } from "../src/server/push.js";
@@ -230,5 +230,129 @@ describe("previews (B2)", () => {
     expect((await post(`/api/builds/${b.id}/merge`)).status).toBe(409);
     expect((await post("/api/builds/nope/merge")).status).toBe(404);
     expect((await (await app.request(`/api/builds/${b.id}`)).json()).name).toBe("Todo");
+  });
+});
+
+describe("the app builds its own APK (Step 2)", () => {
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, stdio: "pipe", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } }).toString();
+  /** A repo like ai-orchestrator: a Node server at the top (no build script) and the phone app in mobile/. */
+  function monorepo() {
+    const dir = tmp("orc-self-");
+    const origin = join(dir, "origin.git");
+    git(dir, "init", "-q", "--bare", origin);
+    const work = join(dir, "work");
+    git(dir, "clone", "-q", origin, work);
+    writeFileSync(join(work, "package.json"), JSON.stringify({ scripts: { test: "vitest" } }));
+    mkdirSync(join(work, "mobile"));
+    writeFileSync(join(work, "mobile", "package.json"), JSON.stringify({ scripts: { "build:apk": "node scripts/build-apk.mjs" } }));
+    mkdirSync(join(work, "web"));
+    writeFileSync(join(work, "web", "index.html"), "<h1>web</h1>");
+    git(work, "add", ".");
+    git(work, "commit", "-qm", "init");
+    git(work, "push", "-q", "origin", "HEAD:refs/heads/orc/b1");
+    return { dir, work, origin };
+  }
+
+  it("finds apps in subfolders: the Android app in mobile/, the web app in web/", () => {
+    const { work } = monorepo();
+    expect(findApps(work)).toEqual({ android: join(work, "mobile"), web: join(work, "web") });
+  });
+
+  it("the hub asks the laptop for the APK of mobile/ and serves it; Update this app offers it", async () => {
+    const { dir, work } = monorepo();
+    const store = new Store(join(dir, "data"));
+    cleanup.unshift(() => store.close());
+    const f = fakeRunner();
+    const desk = new BuildDesk({ store, runner: f.runner, node: "hub" });
+    const b = desk.start({ name: "Orchestrator", spec: "add a dark mode switch", repo: work });
+    f.runs[0].resolve({ ...f.runs[0].record, status: "done", steps: [branchStep("s1", "orc/b1") as any] });
+    await settle();
+    const asked: any[] = [];
+    const apk = join(dir, "from-laptop.apk");
+    const maker = new PreviewMaker({
+      dataDir: join(dir, "data"),
+      remote: "origin",
+      android: {
+        node: "omen",
+        build: async (req) => {
+          asked.push(req);
+          writeFileSync(apk, "PK-apk");
+          return { ok: true, apkFile: apk, log: "BUILD SUCCESSFUL" };
+        },
+      },
+    });
+    expect(appUpdate(desk, "orchestrator")).toEqual({ available: false, app: "orchestrator" });
+    await previewer(desk, maker)(desk.get(b.id)!);
+    const got = desk.get(b.id)!;
+    expect(got.preview).toMatchObject({ status: "ready", apk: `/p/${b.previewKey}/app.apk`, web: `/p/${b.previewKey}/` });
+    expect(asked).toEqual([{ id: b.id, remoteUrl: join(dir, "origin.git"), branch: "orc/b1", appDir: "mobile", timeoutMs: 20 * 60_000 }]);
+
+    const app = new Hono();
+    mountBuilds(app, { builds: desk, config: { builds: { selfApp: "orchestrator" } } });
+    const u = await (await app.request("/api/app/update")).json();
+    expect(u).toMatchObject({ available: true, build: b.id, apk: `/p/${b.previewKey}/app.apk`, size: 6, branch: "orc/b1", status: "ready" });
+    expect(await (await app.request(u.apk)).text()).toBe("PK-apk");
+  });
+
+  it("a failed Android build says where to build it, and the web part still previews", async () => {
+    const { dir, work } = monorepo();
+    const exec = (async (o: { command: string; args: string[] }) => {
+      const words = [o.command, ...o.args].join(" ");
+      if (words.includes("git")) return realGit(o as any);
+      return { code: words.includes("build:apk") ? 1 : 0, stdout: "", stderr: words.includes("build:apk") ? "SDK location not found" : "", timedOut: false, aborted: false };
+    }) as any;
+    const realGit = (o: { args: string[]; cwd?: string }) => {
+      try {
+        return { code: 0, stdout: execFileSync("git", o.args, { cwd: o.cwd, stdio: "pipe" }).toString(), stderr: "", timedOut: false, aborted: false };
+      } catch (e: any) {
+        return { code: 1, stdout: "", stderr: String(e.stderr ?? e.message), timedOut: false, aborted: false };
+      }
+    };
+    const r = await new PreviewMaker({ dataDir: join(dir, "data"), remote: "origin", exec }).make({ id: "b7", repo: work, previewKey: "k7", branches: [{ name: "orc/b1" }] } as any);
+    expect(r.status).toBe("ready");
+    expect(r.web).toBe("/p/k7/");
+    expect(r.apk).toBeUndefined();
+    expect(r.error).toContain("SDK location not found");
+    expect(r.error).toContain("builds.androidNode");
+  });
+
+  it("the laptop side: clones the branch, builds mobile/, streams the result and serves the APK once", async () => {
+    const { dir, origin } = monorepo();
+    const runs: string[] = [];
+    const exec = (async (o: { command: string; args: string[]; cwd?: string }) => {
+      if (o.command === "git") {
+        try {
+          return { code: 0, stdout: execFileSync("git", o.args, { cwd: o.cwd, stdio: "pipe" }).toString(), stderr: "", timedOut: false, aborted: false };
+        } catch (e: any) {
+          return { code: 1, stdout: "", stderr: String(e.stderr ?? e.message), timedOut: false, aborted: false };
+        }
+      }
+      runs.push(`${[o.command, ...o.args].join(" ")} @ ${o.cwd?.split(/[\\/]/).slice(-1)[0]}`);
+      if (o.args.includes("build:apk")) {
+        const out = join(o.cwd!, "android", "app", "build", "outputs", "apk", "release");
+        mkdirSync(out, { recursive: true });
+        writeFileSync(join(out, "app-release.apk"), "PK-release");
+      }
+      return { code: 0, stdout: "ok", stderr: "", timedOut: false, aborted: false };
+    }) as any;
+    const config = { dataDir: join(dir, "laptop"), builds: { androidHere: false, apkTimeoutMinutes: 40 } };
+    const app = new Hono();
+    mountApkNode(app, { config, exec });
+    const body = JSON.stringify({ id: "b5", remoteUrl: origin, branch: "orc/b1", appDir: "mobile" });
+    const post = (b = body) => app.request("/node/apk-build", { method: "POST", headers: { "Content-Type": "application/json" }, body: b });
+    expect((await post()).status).toBe(403); // only the device with the Android tools builds APKs
+    config.builds.androidHere = true;
+    expect((await post(JSON.stringify({ id: "b5", remoteUrl: "--upload-pack=x", branch: "orc/b1", appDir: "mobile" }))).status).toBe(400);
+    expect((await post(JSON.stringify({ id: "b5", remoteUrl: origin, branch: "orc/b1", appDir: "../.." }))).status).toBe(400);
+    const lines = (await (await post()).text()).trim().split("\n").map((l) => JSON.parse(l));
+    const result = lines.at(-1).result;
+    expect(result).toMatchObject({ ok: true });
+    expect(runs.map((r) => r.replace(/^cmd\.exe \/d \/s \/c /, ""))).toEqual(["npm install @ mobile", "npm run build:apk @ mobile"]);
+    expect(await (await app.request("/node/apk-build/b5/app.apk")).text()).toBe("PK-release");
+    expect((await app.request("/node/apk-build/other/app.apk")).status).toBe(404);
+    // a second build of the same id fetches instead of cloning again
+    expect((await buildApkHere({ id: "b5", remoteUrl: origin, branch: "orc/b1", appDir: "mobile" }, { dataDir: join(dir, "laptop"), exec })).ok).toBe(true);
+    expect(existsSync(join(dir, "laptop", "apk-builds", "b5", ".git"))).toBe(true);
+    expect(readFileSync(join(dir, "laptop", "apk-builds", "b5", "mobile", "package.json"), "utf8")).toContain("build:apk");
   });
 });

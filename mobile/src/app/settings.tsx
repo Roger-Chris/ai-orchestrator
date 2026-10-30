@@ -113,6 +113,7 @@ export default function Settings() {
           <Button title="Builds" onPress={() => router.push("/builds" as never)} />
           <Button title="Phone" onPress={() => router.push("/phone" as never)} />
           <Button title="Outside agents" onPress={() => router.push("/agents" as never)} />
+          <Button title="Update this app" onPress={() => router.push("/update" as never)} />
         </Row>
         <Row>
           <Button

@@ -120,6 +120,14 @@ export interface AssistantReply {
   pending: { device: string; action: string; status: string }[];
 }
 
+/** The newest APK of this app the hub built (Settings → Update this app). */
+export type AppUpdate =
+  | { available: false; app: string }
+  | { available: true; app: string; build: string; spec: string; status: string; branch?: string; builtAt: number; apk: string; size: number };
+
+/** The hub's address, for links the phone opens itself (preview pages, APK downloads). */
+export const hubUrl = () => current?.url;
+
 /** A spoken exchange: what the hub heard, the full answer for the screen, and `say` to speak. */
 export interface TalkReply extends AssistantReply {
   heard: string;
@@ -221,6 +229,7 @@ export const Api = {
   phoneDismiss: (id: string) => api(`/api/phone/actions/${id}/dismiss`, { body: {} }),
   // ---- builds (apps built on command)
   builds: () => api<Build[]>("/api/builds?limit=40"),
+  appUpdate: () => api<AppUpdate>("/api/app/update"),
   build: (id: string) => api<Build>(`/api/builds/${id}`),
   startBuild: (b: { name: string; spec: string; repo?: string; agent?: "claude" | "codex"; continue?: boolean }) => api<Build>("/api/builds", { body: b }),
   /** Your tap: merges the build's branches into the branch checked out in its folder. */

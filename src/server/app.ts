@@ -24,7 +24,7 @@ import { TTS_PROVIDERS, type Tts, TtsError } from "../voice/tts.js";
 import type { ToolRegistry } from "../ai/tools.js";
 import { JOB_KINDS, type JobKind, type ModelRouter, RouteError, sizeOf } from "../ai/route.js";
 import { buildAiHub, setPreferred } from "./ai-hub.js";
-import { mountBuilds } from "./builds.js";
+import { mountApkNode, mountBuilds } from "./builds.js";
 import { mountFiles } from "./files.js";
 import { mountPhone } from "./phone.js";
 import { mountOutside } from "./outside.js";
@@ -218,6 +218,7 @@ export function createApp(d: AppDeps) {
   mountActions(app, d);
   mountBrain(app, d);
   mountBuilds(app, d);
+  mountApkNode(app, d);
   mountFiles(app, d);
   mountPhone(app, d);
   mountOutside(app, {

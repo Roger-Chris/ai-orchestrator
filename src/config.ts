@@ -126,6 +126,16 @@ const ConfigSchema = z.object({
     .object({
       autoPreview: z.boolean().default(true),
       previewTimeoutMinutes: z.number().min(1).max(120).default(20),
+      /**
+       * The device that builds Android APKs (it has the Android SDK; the Linux hub doesn't), e.g.
+       * "omen". Empty: this device builds them itself. That device needs `builds.androidHere: true`.
+       */
+      androidNode: z.string().default(""),
+      /** This device takes Android builds for the hub (POST /node/apk-build). */
+      androidHere: z.boolean().default(false),
+      apkTimeoutMinutes: z.number().min(5).max(120).default(40),
+      /** The builds of this app (the Orchestrator phone app) are offered in its Settings → Update this app. */
+      selfApp: z.string().default("orchestrator"),
     })
     .prefault({}),
   /** Coding on branches across devices (run option `branches`). */

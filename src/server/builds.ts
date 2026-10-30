@@ -2,9 +2,11 @@ import { createReadStream, existsSync, realpathSync, statSync } from "node:fs";
 import { extname, join, relative, resolve, isAbsolute } from "node:path";
 import { Readable } from "node:stream";
 import type { Hono } from "hono";
+import { stream } from "hono/streaming";
 import { z } from "zod";
 import { BuildError, type BuildDesk } from "../builds/desk.js";
-import type { PreviewMaker } from "../builds/preview.js";
+import { buildApkHere, type PreviewMaker } from "../builds/preview.js";
+import { slug } from "../shared/replica.js";
 import type { Build, ProviderId } from "../types.js";
 
 /**
@@ -54,7 +56,29 @@ export function previewer(desk: BuildDesk, maker: PreviewMaker, now = Date.now) 
 /** Builds as the app shows them: hub paths stay on the hub. */
 const pub = (b: Build) => (b.preview ? { ...b, preview: { ...b.preview, webRoot: undefined, apkFile: undefined } } : b);
 
-export function mountBuilds(app: Hono, d: { builds?: BuildDesk; preview?: (b: Build) => Promise<void> }) {
+/**
+ * "Update this app": the newest APK the hub built of the phone app itself (config `builds.selfApp`),
+ * merged or still waiting for Merge, so the app can install its own update.
+ */
+export function appUpdate(desk: BuildDesk | undefined, selfApp: string) {
+  const want = slug(selfApp);
+  const b = desk?.list(200).find((x) => slug(x.name) === want && x.preview?.status === "ready" && x.preview.apk && x.preview.apkFile && existsSync(x.preview.apkFile));
+  if (!b) return { available: false as const, app: selfApp };
+  return {
+    available: true as const,
+    app: selfApp,
+    build: b.id,
+    spec: b.spec.slice(0, 300),
+    status: b.status,
+    branch: b.branches.at(-1)?.name,
+    builtAt: b.preview!.at,
+    apk: b.preview!.apk!,
+    size: statSync(b.preview!.apkFile!).size,
+  };
+}
+
+export function mountBuilds(app: Hono, d: { builds?: BuildDesk; preview?: (b: Build) => Promise<void>; config?: { builds: { selfApp: string } } }) {
+  app.get("/api/app/update", (c) => c.json(appUpdate(d.builds, d.config?.builds.selfApp ?? "orchestrator")));
   const off = (c: any) => c.json({ error: "builds are not set up on this hub" }, 404);
   const fail = (c: any, e: unknown) => (e instanceof BuildError ? c.json({ error: e.message }, e.status) : Promise.reject(e));
 
@@ -121,6 +145,40 @@ export function mountBuilds(app: Hono, d: { builds?: BuildDesk; preview?: (b: Bu
     return send(file, MIME[extname(file).toLowerCase()] ?? "application/octet-stream");
   });
   app.get("/p/:key", (c) => c.redirect(`/p/${c.req.param("key")}/`));
+}
+
+const ApkBody = z.object({ id: z.string().regex(/^[\w.-]{1,80}$/), remoteUrl: z.string().min(1).max(500), branch: z.string().regex(/^[\w./-]{1,200}$/), appDir: z.string().max(200).default(""), timeoutMs: z.number().optional() });
+
+/**
+ * The Android side of previews, on the device with the Android SDK (`builds.androidHere: true`, the
+ * laptop): the hub sends the repo, branch and app folder; this builds the APK and streams progress
+ * (a long Gradle build would otherwise look like a dead connection), then serves the file once.
+ */
+export function mountApkNode(app: Hono, d: { config: { dataDir: string; builds: { androidHere: boolean; apkTimeoutMinutes: number } }; exec?: Parameters<typeof buildApkHere>[1]["exec"] }) {
+  const done = new Map<string, string>();
+  app.post("/node/apk-build", async (c) => {
+    if (!d.config.builds.androidHere) return c.json({ error: "this device does not build APKs (set builds.androidHere: true on the device with the Android SDK)" }, 403);
+    const parsed = ApkBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) return c.json({ error: "invalid APK build", issues: parsed.error.issues }, 400);
+    const req = parsed.data;
+    if (/^(-|ext::)/.test(req.remoteUrl) || /\.\.(\/|\\|$)/.test(req.appDir) || isAbsolute(req.appDir)) return c.json({ error: "bad repo or folder" }, 400);
+    c.header("Content-Type", "application/x-ndjson");
+    return stream(c, async (s) => {
+      const tick = setInterval(() => void s.write(JSON.stringify({ type: "progress", note: "building the APK…" }) + "\n"), 30_000);
+      try {
+        const r = await buildApkHere(req, { dataDir: resolve(d.config.dataDir), exec: d.exec, timeoutMs: d.config.builds.apkTimeoutMinutes * 60_000 });
+        if (r.ok && r.apkFile) done.set(req.id, r.apkFile);
+        await s.write(JSON.stringify({ type: "result", result: r }) + "\n");
+      } finally {
+        clearInterval(tick);
+      }
+    });
+  });
+  app.get("/node/apk-build/:id/app.apk", (c) => {
+    const f = done.get(c.req.param("id"));
+    if (!f || !existsSync(f)) return c.text("no APK", 404);
+    return send(f, "application/vnd.android.package-archive", "app.apk");
+  });
 }
 
 function send(file: string, type: string, download?: string) {
