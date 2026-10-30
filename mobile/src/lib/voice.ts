@@ -17,6 +17,27 @@ export interface VoiceChoice {
   phoneVoice?: string;
   /** Listen for "Hey Jarvis" while the app is open (lib/wake.ts). */
   wakeWord?: boolean;
+  /** Say notifications aloud while the app is open (approvals, builds ready, alerts). */
+  speakNotices?: boolean;
+}
+
+/** What a notice says aloud: its title and text, without the hub's emoji. */
+export function noticeLine(title?: string | null, body?: string | null): string {
+  return [title, body]
+    .filter(Boolean)
+    .join(". ")
+    .replace(/\p{Extended_Pictographic}\uFE0F?/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 300);
+}
+
+/** Speaks a notice that arrived while the app is open, when Settings → Voice → Say notices aloud is on. */
+export async function speakNotice(title?: string | null, body?: string | null) {
+  await load();
+  if (!choice.speakNotices) return;
+  const line = noticeLine(title, body);
+  if (line) await speak(line);
 }
 
 export interface HubTts {

@@ -225,6 +225,21 @@ export interface Home {
   quiet?: QuietChat[];
   /** Device actions the assistant wants to take, waiting for Approve or Deny; absent from an older hub. */
   approvals?: PendingApproval[];
+  /** Builds to try or still building (Jarvis U1); absent from an older hub. */
+  builds?: HomeBuild[];
+}
+
+/** A build on Home: ready to try (preview), building, or its preview failed. Merge stays on the Builds screen. */
+export interface HomeBuild {
+  id: string;
+  name: string;
+  status: "running" | "ready" | "failed";
+  preview?: "building" | "ready" | "failed";
+  web?: string;
+  apk?: string;
+  /** Steps that did not run (no second model for the review, say). */
+  notes: number;
+  at: number;
 }
 
 /** One action waiting for the owner (src/actions). */
@@ -232,6 +247,8 @@ export interface PendingApproval {
   id: string;
   node: string;
   action: string;
+  /** Who asked: absent = your assistant; "agent:<name>" = an outside agent. */
+  by?: string;
   summary: string;
   reason?: string;
   since: number;

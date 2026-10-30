@@ -2,6 +2,7 @@ import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { Api } from "./api";
+import { speakNotice } from "./voice";
 
 /** Built with a google-services.json? Without Firebase there is no way to receive pushes. */
 export const pushBuiltIn = !!Constants.expoConfig?.extra?.firebase;
@@ -37,6 +38,9 @@ export async function ensureChannels(): Promise<void> {
 Notifications.setNotificationHandler({
   handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
 });
+
+// U1: with Settings → Voice → "Say notices aloud" on, a notice that arrives while the app is open is also spoken.
+Notifications.addNotificationReceivedListener((n) => void speakNotice(n.request.content.title, n.request.content.body).catch(() => {}));
 
 /**
  * Turns on notifications for this phone: creates the channel, asks permission, and gives the

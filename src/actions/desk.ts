@@ -116,6 +116,8 @@ export interface Approval {
   hash: string;
   summary: string;
   reason?: string;
+  /** Who asked: absent = the owner's own assistant; "agent:<name>" = an outside agent (Jarvis A1). */
+  by?: string;
   status: "pending" | "approved" | "denied" | "expired" | "done" | "failed";
   createdAt: number;
   expiresAt: number;
@@ -135,9 +137,12 @@ export class ApprovalDesk {
       summary TEXT NOT NULL, reason TEXT, status TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
       decided_at INTEGER, used_at INTEGER, result TEXT
     )`);
+    // Older hubs: who asked was added later (U1: outside agents' requests marked on Home).
+    const cols = (db.prepare("PRAGMA table_info(approvals)").all() as { name: string }[]).map((c) => c.name);
+    if (!cols.includes("requested_by")) db.exec("ALTER TABLE approvals ADD COLUMN requested_by TEXT");
   }
 
-  request(r: { node: string; action: string; args: Record<string, unknown>; summary: string; reason?: string }, now = Date.now()): Approval {
+  request(r: { node: string; action: string; args: Record<string, unknown>; summary: string; reason?: string; by?: string }, now = Date.now()): Approval {
     const a: Approval = {
       id: randomUUID(),
       node: r.node,
@@ -146,14 +151,16 @@ export class ApprovalDesk {
       hash: argsHash(r.action, r.args),
       summary: redact(r.summary),
       reason: r.reason ? redact(r.reason) : undefined,
+      by: r.by,
       status: "pending",
       createdAt: now,
       expiresAt: now + this.config.actions.approvalMinutes * 60_000,
     };
     this.db
-      .prepare("INSERT INTO approvals (id, node, action, args, hash, summary, reason, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-      .run(a.id, a.node, a.action, JSON.stringify(a.args), a.hash, a.summary, a.reason ?? null, a.status, a.createdAt, a.expiresAt);
-    this.notify(`Approve on ${a.node}?`, `${a.summary}${a.reason ? `\nWhy: ${a.reason}` : ""}`, a.id);
+      .prepare("INSERT INTO approvals (id, node, action, args, hash, summary, reason, requested_by, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+      .run(a.id, a.node, a.action, JSON.stringify(a.args), a.hash, a.summary, a.reason ?? null, a.by ?? null, a.status, a.createdAt, a.expiresAt);
+    const who = a.by?.startsWith("agent:") ? ` (asked by ${a.by.slice(6)})` : "";
+    this.notify(`Approve on ${a.node}?${who}`, `${a.summary}${a.reason ? `\nWhy: ${a.reason}` : ""}`, a.id);
     return a;
   }
 
@@ -214,6 +221,7 @@ function toApproval(r: any): Approval {
     hash: r.hash,
     summary: r.summary,
     reason: r.reason ?? undefined,
+    by: r.requested_by ?? undefined,
     status: r.status,
     createdAt: r.created_at,
     expiresAt: r.expires_at,
@@ -243,12 +251,12 @@ export class ActionHub {
   }
 
   /** `noApprovals`: a call that would need the owner's Approve is refused instead of asked (outside agents limited to safe calls). */
-  async act(node: string | undefined, req: ActRequest, opts: { noApprovals?: boolean } = {}): Promise<ActResponse | { status: "pending"; node: string; action: string; approval: Approval }> {
+  async act(node: string | undefined, req: ActRequest, opts: { noApprovals?: boolean; by?: string } = {}): Promise<ActResponse | { status: "pending"; node: string; action: string; approval: Approval }> {
     const target = node || this.runner.node;
     const res = await this.send(target, { action: req.action, args: req.args, reason: req.reason });
     if (res.status !== "needs_approval") return res;
     if (opts.noApprovals) return { status: "refused", node: target, action: req.action, error: "this needs the owner's approval, which this caller may not ask for" };
-    const approval = this.desk.request({ node: target, action: req.action, args: req.args ?? {}, summary: res.summary, reason: req.reason });
+    const approval = this.desk.request({ node: target, action: req.action, args: req.args ?? {}, summary: res.summary, reason: req.reason, by: opts.by });
     return { status: "pending", node: target, action: req.action, approval };
   }
 

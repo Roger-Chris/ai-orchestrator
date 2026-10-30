@@ -3,7 +3,7 @@ import { WaReply } from "./wareply";
 import type { AiHub, Build, BrainAlert, OutsideAgent, OutsideAgentScopes, OutsideAuditEntry, PhoneAction, Home, Insights, JobKind, ProviderId, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
 
 export type { AiHub, Build, BuildBranch, OutsideAgent, OutsideAgentScopes, OutsideAuditEntry, PhoneAction, JobKind, ProviderId, ToolInfo, ToolState } from "../../../src/types";
-export type { AlertAction, Attention, BrainAlert, DayTask, Decision, Home, Insights, PendingApproval, QuietChat, ReplyDraft, RunEvent, RunOptions, RunRecord, Running, StepRecord, Thread } from "../../../src/types";
+export type { AlertAction, Attention, BrainAlert, DayTask, Decision, Home, HomeBuild, Insights, PendingApproval, QuietChat, ReplyDraft, RunEvent, RunOptions, RunRecord, Running, StepRecord, Thread } from "../../../src/types";
 
 /** Where the hub is and how to get in. Kept in Android's encrypted storage. */
 export interface Connection {

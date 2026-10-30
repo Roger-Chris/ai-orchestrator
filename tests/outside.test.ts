@@ -82,7 +82,7 @@ describe("outside agents (phase 4)", () => {
     const { token } = s.outside.create("Builder", { devices: ["*"], folders: [], risk: "ask", memoryWrite: false });
     const r = await s.call(token, "act", { device: "hub", action: "files.write", args: { path: "plan.md", content: "hi" }, reason: "write the plan" });
     expect(r.content[0].text).toContain("PENDING: waiting for the owner's Approve");
-    expect(s.desk.list()[0]).toMatchObject({ action: "files.write", reason: "[outside agent Builder] write the plan" });
+    expect(s.desk.list()[0]).toMatchObject({ action: "files.write", reason: "[outside agent Builder] write the plan", by: "agent:Builder" });
     expect((await s.call(token, "devices", {})).content[0].text).toBe("hub: online (linux)\nmac: offline");
   });
 

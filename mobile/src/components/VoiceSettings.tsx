@@ -114,6 +114,12 @@ export function VoiceSettings() {
       </Muted>
       {!!wakeMsg && <Text style={{ color: c.warn }}>{wakeMsg}</Text>}
 
+      <Row style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
+        <Text style={{ ...sub, flex: 1 }}>Say notices aloud while the app is open</Text>
+        <Switch value={!!v.speakNotices} onValueChange={(on) => pick({ ...v, speakNotices: on })} />
+      </Row>
+      <Muted small>Approvals, builds ready to try and alerts are read out in Jarvis's voice when they arrive. When the app is closed, Android shows them as usual.</Muted>
+
       <Row>
         <Button title={testing ? "Stop" : "Test voice"} onPress={() => (testing ? stopSpeaking() : void test())} />
       </Row>

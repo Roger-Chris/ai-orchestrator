@@ -7,6 +7,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { BuildDesk, type BuildRunner, buildTask } from "../src/builds/desk.js";
 import { buildApkHere, findApps, newestApk, PreviewMaker } from "../src/builds/preview.js";
 import { appUpdate, mountApkNode, mountBuilds, previewer } from "../src/server/builds.js";
+import { homeBuilds } from "../src/server/home.js";
 import { MemoryReplica } from "../src/shared/replica.js";
 import { Store } from "../src/store/db.js";
 import type { PushPayload } from "../src/server/push.js";
@@ -354,5 +355,25 @@ describe("the app builds its own APK (Step 2)", () => {
     expect((await buildApkHere({ id: "b5", remoteUrl: origin, branch: "orc/b1", appDir: "mobile" }, { dataDir: join(dir, "laptop"), exec })).ok).toBe(true);
     expect(existsSync(join(dir, "laptop", "apk-builds", "b5", ".git"))).toBe(true);
     expect(readFileSync(join(dir, "laptop", "apk-builds", "b5", "mobile", "package.json"), "utf8")).toContain("build:apk");
+  });
+});
+
+describe("Home shows builds (U1)", () => {
+  it("running and unmerged ready builds, with their preview links; merged ones are not news", async () => {
+    const s = setup();
+    const a = s.desk.start({ name: "expenses", spec: "x", repo: s.repo });
+    const b = s.desk.start({ name: "todo", spec: "y", repo: s.repo });
+    const m = s.desk.start({ name: "old", spec: "z", repo: s.repo });
+    s.runs[1].resolve({ ...s.runs[1].record, status: "done", steps: [branchStep("s1", "orc/b2") as any] });
+    s.runs[2].resolve({ ...s.runs[2].record, status: "done", steps: [branchStep("s1", "orc/b3") as any] });
+    await settle();
+    s.desk.setPreview(b.id, { status: "ready", web: `/p/${b.previewKey}/`, apk: `/p/${b.previewKey}/app.apk`, webRoot: "/hub/path", at: 1 });
+    await s.desk.merge(m.id);
+    const rows = homeBuilds(s.desk);
+    expect(new Set(rows.map((r) => `${r.name}:${r.status}:${r.preview}`))).toEqual(new Set(["todo:ready:ready", "expenses:running:undefined"]));
+    expect(rows.find((r) => r.id === b.id)).toMatchObject({ web: `/p/${b.previewKey}/`, apk: `/p/${b.previewKey}/app.apk` });
+    expect(rows.find((r) => r.id === a.id)?.status).toBe("running");
+    expect(JSON.stringify(rows)).not.toContain("/hub/path");
+    expect(homeBuilds(undefined)).toEqual([]);
   });
 });

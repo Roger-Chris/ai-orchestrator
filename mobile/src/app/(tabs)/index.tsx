@@ -3,7 +3,7 @@ import { type ReactNode, useCallback, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Linking, Pressable, RefreshControl, ScrollView, Share, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ErrorText } from "../../components/ui";
-import { type AlertAction, Api, type Attention, type BrainAlert, type DayTask, type Decision, type Home as HomeData, type PendingApproval, type QuietChat, type ReplyDraft, type Running, Unauthorized } from "../../lib/api";
+import { type AlertAction, Api, type Attention, type BrainAlert, type DayTask, type Decision, type Home as HomeData, type HomeBuild, hubUrl, type PendingApproval, type QuietChat, type ReplyDraft, type Running, Unauthorized } from "../../lib/api";
 import { useColors } from "../../lib/theme";
 
 function ago(ts: number): string {
@@ -24,8 +24,10 @@ function headline(h: HomeData): string {
   const replies = h.replies?.length ?? 0; // an older hub sends none
   const alerts = h.alerts?.length ?? 0;
   const approvals = h.approvals?.length ?? 0; // an older hub sends none
+  const toTry = h.builds?.filter((b) => b.preview === "ready").length ?? 0;
   const parts = [
     approvals && `${approvals} ${approvals === 1 ? "action" : "actions"} to approve`,
+    toTry && `${toTry} ${toTry === 1 ? "build" : "builds"} to try`,
     alerts && `${alerts} ${alerts === 1 ? "thing needs" : "things need"} you`,
     tasks && `${tasks} ${tasks === 1 ? "task" : "tasks"} today`,
     replies && `${replies} ${replies === 1 ? "reply" : "replies"} to send`,
@@ -112,9 +114,10 @@ function ApprovalRow({ a, first, onDone }: { a: PendingApproval; first: boolean;
     }
   };
   const left = Math.max(0, Math.round((a.expiresAt - Date.now()) / 60_000));
+  const outside = !!a.by?.startsWith("agent:");
   return (
     <Row first={first}>
-      <Text style={{ color: c.muted, fontSize: 13 }}>{`On ${a.node} · ${ago(a.since)} · ${left} min left`}</Text>
+      <Text style={{ color: outside ? c.warn : c.muted, fontSize: 13 }}>{`${outside ? `Asked by outside agent ${a.by!.slice(6)} · ` : ""}On ${a.node} · ${ago(a.since)} · ${left} min left`}</Text>
       <Text style={{ color: c.text, fontSize: 16, marginTop: 3 }}>{a.summary}</Text>
       {!!a.reason && <Text style={{ color: c.muted, fontSize: 14, lineHeight: 20, marginTop: 3 }}>{`Why: ${a.reason}`}</Text>}
       <View style={{ flexDirection: "row", gap: 20, marginTop: 10, alignItems: "center" }}>
@@ -124,6 +127,25 @@ function ApprovalRow({ a, first, onDone }: { a: PendingApproval; first: boolean;
       </View>
       {!!out && <Text style={{ color: c.muted, fontSize: 13, marginTop: 6 }}>{out}</Text>}
       <ErrorText text={err} />
+    </Row>
+  );
+}
+
+/** A build to try (U1): open its preview or install its APK here; Merge stays on the Builds screen. */
+function BuildRow({ b, first }: { b: HomeBuild; first: boolean }) {
+  const c = useColors();
+  const base = hubUrl() ?? "";
+  const state =
+    b.status === "running" ? "Building…" : b.status === "failed" ? "Build failed" : b.preview === "ready" ? "Ready to try" : b.preview === "building" ? "Making the preview…" : b.preview === "failed" ? "Preview failed" : "Ready to review";
+  return (
+    <Row first={first} onPress={() => router.push(`/builds?id=${b.id}` as never)}>
+      <Text style={{ color: b.status === "failed" || b.preview === "failed" ? c.err : c.muted, fontSize: 13 }}>{`${state} · ${ago(b.at)}${b.notes ? ` · ${b.notes} step${b.notes === 1 ? "" : "s"} did not run` : ""}`}</Text>
+      <Text style={{ color: c.text, fontSize: 16, marginTop: 3 }}>{b.name}</Text>
+      <View style={{ flexDirection: "row", gap: 20, marginTop: 10 }}>
+        {!!b.web && <TextLink title="Open preview" onPress={() => void Linking.openURL(`${base}${b.web}`)} />}
+        {!!b.apk && <TextLink title="Install APK" onPress={() => void Linking.openURL(`${base}${b.apk}`)} />}
+        <TextLink title="Review →" color={c.muted} onPress={() => router.push(`/builds?id=${b.id}` as never)} />
+      </View>
     </Row>
   );
 }
@@ -473,6 +495,14 @@ export default function Home() {
               <Section label="Approve?" right={home.approvals!.length}>
                 {home.approvals!.map((a, i) => (
                   <ApprovalRow key={a.id} a={a} first={i === 0} onDone={() => void load()} />
+                ))}
+              </Section>
+            )}
+
+            {(home.builds?.length ?? 0) > 0 && (
+              <Section label="Builds" right={<TextLink title="All builds →" color={c.muted} onPress={() => router.push("/builds" as never)} />}>
+                {home.builds!.map((b, i) => (
+                  <BuildRow key={b.id} b={b} first={i === 0} />
                 ))}
               </Section>
             )}

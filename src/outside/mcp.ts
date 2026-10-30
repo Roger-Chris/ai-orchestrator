@@ -145,7 +145,7 @@ async function callTool(agent: OutsideAgent, name: string, args: Json, d: McpDep
           return text(`REFUSED: ${why}.`, true);
         }
         const reason = `[outside agent ${agent.name}] ${String(args.reason ?? "").slice(0, 400)}`;
-        const res = await d.actions.act(device, { action, args: a, reason }, { noApprovals: agent.scopes.risk === "safe" });
+        const res = await d.actions.act(device, { action, args: a, reason }, { noApprovals: agent.scopes.risk === "safe", by: `agent:${agent.name}` });
         if (res.status === "done") {
           let out = res.result.output;
           // files.everywhere searches every device: keep only what this agent may see

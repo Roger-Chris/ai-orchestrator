@@ -1,4 +1,5 @@
 import type { ActionHub } from "../actions/desk.js";
+import type { BuildDesk } from "../builds/desk.js";
 import type { Cluster } from "../cluster/cluster.js";
 import type { Orchestrator } from "../brain/orchestrator.js";
 import type { ProviderPool } from "../providers/registry.js";
@@ -17,7 +18,7 @@ function chatNamer(store: Store, book?: StyleBook) {
     return [name, book?.contacts.find((c) => c.chatId === id)?.name].find((n) => n && !n.startsWith("+")) ?? `+${id.split("@")[0]}`;
   };
 }
-import type { Attention, Decision, Home, Insights, ProviderId, Running } from "../types.js";
+import type { Attention, Decision, Home, HomeBuild, Insights, ProviderId, Running } from "../types.js";
 
 export const PROVIDER_NAME: Record<ProviderId, string> = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity", groq: "Groq", local: "Local model" };
 
@@ -40,6 +41,7 @@ export async function buildHome(d: {
   assistant?: AssistantTasks;
   drafter?: ReplyDrafter;
   actions?: ActionHub;
+  builds?: BuildDesk;
 }): Promise<Home> {
   const decisions: Decision[] = [];
   const running: Running[] = [];
@@ -111,9 +113,29 @@ export async function buildHome(d: {
     replies: d.drafter?.drafts(10) ?? [],
     quiet: d.drafter ? quietChats(d.store.db, chatNamer(d.store, d.drafter.book())) : [],
     approvals: (d.actions?.desk.list("pending") ?? []).map((a) => ({
-      id: a.id, node: a.node, action: a.action, summary: a.summary, reason: a.reason, since: a.createdAt, expiresAt: a.expiresAt,
+      id: a.id, node: a.node, action: a.action, by: a.by, summary: a.summary, reason: a.reason, since: a.createdAt, expiresAt: a.expiresAt,
     })),
+    builds: homeBuilds(d.builds),
   };
+}
+
+/** U1: builds still running, and ready ones not merged yet (last 7 days), newest first; at most 5. */
+export function homeBuilds(desk?: BuildDesk, now = Date.now()): HomeBuild[] {
+  if (!desk) return [];
+  return desk
+    .list(30)
+    .filter((b) => (b.status === "running" || b.status === "ready" || (b.status === "failed" && now - b.updatedAt < 86_400_000)) && now - b.updatedAt < 7 * 86_400_000)
+    .slice(0, 5)
+    .map((b) => ({
+      id: b.id,
+      name: b.name,
+      status: b.status as HomeBuild["status"],
+      preview: b.preview?.status,
+      web: b.preview?.status === "ready" ? b.preview.web : undefined,
+      apk: b.preview?.status === "ready" ? b.preview.apk : undefined,
+      notes: b.notes?.length ?? 0,
+      at: b.updatedAt,
+    }));
 }
 
 export function buildInsights(store: Store, days = 7): Insights {
