@@ -169,10 +169,9 @@ export async function api<T = unknown>(path: string, init: { method?: string; bo
     // The hub did not answer at all (not an error it sent): try the same request on a backup hub once.
     if (!retried && hubs.length > 1 && (await failover())) return api<T>(path, init, true);
     if ((e as Error).name === "AbortError") throw new Error(`The hub at ${current.url} did not answer. Is Tailscale on and the hub running?`);
-    // React Native says only "Network request failed" / "fetch failed": usually Tailscale on this phone
-    // is off or stuck on "Starting…" (HyperOS stops it in the background).
-    if (e instanceof TypeError) throw new Error(`Can't reach the hub at ${current.url}. Open Tailscale on this phone and check it is connected.`);
-    throw e;
+    // Only the request itself failed here ("Network request failed", "fetch failed: java.net.ConnectException…"):
+    // usually Tailscale on this phone is off or stuck on "Starting…" (HyperOS stops it), or the hub is restarting.
+    throw new Error(`Can't reach the hub at ${current.url}. Check Tailscale on this phone is connected; if it is, the hub may be restarting: pull down to try again.`);
   }
   if (res.status === 401) {
     clearTimeout(timer);

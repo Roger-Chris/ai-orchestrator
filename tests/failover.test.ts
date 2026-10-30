@@ -85,7 +85,7 @@ describe("the app when the Linux hub goes down (simulated power cut)", () => {
   it("says Tailscale may be off when no hub answers, and does not move on an error the hub sent", async () => {
     const m = await app();
     up[LINUX] = up[LAPTOP] = false;
-    await expect(m.api("/api/home")).rejects.toThrow(/Open Tailscale on this phone/);
+    await expect(m.api("/api/home")).rejects.toThrow(/Check Tailscale on this phone/);
     expect(m.connection()?.url).toBe(LINUX);
 
     up[LINUX] = true;
