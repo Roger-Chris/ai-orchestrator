@@ -27,6 +27,8 @@ export const DEFAULT_ROUTES: Record<JobKind, ProviderId[]> = {
   call: ["claude", "codex", "gemini", "groq"],
   // The brain thinks with the ChatGPT session (PLANNER_MODEL=codex) and falls back from there.
   brain: ["codex", "claude", "gemini", "groq"],
+  // Reading a WhatsApp message against your people's tasks: small and frequent, so the quick ones first.
+  work: ["groq", "gemini", "claude", "codex"],
 };
 
 /** Characters above which a prompt counts as large (about 6k tokens) and below which small. */

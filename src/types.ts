@@ -518,7 +518,7 @@ export interface Usage {
 }
 
 /** The hub's own jobs the model router chooses for. */
-export const JOB_KINDS = ["whatsapp_draft", "mail", "call", "brain"] as const;
+export const JOB_KINDS = ["whatsapp_draft", "mail", "call", "brain", "work"] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
 export type JobSize = "small" | "medium" | "large";
@@ -640,4 +640,49 @@ export interface OutsideAuditEntry {
   /** ok: answered; pending: waiting for the owner's Approve; refused: outside its scopes, paused or failed. */
   outcome: "ok" | "pending" | "refused" | "error";
   detail?: string;
+}
+
+// ---- Work (src/work/desk.ts): people you give tasks to, followed through WhatsApp
+export const WORK_STATUSES = ["todo", "sent", "in_progress", "blocked", "done", "cancelled"] as const;
+export type WorkStatus = (typeof WORK_STATUSES)[number];
+
+export interface WorkPerson {
+  id: string;
+  name: string;
+  /** Their WhatsApp chat (…@s.whatsapp.net or …@lid); without one, updates are only what you set. */
+  chatId?: string;
+  role?: string;
+  createdAt: number;
+}
+
+export interface WorkUpdate {
+  at: number;
+  status?: WorkStatus;
+  /** you = set in the app; them / me = read from a WhatsApp message they or you sent. */
+  by: "you" | "them" | "me";
+  text: string;
+}
+
+export interface WorkTask {
+  id: string;
+  personId: string;
+  title: string;
+  details?: string;
+  /** His local date or date-time, e.g. 2026-11-02 or 2026-11-02T17:00. */
+  due?: string;
+  status: WorkStatus;
+  createdAt: number;
+  updatedAt: number;
+  updates: WorkUpdate[];
+}
+
+export interface WorkPersonView extends WorkPerson {
+  open: number;
+  overdue: number;
+  done: number;
+  /** Newest WhatsApp message with them (seconds), and a few words of it. */
+  lastTs?: number;
+  last?: string;
+  lastFromMe?: boolean;
+  phone?: string;
 }

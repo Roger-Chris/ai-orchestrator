@@ -29,6 +29,8 @@ import { mountApkNode, mountBuilds } from "./builds.js";
 import { mountFiles } from "./files.js";
 import { mountPhone } from "./phone.js";
 import { mountOutside } from "./outside.js";
+import { mountWork } from "./work.js";
+import type { WorkDesk } from "../work/desk.js";
 import type { OutsideAgents } from "../outside/agents.js";
 import type { PhoneDesk } from "../phone/desk.js";
 import type { FileClient } from "../files/client.js";
@@ -77,6 +79,8 @@ export interface AppDeps {
   phone?: PhoneDesk;
   /** Outside agents with their own tokens and scopes, over MCP at /mcp (phase 4). */
   outside?: OutsideAgents;
+  /** Work: people you give tasks to, followed through WhatsApp. */
+  work?: WorkDesk;
   /** This device's copy of the shared memory pool; absent when sharedMemory.enabled is false. */
   replica?: MemoryReplica;
   /** How /node/memory/* reaches the brain; tests pass a fake. */
@@ -219,6 +223,7 @@ export function createApp(d: AppDeps) {
   mountActions(app, d);
   mountBrain(app, d);
   mountBuilds(app, d);
+  mountWork(app, d);
   mountApkNode(app, d);
   mountFiles(app, d);
   mountPhone(app, d);
@@ -329,7 +334,10 @@ export function createApp(d: AppDeps) {
   app.post("/api/whatsapp/messages", async (c) => {
     if (!d.drafter) return noDrafter(c);
     const body = z.object({ messages: z.array(WaMessageBody).max(5000), live: z.boolean().default(true) }).parse(await c.req.json());
-    return c.json(d.drafter.ingest(body.messages, body.live));
+    const out = d.drafter.ingest(body.messages, body.live);
+    // a live message with one of your Work people can move their task on (in the background)
+    if (body.live && d.work) void d.work.onMessages(body.messages).catch(() => undefined);
+    return c.json(out);
   });
   app.get("/api/whatsapp/drafts", (c) => (d.drafter ? c.json(d.drafter.drafts()) : noDrafter(c)));
   // A chat that went quiet after your message: hide it from Home until it moves again.

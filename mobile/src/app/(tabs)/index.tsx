@@ -482,7 +482,10 @@ export default function Home() {
           <Text style={{ color: c.muted, fontSize: 13, flex: 1 }} numberOfLines={1}>
             {home ? `${date} · hub on ${home.node}${home.devices > 1 ? ` · ${home.devices} devices` : ""}` : date}
           </Text>
-          <TextLink title="Settings" color={c.muted} onPress={() => router.push("/settings")} />
+          <View style={{ flexDirection: "row", gap: 18 }}>
+            <TextLink title="Insights" color={c.muted} onPress={() => router.push("/insights" as never)} />
+            <TextLink title="Settings" color={c.muted} onPress={() => router.push("/settings")} />
+          </View>
         </View>
         <ErrorText text={error} />
         {!home ? (

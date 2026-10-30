@@ -1,9 +1,11 @@
 import * as SecureStore from "expo-secure-store";
 import { WaReply } from "./wareply";
 import type { PersonSummary } from "../../../src/types";
+import type { WorkPerson, WorkPersonView, WorkStatus, WorkTask } from "../../../src/types";
 import type { AiHub, Build, BrainAlert, OutsideAgent, OutsideAgentScopes, OutsideAuditEntry, PhoneAction, Home, Insights, JobKind, ProviderId, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
 
 export type { PersonSummary } from "../../../src/types";
+export type { WorkPerson, WorkPersonView, WorkStatus, WorkTask, WorkUpdate } from "../../../src/types";
 export type { AiHub, Build, BuildBranch, OutsideAgent, OutsideAgentScopes, OutsideAuditEntry, PhoneAction, JobKind, ProviderId, ToolInfo, ToolState } from "../../../src/types";
 export type { AlertAction, Attention, BrainAlert, DayTask, Decision, Home, HomeBuild, Insights, PendingApproval, QuietChat, ReplyDraft, RunEvent, RunOptions, RunRecord, Running, StepRecord, Thread } from "../../../src/types";
 
@@ -330,6 +332,15 @@ export const Api = {
   waChats: () => api<WaChat[]>("/api/brain/chats?limit=200"),
   /** The people in the WhatsApp style book: cards and counts, no messages. */
   people: () => api<{ builtAt: number | null; people: PersonSummary[] }>("/api/style/people"),
+  // ---- Work: people you give tasks to, followed through WhatsApp
+  work: () => api<{ people: WorkPersonView[] }>("/api/work"),
+  workContacts: (q: string) => api<{ chatId: string; name: string; phone?: string }[]>(`/api/work/contacts?q=${encodeURIComponent(q)}`),
+  addWorkPerson: (p: { name: string; chatId?: string; role?: string }) => api<WorkPerson>("/api/work/people", { body: p }),
+  workPerson: (id: string) =>
+    api<{ person: WorkPerson; tasks: (WorkTask & { overdue: boolean })[]; chat: { ts: number; fromMe: boolean; text: string; media?: string }[] }>(`/api/work/people/${id}`),
+  addWorkTask: (t: { personId: string; title: string; details?: string; due?: string }) => api<WorkTask>("/api/work/tasks", { body: t }),
+  updateWorkTask: (id: string, p: { status?: WorkStatus; note?: string; due?: string | null; title?: string }) => api<WorkTask>(`/api/work/tasks/${id}`, { method: "PATCH", body: p }),
+  workMessage: (id: string) => api<{ text: string; phone?: string }>(`/api/work/tasks/${id}/message`),
   muteChat: (id: number, muted: boolean) => api(`/api/brain/chats/${id}/mute`, { body: { muted } }),
   briefNow: () => api("/api/brain/brief", { body: {}, timeoutMs: 120_000 }),
   modelUsage: () => api<{ report: string }>("/api/brain/llm/usage"),

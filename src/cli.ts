@@ -46,6 +46,7 @@ import { ModelRouter } from "./ai/route.js";
 import { BuildDesk } from "./builds/desk.js";
 import { FileClient } from "./files/client.js";
 import { PhoneDesk } from "./phone/desk.js";
+import { WorkDesk } from "./work/desk.js";
 import { OutsideAgents } from "./outside/agents.js";
 import { FileIndex } from "./files/index.js";
 import { PreviewMaker } from "./builds/preview.js";
@@ -187,7 +188,14 @@ export function buildSystem(config: Config) {
         : undefined,
     }),
   );
-  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts, tools, models, builds, preview, fileIndex, files, phone: new PhoneDesk(store, config, (p) => void notifier.notify(p)), outside: new OutsideAgents(store, replica) };
+  // Work: people you give tasks to; a live WhatsApp message with them can move a task on (src/work/desk.ts).
+  const work = new WorkDesk({
+    store,
+    wa: new WaStore(store),
+    think: (kind, req) => models.run(kind, req),
+    notify: (title, body) => void notifier.notify({ title, body, url: "/work", tag: `work:${title}` }),
+  });
+  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts, tools, models, builds, preview, fileIndex, files, phone: new PhoneDesk(store, config, (p) => void notifier.notify(p)), outside: new OutsideAgents(store, replica), work };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */
