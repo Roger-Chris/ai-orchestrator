@@ -31,7 +31,7 @@ import { Store } from "./store/db.js";
 import type { Permission, ProviderId, RunEvent, RunMode } from "./types.js";
 import { learnStyle, type StyleBook } from "./whatsapp/learn.js";
 import { buildPool, poolPrompt } from "./whatsapp/pool.js";
-import { describe, peopleGraph } from "./whatsapp/graph.js";
+import { describe, peopleGraph, readGraphFiles } from "./whatsapp/graph.js";
 import { spawnSync } from "node:child_process";
 import { WhatsAppLink } from "./whatsapp/link.js";
 import { describeImages, ollamaProblem, transcribe } from "./whatsapp/local.js";
@@ -497,6 +497,9 @@ async function cmdStyle(config: Config, sub = "show", opts: { who?: string; ask?
       let saved = 0;
       for (let i = 0; i < recent.length; i += 2000) saved += (await hubCall(config, "POST", "/api/whatsapp/messages", { messages: recent.slice(i, i + 2000), live: false })).saved;
       console.log(`Sent ${recent.length} recent messages for context (${saved} new on the hub).`);
+      const graph = readGraphFiles(resolve(config.dataDir));
+      if (Object.keys(graph).length) console.log(`People graph sent: ${(await hubCall(config, "PUT", "/api/style/graph", { files: graph })).saved.join(", ")}.`);
+      else console.log("No people graph here yet: `orc style graph` makes one, then push again.");
     } else if (sub === "learn") {
       const problem = await ollamaProblem(config.style);
       if (problem) throw new Error(problem);

@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { ContactStyle, StyleBook } from "./learn.js";
 
 /**
@@ -7,6 +9,29 @@ import type { ContactStyle, StyleBook } from "./learn.js";
  * of relationship and to the groups you share. Graphify clusters and draws it (graph.html), so
  * you can check every person before their profile is used to write messages.
  */
+
+/** What `orc style graph` makes, relative to `<dataDir>/style/graph`. `orc style push` copies these to the hub. */
+export const GRAPH_FILES = ["graphify-out/graph.json", "graphify-out/graph.html", "people.md"];
+
+/** The graph files this device has, by name. */
+export function readGraphFiles(dataDir: string): Record<string, string> {
+  const dir = join(dataDir, "style", "graph");
+  return Object.fromEntries(GRAPH_FILES.filter((f) => existsSync(join(dir, f))).map((f) => [f, readFileSync(join(dir, f), "utf8")]));
+}
+
+/** Saves graph files sent by the laptop. Only the known names; each is replaced whole or not at all. */
+export function saveGraphFiles(dataDir: string, files: Record<string, string>): string[] {
+  const names = Object.keys(files);
+  const bad = names.find((f) => !GRAPH_FILES.includes(f));
+  if (bad) throw new Error(`not a graph file: ${bad}`);
+  for (const f of names) {
+    const path = join(dataDir, "style", "graph", f);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(`${path}.tmp`, files[f]);
+    renameSync(`${path}.tmp`, path);
+  }
+  return names;
+}
 
 export interface Activity {
   first: number;
