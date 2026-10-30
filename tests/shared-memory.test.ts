@@ -59,7 +59,9 @@ class FakeBrain {
 }
 
 function device(name: string, brain: FakeBrain) {
-  return new MemoryReplica(join(tmp(), "shared.db"), name, { base: "http://hub:4317/node/memory", token: "t" }, brain.fetch);
+  const replica = new MemoryReplica(join(tmp(), "shared.db"), name, { base: "http://hub:4317/node/memory", token: "t" }, brain.fetch);
+  cleanup.unshift(() => replica.close());
+  return replica;
 }
 
 describe("shared memory replica", () => {
@@ -186,6 +188,8 @@ describe("shared memory over HTTP", () => {
 
   it("remember, search and about on this device's replica", async () => {
     const replica = new MemoryReplica(join(tmp(), "m.db"), "omen");
+
+    cleanup.unshift(() => replica.close());
     const app = new Hono();
     mountSharedMemory(app, { config: parseConfig({}), replica });
     replica.put({ uid: "project:evtol", kind: "project", title: "Heavy-lift X8 coaxial eVTOL" });

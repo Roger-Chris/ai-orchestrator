@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseConfig } from "../src/config.js";
@@ -73,7 +73,7 @@ describe("Hey Jarvis on a computer", () => {
   it("starts the recorder with uv and the configured model", () => {
     const s = setup([], { threshold: 0.4, device: "2", chime: false });
     expect(s.rec.spawned[0].cmd).toBe("uv");
-    expect(s.rec.spawned[0].args).toEqual(["run", join("/repo", "tools", "wakeword.py"), "--model", "hey_jarvis", "--threshold", "0.4", "--out-dir", s.outDir, "--no-chime", "--device", "2"]);
+    expect(s.rec.spawned[0].args).toEqual(["run", resolve("/repo", "tools", "wakeword.py"), "--model", "hey_jarvis", "--threshold", "0.4", "--out-dir", s.outDir, "--no-chime", "--device", "2"]);
   });
 
   it("sends what you said to the hub, plays the hub's voice, then listens for a follow-up", async () => {

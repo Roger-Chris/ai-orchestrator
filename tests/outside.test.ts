@@ -26,6 +26,8 @@ function setup() {
   const store = new Store(join(dir, "data"));
   cleanup.unshift(() => store.close());
   const replica = new MemoryReplica(join(dir, "m.db"), "hub");
+
+  cleanup.unshift(() => replica.close());
   replica.put({ uid: "project:drone", kind: "project", title: "Drone", body: "eVTOL drone with coaxial rotors" });
   const outside = new OutsideAgents(store, replica);
   const desk = new ApprovalDesk(store.db, config, () => undefined);

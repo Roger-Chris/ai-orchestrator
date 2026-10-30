@@ -419,6 +419,8 @@ describe("what memory knows about the person a reply is for", () => {
     const dir = mkdtempSync(join(tmpdir(), "orc-know-"));
     cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
     const r = new MemoryReplica(join(dir, "m.db"), "hub");
+
+    cleanup.unshift(() => r.close());
     // as the brain mirrors him: the chat id is a slugged alias
     r.put({ uid: "person:jayesh-daga", kind: "person", title: "Jayesh Daga", body: "Classmate; co-inventor on the patent.", aliases: ["919876543210-s-whatsapp-net", "jd"] });
     r.put({ kind: "fact", title: "calls", body: "Jayesh prefers calls after 6 pm on weekdays.", subject: "person:jayesh-daga" });

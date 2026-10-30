@@ -79,6 +79,8 @@ describe("files across devices (D2)", () => {
     cleanup.unshift(() => store.close());
     const index = new FileIndex(store.db);
     const replica = new MemoryReplica(join(dir, "m.db"), "hub");
+
+    cleanup.unshift(() => replica.close());
     const files = new FileClient({ config, index, replica });
     expect(await files.reindex()).toMatchObject({ files: 1, roots: [root] });
     index.replace("omen", ["D:/evtol"], [

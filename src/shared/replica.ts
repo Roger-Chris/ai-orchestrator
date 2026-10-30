@@ -268,6 +268,12 @@ export class MemoryReplica {
     clearInterval(this.timer);
   }
 
+  /** Stops syncing and closes the file (Windows will not delete a database that is still open). */
+  close() {
+    this.stop();
+    this.db.close();
+  }
+
   /** Push what this device wrote, then pull everything new. Returns records pulled. One at a time. */
   sync(): Promise<number> {
     if (!this.upstream) return Promise.resolve(0);

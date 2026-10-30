@@ -61,6 +61,8 @@ function setup() {
   const store = new Store(join(dir, "data"));
   cleanup.unshift(() => store.close());
   const replica = new MemoryReplica(join(dir, "m.db"), "hub");
+
+  cleanup.unshift(() => replica.close());
   const pushes: PushPayload[] = [];
   const ready: string[] = [];
   const f = fakeRunner();

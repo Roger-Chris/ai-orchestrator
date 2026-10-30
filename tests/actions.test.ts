@@ -23,6 +23,7 @@ function device(name: string, extra: Record<string, unknown> = {}) {
   const root = tmp();
   const config = parseConfig({ node: { name }, server: { token: "t" }, actions: { roots: [root] }, ...extra });
   const store = new Store(tmp());
+  cleanup.unshift(() => store.close());
   return { root, config, store };
 }
 
