@@ -11,7 +11,7 @@ import type { Orchestrator } from "../brain/orchestrator.js";
 import type { Router } from "../brain/router.js";
 import type { ProviderPool } from "../providers/registry.js";
 import type { Store } from "../store/db.js";
-import { PROVIDER_IDS, type ProviderId, type RunEvent, type RunOptions } from "../types.js";
+import { PROVIDER_IDS, type ProviderId, type RunEvent, type RunOptions, TASK_KINDS, type TaskKind } from "../types.js";
 import { buildHome, buildInsights, localDay } from "./home.js";
 import type { AssistantTasks } from "../integrations/assistant.js";
 import type { GmailReader } from "../integrations/gmail.js";
@@ -22,6 +22,7 @@ import { CallError, type CallDesk } from "../calls/desk.js";
 import { type AskReply, sayFor, type TalkReply } from "../voice/talk.js";
 import { TTS_PROVIDERS, type Tts, TtsError } from "../voice/tts.js";
 import type { ToolRegistry } from "../ai/tools.js";
+import { JOB_KINDS, type JobKind, type ModelRouter, RouteError, sizeOf } from "../ai/route.js";
 import type { StyleBook } from "../whatsapp/learn.js";
 import type { MemoryReplica } from "../shared/replica.js";
 import { type Ask, AskBody, askBrain, mountSharedMemory } from "./shared-memory.js";
@@ -52,6 +53,8 @@ export interface AppDeps {
   tts?: Tts;
   /** Every AI tool with cost, limits, live state and usage today (src/ai/tools.ts). */
   tools?: ToolRegistry;
+  /** The model router (R2): fallback chains for the hub's own jobs and raw:auto. */
+  models?: ModelRouter;
   /** This device's copy of the shared memory pool; absent when sharedMemory.enabled is false. */
   replica?: MemoryReplica;
   /** How /node/memory/* reaches the brain; tests pass a fake. */
@@ -216,6 +219,15 @@ export function createApp(d: AppDeps) {
   app.get("/api/tools", async (c) => {
     if (!d.tools) return c.json({ error: "the tool registry is not set up on this hub" }, 404);
     return c.json({ tools: await d.tools.list(c.req.query("fresh") === "1") });
+  });
+  // The model router's choice for a job, without running it: ?kind=whatsapp_draft|mail|call|brain|<task kind>&size=small|medium|large&override=<provider>
+  app.get("/api/tools/route", async (c) => {
+    if (!d.models) return c.json({ error: "the model router is not set up on this hub" }, 404);
+    const kind = c.req.query("kind") ?? "brain";
+    if (!(JOB_KINDS as readonly string[]).includes(kind) && !(TASK_KINDS as readonly string[]).includes(kind)) return c.json({ error: `unknown kind ${kind}` }, 400);
+    const size = z.enum(["small", "medium", "large"]).catch("medium").parse(c.req.query("size"));
+    const override = Provider.safeParse(c.req.query("override"));
+    return c.json(await d.models.routeFor(kind as JobKind | TaskKind, size, { override: override.success ? override.data : undefined }));
   });
   app.get("/api/usage", (c) => c.json(d.store.usage(Number(c.req.query("days") ?? 7))));
 
@@ -660,7 +672,7 @@ export function createApp(d: AppDeps) {
 
   // ---- OpenAI-compatible API: point any OpenAI-speaking tool at http://<host>:4317/v1
   app.get("/v1/models", (c) => {
-    const ids = ["orchestrator", "orchestrator-plan", "auto", ...PROVIDER_IDS, ...[...d.orchestrator.agents.keys()].map((a) => `agent:${a}`)];
+    const ids = ["orchestrator", "orchestrator-plan", "auto", "raw:auto", ...PROVIDER_IDS.map((p) => `raw:${p}`), ...PROVIDER_IDS, ...[...d.orchestrator.agents.keys()].map((a) => `agent:${a}`)];
     return c.json({ object: "list", data: ids.map((id) => ({ id, object: "model", created: 0, owned_by: "orchestrator" })) });
   });
   app.post("/v1/chat/completions", async (c) => {
@@ -668,6 +680,24 @@ export function createApp(d: AppDeps) {
     const { system, prompt } = messagesToPrompt(body.messages);
     // "raw:<provider>": one plain call to your logged-in session (codex = ChatGPT), no run, no plan,
     // no notification or memory entry. The AI_Assistant brain thinks through this (PLANNER_BASE_URL=hub).
+    // "raw:auto": the same plain call, but the model router (R2) picks the session and falls back
+    // through the others when it fails or is cooling (job "brain", sized by the prompt).
+    if (body.model === "raw:auto" && d.models) {
+      try {
+        const r = await d.models.run("brain", { system, prompt, timeoutMs: 240_000 }, { size: sizeOf(`${system ?? ""}${prompt}`) });
+        return c.json({
+          id: `chatcmpl-raw-${Date.now()}`,
+          object: "chat.completion",
+          created: Math.floor(Date.now() / 1000),
+          model: `raw:${r.provider}`,
+          choices: [{ index: 0, message: { role: "assistant", content: r.text }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        });
+      } catch (e) {
+        const limited = e instanceof RouteError && (e.rateLimited || !e.route.chain.length);
+        return c.json({ error: { message: (e as Error).message, type: limited ? "rate_limit" : "provider_error" } }, limited ? 429 : 502);
+      }
+    }
     const raw = body.model.startsWith("raw:") ? Provider.safeParse(body.model.slice(4)) : undefined;
     if (raw) {
       if (!raw.success) return c.json({ error: { message: `unknown provider in ${body.model}`, type: "invalid_request_error" } }, 400);

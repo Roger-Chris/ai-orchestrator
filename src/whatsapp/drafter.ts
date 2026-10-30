@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { ModelRouter } from "../ai/route.js";
 import type { ProviderPool } from "../providers/registry.js";
 import type { PushPayload } from "../server/push.js";
 import type { Store } from "../store/db.js";
@@ -30,6 +31,8 @@ export interface DrafterOptions {
   node: string;
   /** What the shared memory knows about the person a reply is for (knowledge.ts); none when absent. */
   knowledge?: (who: { name: string; chatId: string; isGroup: boolean }) => string[];
+  /** The model router (R2): picks the model and falls back. Without it, the fixed ORDER below. */
+  router?: ModelRouter;
 }
 
 /** Gemini last: its free tier is often busy; ChatGPT (codex) and Groq answer first. */
@@ -255,6 +258,11 @@ export class ReplyDrafter {
 
   /** The first ready model (or the configured one) answers; usage is recorded per try. */
   private async generate(system: string, prompt: string): Promise<{ provider: ProviderId; text: string }> {
+    if (this.opts.router) {
+      // a pinned replyProvider stays the only one, as before; "auto" lets the router choose and fall back
+      const r = await this.opts.router.run("whatsapp_draft", { system, prompt, timeoutMs: 120_000 }, { override: this.opts.provider, strict: this.opts.provider !== "auto" });
+      return { provider: r.provider, text: r.text };
+    }
     const ready = await this.pool.available();
     const order = this.opts.provider === "auto" ? ORDER.filter((id) => ready.includes(id)) : [this.opts.provider];
     if (!order.length) throw new Error("no online model is ready to draft (Claude, Gemini, ChatGPT or Groq)");

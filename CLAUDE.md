@@ -131,7 +131,15 @@ Hard-won details:
 - `src/ai/tools.ts` `ToolRegistry.list()` (`GET /api/tools`, `?fresh=1` re-detects logins): every AI the hub can use as `ToolInfo` {id, name, kind agent/chat/speech/transcribe/vision, cost local/free/subscription/paid, strengths (kinds scored >= 8.5 in the capability matrix), scores, limits {maxConcurrent, perDay, note}, state ready/busy/cooling/limit/off/not_set_up, until, load, usageToday}. Tool ids: the five providers, `whisper:groq`, `tts:openai|gemini|groq`, `ollama:<style.model>` and `ollama:<style.visionModel>` (Ollama `/api/tags`, cached 60 s).
 - Cost classes and plan notes are in `PROVIDER_FACTS`/`TTS_FACTS`; config `tools.overrides.<id>` sets `cost`, `perDay` (state `limit` until the next UTC day once today's calls reach it), `note`, `enabled: false`.
 - Usage today comes from the `usage` table (UTC day, every device that reported here). Providers were already recorded; TTS (`Tts` `onUse`) records `tts:<service>` and Groq Whisper (`GroqVoice` `onTranscribe`) records `whisper:groq`. `Store.recordUsage` takes any tool id.
-- R2 (`routeFor`) will choose from this list; R4 shows it in the app.
+- R4 will show it in the app.
+
+## Model router (Jarvis phase 1, R2)
+
+- `src/ai/route.ts` `ModelRouter.routeFor(kind, size, {override, strict})` -> `{chain, skipped, reason}` from the registry's live list. Kinds: the hub's jobs `whatsapp_draft`, `mail`, `call`, `brain` (orders in `DEFAULT_ROUTES`, the owner's earlier choices; config `tools.routes.<job>: [..]` replaces one, the other providers except Perplexity follow as last resorts), or any TaskKind (capability score order; `small` lets a cheaper tool lead when scores are within 1). Off / not set up / daily cap / cooling are skipped with a reason; busy goes after ready. `large` (>= 24k chars, `sizeOf`) moves Groq to the end (free-tier token limits).
+- `run(kind, req, opts)` walks the chain with `pool.run` (read permission), records usage per try, returns `{provider, text, route, failed}`; `RouteError` (`rateLimited` when every try was a limit) when nothing answered.
+- Used by: WhatsApp drafts (`ReplyDrafter` `router`), Gmail tasks (`GmailReader` `router`, per batch), a call's typed answers (`CallDesk.think`), and `/v1/chat/completions` model `raw:auto` (job `brain`; the answer's `model` says which session answered; nothing left: 429). A pinned `whatsapp.replyProvider` / `gmail.provider` stays strict (that one only), as before. The brain uses `raw:auto` with `PLANNER_BASE_URL=hub` `PLANNER_MODEL=auto`.
+- `GET /api/tools/route?kind=&size=&override=` previews a chain without running anything (for R4's screen and for checking).
+- Ollama models are listed by the registry but not routed yet: R3 makes `local` a provider.
 
 ## Talking to Jarvis (voice)
 

@@ -331,6 +331,8 @@ const ConfigSchema = z.object({
           }),
         )
         .prefault({}),
+      /** The model router (src/ai/route.ts): your order per job (whatsapp_draft, mail, call, brain), e.g. `mail: [groq, gemini]`. Others still follow as last resorts. */
+      routes: z.record(z.string(), z.array(z.enum(["claude", "codex", "gemini", "perplexity", "groq"]))).prefault({}),
     })
     .prefault({}),
   cluster: z

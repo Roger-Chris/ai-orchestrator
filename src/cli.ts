@@ -42,6 +42,7 @@ import { GroqVoice } from "./calls/groq.js";
 import { ttsFromConfig } from "./voice/tts.js";
 import { WakeListener, wakeOptions } from "./voice/wake.js";
 import { ToolRegistry } from "./ai/tools.js";
+import { ModelRouter } from "./ai/route.js";
 import { addTerms } from "./whatsapp/address.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -88,12 +89,17 @@ export function buildSystem(config: Config) {
         return [gmailLine, `Phone notifications: ${notifier.fcm ? "on (Android app via Firebase)" : "web push only"}`, waLine];
       },
     });
+  // The tool registry (R1) and the model router (R2) choose which AI does the hub's own jobs.
+  const tts = ttsFromConfig(config, undefined, (p, ok, ms) => store.recordUsage(`tts:${p}`, config.node.name, ok, ms));
+  const tools = new ToolRegistry({ config, pool, capabilities: buildCapabilities(config.routing.overrides), usage: () => store.usage(1), tts });
+  const models = new ModelRouter({ tools: () => tools.list(), pool, store, node: config.node.name, routes: config.tools.routes });
   const gmail = new GmailReader(store, pool, {
     clientFile: resolve(config.gmail.clientFile),
     dataDir: resolve(config.dataDir),
     query: config.gmail.query,
     provider: config.gmail.provider,
     node: config.node.name,
+    router: models,
   });
   const assistant = config.assistant.token
     ? new AssistantTasks(store, { url: config.assistant.url, token: config.assistant.token, pollMinutes: config.assistant.pollMinutes })
@@ -112,6 +118,7 @@ export function buildSystem(config: Config) {
       node: config.node.name,
       // who they are, facts and open tasks with them, from the shared memory
       knowledge: replica ? (who) => personKnowledge(replica, who) : undefined,
+      router: models,
     },
     (p) => void notifier.notify(p),
   );
@@ -124,20 +131,8 @@ export function buildSystem(config: Config) {
       transcribeModel: groq.transcribeModel,
       onTranscribe: (ok, ms) => store.recordUsage("whisper:groq", config.node.name, ok, ms),
     }),
-    // Without Groq, typed answers on a call are decided by the first ready of Claude, ChatGPT, Gemini (Gemini last: it is often busy).
-    think: async (system, prompt) => {
-      const ready = await pool.available();
-      const order = (["claude", "codex", "gemini"] as ProviderId[]).filter((id) => ready.includes(id));
-      if (!order.length) throw new Error("no model is ready (Claude, Gemini or ChatGPT)");
-      let error = "";
-      for (const id of order) {
-        const r = await pool.run(id, { system, prompt, permission: "read", timeoutMs: 60_000 });
-        store.recordUsage(id, config.node.name, r.ok, r.durationMs);
-        if (r.ok) return r.text;
-        error = `${id}: ${r.error ?? "failed"}`;
-      }
-      throw new Error(error);
-    },
+    // Typed answers on a call: the router's "call" order (Claude, ChatGPT, Gemini, then Groq), skipping what is cooling.
+    think: async (system, prompt) => (await models.run("call", { system, prompt, timeoutMs: 60_000 })).text,
     ack: async (id, action) => {
       if (!assistant) throw new Error("the brain is not connected (BRAIN_TOKEN)");
       await assistant.ack(id, action);
@@ -148,9 +143,7 @@ export function buildSystem(config: Config) {
     task: (taskId) => store.tasksFor(localDay()).find((t) => t.id === `brain:${taskId}`),
   });
   const actions = buildActions(config, { store, pool, replica, cluster, notifier });
-  const tts = ttsFromConfig(config, undefined, (p, ok, ms) => store.recordUsage(`tts:${p}`, config.node.name, ok, ms));
-  const tools = new ToolRegistry({ config, pool, capabilities: buildCapabilities(config.routing.overrides), usage: () => store.usage(1), tts });
-  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts, tools };
+  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts, tools, models };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */

@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
+import type { ModelRouter } from "../ai/route.js";
 import type { ProviderPool } from "../providers/registry.js";
 import { localDay } from "../server/home.js";
 import type { Store } from "../store/db.js";
@@ -26,6 +27,8 @@ export interface GmailOptions {
   query: string;
   provider: "auto" | ProviderId;
   node: string;
+  /** The model router (R2): each batch goes to the best ready model, falling back on failure. */
+  router?: ModelRouter;
 }
 
 interface Client {
@@ -204,17 +207,25 @@ export class GmailReader {
       mails.push({ id: m.id, from: h("from"), subject: h("subject"), date: h("date"), body: body.slice(0, 1500) });
     }
 
-    const provider = await this.pickProvider();
+    const provider = this.opts.router ? undefined : await this.pickProvider();
     const mark = this.store.db.prepare("INSERT OR IGNORE INTO gmail_seen (id, ts) VALUES (?, ?)");
     const today = localDay();
     let added = 0;
     // Small batches keep each prompt short and let one bad answer cost only a few emails.
     for (let i = 0; i < mails.length; i += 10) {
       const batch = mails.slice(i, i + 10);
-      const r = await this.pool.run(provider, { prompt: taskPrompt(batch), permission: "read", timeoutMs: 240_000 });
-      this.store.recordUsage(provider, this.opts.node, r.ok, r.durationMs);
+      let r: { ok: boolean; text: string; error?: string; provider: ProviderId };
+      if (this.opts.router) {
+        // a pinned gmail.provider stays the only one; "auto" lets the router choose and fall back
+        const o = await this.opts.router.run("mail", { prompt: taskPrompt(batch), timeoutMs: 240_000 }, { override: this.opts.provider, strict: this.opts.provider !== "auto" });
+        r = { ok: true, text: o.text, provider: o.provider };
+      } else {
+        const res = await this.pool.run(provider!, { prompt: taskPrompt(batch), permission: "read", timeoutMs: 240_000 });
+        this.store.recordUsage(provider!, this.opts.node, res.ok, res.durationMs);
+        r = res;
+      }
       const tasks = r.ok ? parseTasks(r.text, batch, today) : undefined;
-      if (!tasks) throw new Error(`could not read tasks from ${provider}'s answer${r.error ? `: ${r.error.slice(0, 200)}` : ""}`);
+      if (!tasks) throw new Error(`could not read tasks from ${r.provider}'s answer${r.error ? `: ${r.error.slice(0, 200)}` : ""}`);
       for (const t of tasks) this.store.addTask({ ...t, source: "gmail" });
       added += tasks.length;
       // Only now are these emails done: a failed batch is tried again next time.

@@ -29,7 +29,7 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 
 ### Phase 1: model router + AI hub
 - [x] R1 Tool registry: every provider with kind strengths, cost class (local/free/subscription/paid), limits, live state (ready/busy/cooling until), usage today.
-- [ ] R2 `routeFor(kind, size, override?)` with fallback chains; used by WhatsApp drafts, Gmail, calls, raw:auto for the brain.
+- [x] R2 `routeFor(kind, size, override?)` with fallback chains; used by WhatsApp drafts, Gmail, calls, raw:auto for the brain.
 - [ ] R3 Ollama/local models as a provider (`local`), and spend caps per paid tool.
 - [ ] R4 `/api/ai-hub` (status, usage, caps, preferred tool per job kind) + app AI hub screen.
 
@@ -57,8 +57,10 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 - 2026-10-29 (scheduled run): V4 hub `POST /api/tts` + `GET /api/tts/audio` (OpenAI gpt-4o-mini-tts, Gemini Interactions TTS, Groq Orpheus split at 200 chars; failing services rest; cache) and Settings → Voice (auto / hub / phone, service, voice, phone voice, test). Phone TTS stays the fallback. Assumed Gemini model `gemini-3.8-flash-lite-tts` from the current docs; change `tts.gemini.model` if it is renamed. JS-only app change: rebuild the APK.
 - 2026-10-29 (scheduled run): V5 `orc wake` on the laptop (tools/wakeword.py: openWakeWord `hey_jarvis` on the CPU, records until you pause, plays the hub's WAV answer; src/voice/wake.ts sends it to `/api/assistant/voice`, follow-ups without the wake word, computer's own voice as fallback; `wake.enabled` starts it with `orc serve`) and in-app "Hey Jarvis" while the app is open (Settings → Voice switch; continuous Android recognition, mic ownership so screens that listen keep it off). Read "Porcupine-free" as: no Picovoice key, so openWakeWord. Screen-off phone wake word not built (needs a native service). Could not test with a real mic from the cloud.
 - 2026-10-29 (scheduled run): R1 tool registry `src/ai/tools.ts` + `GET /api/tools`: providers, Groq Whisper, TTS services and the configured Ollama models with cost class, strengths, limits, live state and usage today; `tools.overrides` for cost/daily cap/off; TTS and Whisper now record usage. Plan limits are notes, not live quota (no provider exposes it); `perDay` caps are the owner's to set.
+- 2026-10-30 (scheduled run): R2 model router `src/ai/route.ts` (`routeFor`/`run`, job orders + `tools.routes`, skip cooling/capped/not set up, Groq last for long prompts, cheaper first for small TaskKind jobs) used by WhatsApp drafts, Gmail, call answers and `raw:auto`; `GET /api/tools/route`; brain `PLANNER_MODEL=auto` -> `raw:auto`. Calls now fall back to Groq last (before: Claude, ChatGPT, Gemini only). Hub + one brain line (AI_Assistant `jarvis/next`), no app change. The laptop was not connected, so this run's commits and the 29 Oct ones are kept as a bundle in the claude.ai project (`claude/unpushed/`).
 
 ## Owner to-do
 - Rebuild and install the APK (`npm run build:apk` in mobile/ on the laptop, or the GitHub Actions build): V4 Settings → Voice and V5 "Hey Jarvis" are in the app (JS only, no new native packages since V2-V3's build).
 - For the hub's voice: add `OPENAI_API_KEY` or `GEMINI_API_KEY` to the hub's `.env` and restart it, or accept the Orpheus model terms once in the Groq console (the Groq keys are reused). Without any, the phone's own voice speaks (as before).
 - Try `npm run orc -- wake` on the laptop (needs uv, already used for `orc style learn`); if it wakes too rarely or too often, try `--threshold 0.4` / `0.6` and put the value under `wake:` in the config; `wake.enabled: true` to start it with `orc serve`.
+- Optional: `PLANNER_MODEL=auto` (with `PLANNER_BASE_URL=hub`) in the brain's `.env` lets the hub's router pick ChatGPT / Claude / Gemini / Groq for the brain's thinking and fall back between them; `codex` keeps it on ChatGPT as now. Restart the brain after the change.
