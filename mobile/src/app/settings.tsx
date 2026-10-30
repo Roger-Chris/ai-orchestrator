@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Alert, AppState, Platform, ScrollView, Text, View } from "react-native";
 import { Button, Card, Dot, Muted, Row } from "../components/ui";
 import { VoiceSettings } from "../components/VoiceSettings";
-import { Api, connection } from "../lib/api";
+import { Api, connection, hubList, primaryHub } from "../lib/api";
 import { askBatteryExemption, batteryRestricted, isXiaomi, openAppSettings, openAutostart } from "../lib/background";
 import { enablePush, pushBuiltIn } from "../lib/push";
 import { useColors } from "../lib/theme";
@@ -95,6 +95,12 @@ export default function Settings() {
       <Card>
         <Text style={h2}>Hub</Text>
         <Muted>{conn?.url ?? "not connected"}</Muted>
+        {conn && primaryHub() && conn.url !== primaryHub() ? (
+          <Text style={{ color: c.warn }}>Using a backup: {primaryHub()} is not answering. The app goes back to it when it does.</Text>
+        ) : null}
+        <Muted>
+          {hubList().length > 1 ? `Backups if it is down: ${hubList().slice(1).join(", ")}` : "No backup hub yet: start the orchestrator on another device (the laptop) and it is found here."}
+        </Muted>
         <Row>
           <Button title="Change hub or token" onPress={() => router.push("/connect")} />
         </Row>
@@ -107,6 +113,7 @@ export default function Settings() {
           <Button title="Tasks" onPress={() => router.push("/tasks")} />
           <Button title="Memory" onPress={() => router.push("/memory")} />
           <Button title="WhatsApp chats" onPress={() => router.push("/wa-chats")} />
+          <Button title="People" onPress={() => router.push("/people")} />
         </Row>
         <Row>
           <Button title="Learning" onPress={() => router.push("/learning" as never)} />

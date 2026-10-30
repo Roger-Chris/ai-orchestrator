@@ -1,7 +1,7 @@
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
-import { Api } from "./api";
+import { Api, registerPushEverywhere } from "./api";
 import { speakNotice } from "./voice";
 
 /** Built with a google-services.json? Without Firebase there is no way to receive pushes. */
@@ -56,6 +56,7 @@ export async function enablePush(): Promise<string> {
   if (!enabled) return "The hub has no Firebase key yet, so it can't send notifications. Put fcm-service-account.json in the hub's folder and restart it.";
   const token = await Notifications.getDevicePushTokenAsync();
   await Api.registerFcm(String(token.data));
+  await registerPushEverywhere(String(token.data)); // the backup hubs too, for when this one is down
   return "Notifications are on for this phone.";
 }
 

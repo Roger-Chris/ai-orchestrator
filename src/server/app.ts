@@ -17,6 +17,7 @@ import type { AssistantTasks } from "../integrations/assistant.js";
 import type { GmailReader } from "../integrations/gmail.js";
 import { type Notifier, alertPayload } from "./push.js";
 import { letGo } from "../whatsapp/convo.js";
+import { people } from "../whatsapp/people.js";
 import type { ReplyDrafter } from "../whatsapp/drafter.js";
 import { CallError, type CallDesk } from "../calls/desk.js";
 import { type AskReply, sayFor, type TalkReply } from "../voice/talk.js";
@@ -298,6 +299,12 @@ export function createApp(d: AppDeps) {
   // `orc style push` sends the style book. Nothing on the hub can send a WhatsApp message.
   const noDrafter = (c: Context) => c.json({ error: "WhatsApp drafting is off on this hub" }, 404);
   app.get("/api/style", (c) => (d.drafter ? c.json(d.drafter.status()) : noDrafter(c)));
+  // The people in the style book (cards and counts, no messages) for the app's People screen.
+  app.get("/api/style/people", (c) => {
+    if (!d.drafter) return noDrafter(c);
+    const book = d.drafter.book();
+    return c.json({ builtAt: book?.builtAt ?? null, people: book ? people(book) : [] });
+  });
   app.put("/api/style", async (c) => {
     if (!d.drafter) return noDrafter(c);
     const book = (await c.req.json()) as StyleBook;

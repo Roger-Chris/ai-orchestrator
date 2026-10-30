@@ -567,8 +567,11 @@ function quietSignalNoise(): () => number {
 /** Where reply drafting happens: `whatsapp.hub`, else the hub on this device. */
 const hubUrl = (config: Config) => (config.whatsapp.hub || `http://127.0.0.1:${config.server.port}`).replace(/\/$/, "");
 
-async function hubCall(config: Config, method: string, path: string, body: unknown): Promise<any> {
-  const res = await fetch(`${hubUrl(config)}${path}`, {
+/** The orchestrator on this device: the backup hub when `whatsapp.hub` (the Linux machine) is down. */
+const localHub = (config: Config) => `http://127.0.0.1:${config.server.port}`;
+
+async function hubCall(config: Config, method: string, path: string, body: unknown, base = hubUrl(config)): Promise<any> {
+  const res = await fetch(`${base}${path}`, {
     method,
     headers: { "Content-Type": "application/json", ...(config.server.token ? { Authorization: `Bearer ${config.server.token}` } : {}) },
     body: JSON.stringify(body),
@@ -578,20 +581,38 @@ async function hubCall(config: Config, method: string, path: string, body: unkno
   return out;
 }
 
-/** Sends new messages to the hub in order; while the hub is unreachable they wait and are retried. */
+/**
+ * Sends new messages to the hub in order. When it does not answer at all (a power cut on the Linux
+ * machine), they go to the orchestrator on this device instead, which drafts from the same style book
+ * and which the phone app moves to; when neither answers they wait and are retried.
+ */
 function hubForwarder(config: Config) {
   const queue: WaMessage[] = [];
   let busy = false;
   let warned = false;
+  const send = async (batch: unknown[]) => {
+    const body = { messages: batch, live: true };
+    try {
+      await hubCall(config, "POST", "/api/whatsapp/messages", body);
+    } catch (e) {
+      // Only a hub that did not answer (fetch failed), not one that answered with an error.
+      if (!(e instanceof TypeError) || hubUrl(config) === localHub(config)) throw e;
+      await hubCall(config, "POST", "/api/whatsapp/messages", body, localHub(config));
+      if (!warned) console.warn(`! ${hubUrl(config)} is not answering; drafting on this device until it is back`);
+      warned = true;
+      return;
+    }
+    if (warned) console.log(`${hubUrl(config)} is answering again.`);
+    warned = false;
+  };
   const drain = async () => {
     if (busy) return;
     busy = true;
     while (queue.length) {
       const batch = queue.slice(0, 200).map((m) => ({ ...m, mediaPath: undefined }));
       try {
-        await hubCall(config, "POST", "/api/whatsapp/messages", { messages: batch, live: true });
+        await send(batch);
         queue.splice(0, batch.length);
-        warned = false;
       } catch (e) {
         if (!warned) console.warn(`! hub unreachable (${(e as Error).message}); keeping ${queue.length} message(s) to retry`);
         warned = true;

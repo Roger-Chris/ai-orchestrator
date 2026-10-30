@@ -1,7 +1,9 @@
 import * as SecureStore from "expo-secure-store";
 import { WaReply } from "./wareply";
+import type { PersonSummary } from "../../../src/types";
 import type { AiHub, Build, BrainAlert, OutsideAgent, OutsideAgentScopes, OutsideAuditEntry, PhoneAction, Home, Insights, JobKind, ProviderId, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
 
+export type { PersonSummary } from "../../../src/types";
 export type { AiHub, Build, BuildBranch, OutsideAgent, OutsideAgentScopes, OutsideAuditEntry, PhoneAction, JobKind, ProviderId, ToolInfo, ToolState } from "../../../src/types";
 export type { AlertAction, Attention, BrainAlert, DayTask, Decision, Home, HomeBuild, Insights, PendingApproval, QuietChat, ReplyDraft, RunEvent, RunOptions, RunRecord, Running, StepRecord, Thread } from "../../../src/types";
 
@@ -13,19 +15,128 @@ export interface Connection {
 
 let current: Connection | null = null;
 
+// ---- backup hubs. Every device runs the same server, so when the hub you chose (the Linux machine)
+// stops answering, e.g. in a power cut, the app moves to the next one that answers (the laptop) and goes
+// back once yours answers again. The others are found from the hub's /api/nodes; yours is always first.
+let hubs: string[] = [];
+const hubListeners = new Set<(url: string) => void>();
+let watching: ReturnType<typeof setInterval> | undefined;
+
+/** The hubs this phone can use, the one you chose first. */
+export const hubList = () => hubs;
+/** The hub you chose (Settings → Change hub); `connection().url` is the one in use right now. */
+export const primaryHub = () => hubs[0];
+/** Called with the new hub's address whenever the app moves to another hub. */
+export function onHubChange(f: (url: string) => void): () => void {
+  hubListeners.add(f);
+  return () => hubListeners.delete(f);
+}
+
+const clean = (u: string) => u.trim().replace(/\/+$/, "");
+
+async function answers(url: string, timeoutMs = 4000): Promise<boolean> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return (await fetch(`${url}/api/health`, { headers: authHeaders(), signal: ctrl.signal })).ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function useHub(url: string) {
+  if (!current || current.url === url) return;
+  current = { ...current, url };
+  WaReply.configure(url, current.token);
+  hubListeners.forEach((f) => f(url));
+}
+
+let switching: Promise<boolean> | null = null;
+/** Moves to the first other hub that answers, yours first. True when the app changed hub. */
+export function failover(): Promise<boolean> {
+  switching ??= (async () => {
+    try {
+      for (const url of hubs) {
+        if (url !== current?.url && (await answers(url))) {
+          useHub(url);
+          return true;
+        }
+      }
+      return false;
+    } finally {
+      switching = null;
+    }
+  })();
+  return switching;
+}
+
+/** Every minute: back to your hub when it answers again, or away from one that stopped answering. */
+async function checkHubs() {
+  if (!current || hubs.length < 2) return;
+  if (current.url !== hubs[0] && (await answers(hubs[0]))) useHub(hubs[0]);
+  else if (!(await answers(current.url))) await failover();
+}
+
+/** The other devices that run the server, from your hub, kept for when it is down. */
+export async function refreshHubs(): Promise<string[]> {
+  if (!current || current.url !== hubs[0]) return hubs;
+  const { peers } = await api<{ peers: { url?: string; online?: boolean }[] }>("/api/nodes");
+  const others = peers
+    .filter((p) => p.url)
+    .sort((a, b) => Number(!!b.online) - Number(!!a.online))
+    .map((p) => clean(p.url!))
+    .filter((u, i, all) => u !== hubs[0] && all.indexOf(u) === i);
+  hubs = [hubs[0], ...others];
+  await SecureStore.setItemAsync("orc.hubs", JSON.stringify(others));
+  return hubs;
+}
+
+/** Gives every hub this phone's notification token, so whichever is up can reach you. Best effort. */
+export async function registerPushEverywhere(fcmToken: string) {
+  await SecureStore.setItemAsync("orc.fcm", fcmToken);
+  await Promise.all(
+    hubs.map((url) =>
+      fetch(`${url}/api/push/fcm`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ token: fcmToken }) }).catch(() => undefined),
+    ),
+  );
+}
+
+// A hub the app moves to gets the notification token too (it may never have had it).
+onHubChange((url) => {
+  void SecureStore.getItemAsync("orc.fcm").then((t) =>
+    t ? fetch(`${url}/api/push/fcm`, { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ token: t }) }).catch(() => undefined) : undefined,
+  );
+});
+
 export async function loadConnection(): Promise<Connection | null> {
   const url = await SecureStore.getItemAsync("orc.hub");
   const token = await SecureStore.getItemAsync("orc.token");
   current = url ? { url, token: token ?? "" } : null;
-  if (current) WaReply.configure(current.url, current.token);
+  if (current) {
+    WaReply.configure(current.url, current.token);
+    let others: string[] = [];
+    try {
+      others = JSON.parse((await SecureStore.getItemAsync("orc.hubs")) ?? "[]");
+    } catch {}
+    hubs = [current.url, ...others.filter((u) => u !== current!.url)];
+    // In the background: is your hub up (else move now, not after a 20 s timeout), and who else is there.
+    void (async () => {
+      if (!(await answers(current!.url))) await failover();
+      else await refreshHubs().catch(() => undefined);
+    })();
+    watching ??= setInterval(() => void checkHubs(), 60_000);
+  }
   return current;
 }
 
 export async function saveConnection(c: Connection) {
-  const url = c.url.trim().replace(/\/+$/, "");
+  const url = clean(c.url);
   await SecureStore.setItemAsync("orc.hub", url);
   await SecureStore.setItemAsync("orc.token", c.token.trim());
   current = { url, token: c.token.trim() };
+  hubs = [url, ...hubs.slice(1).filter((u) => u !== url)];
   WaReply.configure(url, current.token);
 }
 
@@ -39,28 +150,34 @@ export function authHeaders(): Record<string, string> {
   return current?.token ? { Authorization: `Bearer ${current.token}` } : {};
 }
 
-export async function api<T = unknown>(path: string, init: { method?: string; body?: unknown; timeoutMs?: number } = {}): Promise<T> {
+export async function api<T = unknown>(path: string, init: { method?: string; body?: unknown; timeoutMs?: number } = {}, retried = false): Promise<T> {
   if (!current) throw new Error("Not connected to a hub yet.");
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), init.timeoutMs ?? 20_000);
+  let res: Response;
   try {
-    const res = await fetch(`${current.url}${path}`, {
+    res = await fetch(`${current.url}${path}`, {
       method: init.method ?? (init.body === undefined ? "GET" : "POST"),
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: init.body === undefined ? undefined : JSON.stringify(init.body),
       signal: ctrl.signal,
     });
-    if (res.status === 401) throw new Unauthorized("The hub rejected the access token.");
-    const data = await res.json().catch(() => ({}));
-    // The hub says {error}; the brain (FastAPI, through /api/brain) says {detail}.
-    if (!res.ok) throw new Error((data as { error?: string; detail?: unknown }).error ?? String((data as { detail?: unknown }).detail ?? `HTTP ${res.status}`));
-    return data as T;
   } catch (e) {
+    clearTimeout(timer);
+    // The hub did not answer at all (not an error it sent): try the same request on a backup hub once.
+    if (!retried && hubs.length > 1 && (await failover())) return api<T>(path, init, true);
     if ((e as Error).name === "AbortError") throw new Error(`The hub at ${current.url} did not answer. Is Tailscale on and the hub running?`);
     throw e;
-  } finally {
-    clearTimeout(timer);
   }
+  if (res.status === 401) {
+    clearTimeout(timer);
+    throw new Unauthorized("The hub rejected the access token.");
+  }
+  const data = await res.json().catch(() => ({}));
+  clearTimeout(timer);
+  // The hub says {error}; the brain (FastAPI, through /api/brain) says {detail}.
+  if (!res.ok) throw new Error((data as { error?: string; detail?: unknown }).error ?? String((data as { detail?: unknown }).detail ?? `HTTP ${res.status}`));
+  return data as T;
 }
 
 export interface NodeInfo {
@@ -208,6 +325,8 @@ export const Api = {
   taskAction: (id: number, action: "confirm" | "reject" | "done") => api<BrainTask>(`/api/brain/tasks/${id}/${action}`, { body: {} }),
   addTask: (title: string, due_at?: string) => api<BrainTask>("/api/brain/tasks", { body: { title, due_at } }),
   waChats: () => api<WaChat[]>("/api/brain/chats?limit=200"),
+  /** The people in the WhatsApp style book: cards and counts, no messages. */
+  people: () => api<{ builtAt: number | null; people: PersonSummary[] }>("/api/style/people"),
   muteChat: (id: number, muted: boolean) => api(`/api/brain/chats/${id}/mute`, { body: { muted } }),
   briefNow: () => api("/api/brain/brief", { body: {}, timeoutMs: 120_000 }),
   modelUsage: () => api<{ report: string }>("/api/brain/llm/usage"),

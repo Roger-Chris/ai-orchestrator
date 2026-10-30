@@ -58,6 +58,7 @@ export default function RootLayout() {
         <Stack.Screen name="tasks" options={{ title: "Tasks" }} />
         <Stack.Screen name="memory" options={{ title: "Memory" }} />
         <Stack.Screen name="wa-chats" options={{ title: "WhatsApp chats" }} />
+        <Stack.Screen name="people" options={{ title: "People" }} />
         <Stack.Screen name="ai-hub" options={{ title: "AI hub" }} />
         <Stack.Screen name="learning" options={{ title: "Learning" }} />
         <Stack.Screen name="builds" options={{ title: "Builds" }} />

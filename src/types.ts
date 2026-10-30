@@ -268,6 +268,26 @@ export interface QuietChat {
 }
 
 /** A WhatsApp reply written in your style. The hub never sends it; you do. */
+/** One person from the WhatsApp style book, for the app's People screen (GET /api/style/people). */
+export interface PersonSummary {
+  chatId: string;
+  name: string;
+  relationship: string;
+  /** What you call them (sir, da, bro…) and what they call you. */
+  addressAs: string[];
+  theyCallMe: string[];
+  language: string;
+  tone: string;
+  /** 1 very casual … 5 formal. */
+  formality?: number;
+  topics: string[];
+  notes: string;
+  /** Messages you sent them and they sent you, in what was studied. */
+  mine: number;
+  theirs: number;
+  lastTs: number;
+}
+
 export interface ReplyDraft {
   id: string;
   chatId: string;

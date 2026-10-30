@@ -13,6 +13,7 @@ import { WaStore, type WaMessage } from "../src/whatsapp/store.js";
 import { Store } from "../src/store/db.js";
 import { MemoryReplica } from "../src/shared/replica.js";
 import { findPerson, personKnowledge } from "../src/whatsapp/knowledge.js";
+import { people } from "../src/whatsapp/people.js";
 import { addressRule, newContactRule } from "../src/whatsapp/pool.js";
 
 const cleanup: (() => void)[] = [];
@@ -318,6 +319,19 @@ describe("terms of address", () => {
     drafter.saveBook({ version: 1, builtAt: 1, model: "m", owner: { stats: chatStats(chatA) }, contacts: [{ chatId: A, name: "Arun", isGroup: false, stats: chatStats(chatA), card: card(), examples: [], lastTs: 1 }], graph: buildGraph([], new Map()) });
     wa.save([...chatA, msg(A, false, "varuviya", 9999)]);
     expect((await drafter.draft(A))?.text).toBe("seri da varen");
+  });
+
+  it("lists the people for the app: cards and counts, busiest first, no groups or messages", () => {
+    const book: StyleBook = { version: 1, builtAt: 5, model: "m", owner: { stats: chatStats(chatA) }, graph: buildGraph([], new Map()), contacts: [
+      { chatId: "g@g.us", name: "Family", isGroup: true, stats: chatStats(chatA), examples: [], lastTs: 1 },
+      { chatId: "b@s.whatsapp.net", name: "Bala", isGroup: false, stats: { ...chatStats(chatA), mine: 1, theirs: 1 }, examples: [], lastTs: 2 },
+      { chatId: A, name: "Arun", isGroup: false, stats: { ...chatStats(chatA), mine: 40, theirs: 30 }, card: card(), examples: [{ them: "secret", me: "secret" }] as never, lastTs: 3 },
+    ] };
+    const out = people(book);
+    expect(out.map((p) => p.name)).toEqual(["Arun", "Bala"]);
+    expect(out[0]).toMatchObject({ chatId: A, relationship: card().relationship, addressAs: card().addressAs, mine: 40, theirs: 30 });
+    expect(out[1]).toMatchObject({ relationship: "", addressAs: [] }); // never studied: no card yet
+    expect(JSON.stringify(out)).not.toContain("secret");
   });
 });
 
