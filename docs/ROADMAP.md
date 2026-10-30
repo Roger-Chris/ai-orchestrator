@@ -7,7 +7,7 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 
 ## Rules for every session (from the owner, still in force)
 
-- Work on branches `jarvis/next` in both repos (Roger-Chris/ai-orchestrator, Roger-Chris/AI_Assistant). Never merge to main unless the owner says so.
+- Work on `main` in both repos (Roger-Chris/ai-orchestrator, Roger-Chris/AI_Assistant). The owner dropped separate working branches on 30 Oct 2026.
 - Never delete the owner's files; never ask for delete permission again (refused once). Move to `_to_delete/` instead.
 - No Telegram or other chat transport. No WhatsApp send path: replies are drafted, the owner sends.
 - Never print or paste tokens; don't read `.env` files or secrets.
