@@ -174,3 +174,49 @@ describe("model router", () => {
     expect(r2.status).toBe(429);
   });
 });
+
+describe("AI hub (R4)", () => {
+  it("your pick for a job goes first and the rest still follow; auto gives it back", async () => {
+    const s = setup();
+    const { preferredFor } = await import("../src/server/ai-hub.js");
+    const models = new ModelRouter({ tools: () => s.tools.list(), pool: s.pool, store: s.store, node: "hub", preferred: preferredFor(s.store) });
+    s.store.setPref("route.mail", "codex");
+    const r = await models.routeFor("mail");
+    expect(r.chain).toEqual(["codex", "groq", "claude"]);
+    expect(r.reason).toContain("your pick in the app");
+    expect((await models.routeFor("mail", "medium", { override: "claude" })).chain[0]).toBe("claude"); // an explicit ask wins
+    s.store.setPref("route.mail", undefined);
+    expect((await models.routeFor("mail")).chain[0]).toBe("groq");
+  });
+
+  it("GET /api/ai-hub and PUT /api/ai-hub/prefer", async () => {
+    const s = setup({}, { tools: { overrides: { claude: { perDay: 5 }, perplexity: { spendPerDay: 1 } } } });
+    const { preferredFor } = await import("../src/server/ai-hub.js");
+    const models = new ModelRouter({ tools: () => s.tools.list(), pool: s.pool, store: s.store, node: "hub", preferred: preferredFor(s.store) });
+    const cluster = new Cluster(s.config, s.pool);
+    const router = new Router(buildCapabilities(), { localBias: 0.5, learn: false }, s.store);
+    const orchestrator = new Orchestrator(s.config, s.store, cluster, router, loadAgents(["agents"]), {});
+    const app = createApp({ config: s.config, store: s.store, pool: s.pool, cluster, router, orchestrator, publicDir: ".", tools: s.tools, models });
+    const auth = { Authorization: "Bearer secret-token", "Content-Type": "application/json" };
+    await models.run("call", { prompt: "what now?" });
+
+    const hub = await (await app.request("/api/ai-hub", { headers: auth })).json();
+    expect(hub.jobs.map((j: { kind: string }) => j.kind)).toEqual(["whatsapp_draft", "mail", "call", "brain"]);
+    expect(hub.jobs[0]).toMatchObject({ label: "WhatsApp replies", route: { chain: ["claude", "codex", "groq"] } });
+    expect(hub.today).toEqual({ calls: 1, failed: 0, spentUsd: 0 });
+    expect(hub.caps).toEqual([
+      { id: "claude", name: "Claude (Claude Code)", perDay: 5, calls: 1, spentUsd: 0 },
+      { id: "perplexity", name: "Perplexity", spendPerDay: 1, calls: 0, spentUsd: 0 },
+    ]);
+    expect(hub.week).toHaveLength(1);
+    expect(hub.tools.length).toBeGreaterThan(5);
+
+    const put = (body: unknown) => app.request("/api/ai-hub/prefer", { method: "PUT", headers: auth, body: JSON.stringify(body) });
+    expect((await put({ job: "brain", provider: "groq" })).status).toBe(200);
+    const after = await (await app.request("/api/ai-hub", { headers: auth })).json();
+    expect(after.jobs[3]).toMatchObject({ kind: "brain", preferred: "groq", route: { chain: ["groq", "codex", "claude"] } });
+    expect((await put({ job: "brain", provider: "auto" })).status).toBe(200);
+    expect(s.store.getPref("route.brain")).toBeUndefined();
+    expect((await put({ job: "nope", provider: "groq" })).status).toBe(400);
+  });
+});

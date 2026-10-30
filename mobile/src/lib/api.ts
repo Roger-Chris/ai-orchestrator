@@ -1,7 +1,8 @@
 import * as SecureStore from "expo-secure-store";
 import { WaReply } from "./wareply";
-import type { BrainAlert, Home, Insights, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
+import type { AiHub, BrainAlert, Home, Insights, JobKind, ProviderId, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
 
+export type { AiHub, JobKind, ProviderId, ToolInfo, ToolState } from "../../../src/types";
 export type { AlertAction, Attention, BrainAlert, DayTask, Decision, Home, Insights, PendingApproval, QuietChat, ReplyDraft, RunEvent, RunOptions, RunRecord, Running, StepRecord, Thread } from "../../../src/types";
 
 /** Where the hub is and how to get in. Kept in Android's encrypted storage. */
@@ -198,6 +199,10 @@ export const Api = {
   nodes: (refresh = false) => api<{ self: NodeInfo; peers: NodeInfo[] }>(refresh ? "/api/nodes/refresh" : "/api/nodes", refresh ? { body: {} } : {}),
   agents: () => api<Agent[]>("/api/agents"),
   usage: () => api<{ day: string; provider: string; node: string; calls: number; failed: number }[]>("/api/usage?days=7"),
+  /** The AI hub: every AI tool's state and use, what each job would use now, caps, the week. */
+  aiHub: (fresh = false) => api<AiHub>(`/api/ai-hub${fresh ? "?fresh=1" : ""}`, { timeoutMs: 30_000 }),
+  /** The tool to try first for a job; "auto" gives the choice back to the router. */
+  preferAi: (job: JobKind, provider: ProviderId | "auto") => api("/api/ai-hub/prefer", { method: "PUT", body: { job, provider } }),
   fcmStatus: () => api<{ enabled: boolean }>("/api/push/fcm"),
   registerFcm: (token: string) => api("/api/push/fcm", { body: { token } }),
   pushTest: () => api<{ sent: number }>("/api/push/test", { body: {} }),

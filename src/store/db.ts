@@ -30,6 +30,7 @@ export class Store implements CooldownStore, FeedbackSource {
         PRIMARY KEY (run_id, step_id)
       );
       CREATE TABLE IF NOT EXISTS cooldowns (provider TEXT PRIMARY KEY, until INTEGER NOT NULL, reason TEXT);
+      CREATE TABLE IF NOT EXISTS prefs (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS usage (
         day TEXT NOT NULL, provider TEXT NOT NULL, node TEXT NOT NULL,
         calls INTEGER NOT NULL DEFAULT 0, ok INTEGER NOT NULL DEFAULT 0,
@@ -271,6 +272,18 @@ export class Store implements CooldownStore, FeedbackSource {
            failed = failed + excluded.failed, duration_ms = duration_ms + excluded.duration_ms, cost_usd = cost_usd + excluded.cost_usd`,
       )
       .run(day, provider, node, ok ? 1 : 0, ok ? 0 : 1, Math.round(durationMs), Number.isFinite(costUsd) && costUsd > 0 ? costUsd : 0);
+  }
+
+  /** Small settings the owner changes from the app (e.g. `route.mail` -> "groq"); JSON values. */
+  getPref<T>(key: string): T | undefined {
+    const row = this.db.prepare("SELECT value FROM prefs WHERE key = ?").get(key) as { value: string } | undefined;
+    return row ? (JSON.parse(row.value) as T) : undefined;
+  }
+
+  /** `undefined` removes the setting. */
+  setPref(key: string, value: unknown) {
+    if (value === undefined) this.db.prepare("DELETE FROM prefs WHERE key = ?").run(key);
+    else this.db.prepare("INSERT OR REPLACE INTO prefs (key, value, updated_at) VALUES (?, ?, ?)").run(key, JSON.stringify(value), Date.now());
   }
 
   usage(days = 7) {

@@ -23,6 +23,7 @@ import { type AskReply, sayFor, type TalkReply } from "../voice/talk.js";
 import { TTS_PROVIDERS, type Tts, TtsError } from "../voice/tts.js";
 import type { ToolRegistry } from "../ai/tools.js";
 import { JOB_KINDS, type JobKind, type ModelRouter, RouteError, sizeOf } from "../ai/route.js";
+import { buildAiHub, setPreferred } from "./ai-hub.js";
 import type { StyleBook } from "../whatsapp/learn.js";
 import type { MemoryReplica } from "../shared/replica.js";
 import { type Ask, AskBody, askBrain, mountSharedMemory } from "./shared-memory.js";
@@ -229,6 +230,12 @@ export function createApp(d: AppDeps) {
     const override = Provider.safeParse(c.req.query("override"));
     return c.json(await d.models.routeFor(kind as JobKind | TaskKind, size, { override: override.success ? override.data : undefined }));
   });
+  // The app's AI hub screen (R4): tools, what each job would use now, caps, the week. ?fresh=1 re-detects logins.
+  app.get("/api/ai-hub", async (c) => {
+    if (!d.tools || !d.models) return c.json({ error: "the AI hub is not set up on this hub" }, 404);
+    return c.json(await buildAiHub({ tools: d.tools, models: d.models, store: d.store }, c.req.query("fresh") === "1"));
+  });
+  app.put("/api/ai-hub/prefer", async (c) => c.json(await setPreferred(c, d.store)));
   app.get("/api/usage", (c) => c.json(d.store.usage(Number(c.req.query("days") ?? 7))));
 
   // ---- home screen

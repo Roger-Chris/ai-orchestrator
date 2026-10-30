@@ -13,14 +13,9 @@
 
 import type { ProviderPool } from "../providers/registry.js";
 import type { Store } from "../store/db.js";
-import { PROVIDER_IDS, type ProviderId, type ProviderRequest, type TaskKind } from "../types.js";
-import { COST_ORDER, type ToolInfo } from "./tools.js";
+import { COST_ORDER, JOB_KINDS, type JobKind, type JobSize, PROVIDER_IDS, type ProviderId, type ProviderRequest, type Route, type TaskKind, type ToolInfo } from "../types.js";
 
-/** The hub's own jobs. */
-export const JOB_KINDS = ["whatsapp_draft", "mail", "call", "brain"] as const;
-export type JobKind = (typeof JOB_KINDS)[number];
-
-export type JobSize = "small" | "medium" | "large";
+export { JOB_KINDS, type JobKind, type JobSize, type Route } from "../types.js";
 
 /** Preferred order per job, as the owner set it before the router existed. */
 export const DEFAULT_ROUTES: Record<JobKind, ProviderId[]> = {
@@ -42,17 +37,6 @@ export function sizeOf(text: string): JobSize {
   return text.length >= LARGE_CHARS ? "large" : text.length <= SMALL_CHARS ? "small" : "medium";
 }
 
-export interface Route {
-  kind: JobKind | TaskKind;
-  size: JobSize;
-  /** Try these in order. Empty when nothing can take the job right now. */
-  chain: ProviderId[];
-  /** Tools left out and why (off, not set up, cooling, daily cap). */
-  skipped: { id: ProviderId; why: string }[];
-  /** One line on how the chain was chosen. */
-  reason: string;
-}
-
 export interface RouteOptions {
   /** A provider to use first; "auto" or undefined lets the router choose. */
   override?: "auto" | ProviderId;
@@ -68,6 +52,8 @@ export interface ModelRouterDeps {
   node: string;
   /** Config `tools.routes`: job kind -> preferred order. */
   routes?: Partial<Record<string, ProviderId[]>>;
+  /** The owner's pick per job from the app's AI hub (R4): tried first, the rest still follow. */
+  preferred?: (kind: JobKind) => ProviderId | undefined;
 }
 
 export interface RoutedResult {
@@ -131,9 +117,13 @@ export class ModelRouter {
       });
       reason = `${kind}: best capability score first${size === "small" ? ", cheaper first when close" : ""}`;
     }
+    const picked = !override && isJob(kind) ? this.d.preferred?.(kind) : undefined;
     if (override) {
       order = [override, ...order.filter((id) => id !== override)];
       reason = `${override} first (asked), then ${reason}`;
+    } else if (picked) {
+      order = [picked, ...order.filter((id) => id !== picked)];
+      reason = `${picked} first (your pick in the app), then ${reason}`;
     }
     if (size === "large" && order.includes("groq") && order[order.length - 1] !== "groq") {
       // Groq's free tier caps tokens per minute; a long prompt is likely to be refused there.

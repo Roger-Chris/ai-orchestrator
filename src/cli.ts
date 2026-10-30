@@ -43,6 +43,7 @@ import { ttsFromConfig } from "./voice/tts.js";
 import { WakeListener, wakeOptions } from "./voice/wake.js";
 import { ToolRegistry } from "./ai/tools.js";
 import { ModelRouter } from "./ai/route.js";
+import { preferredFor } from "./server/ai-hub.js";
 import { addTerms } from "./whatsapp/address.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -95,7 +96,7 @@ export function buildSystem(config: Config) {
   // Daily call and spend caps (tools.overrides perDay / spendPerDay) are enforced for every run and every spoken line.
   pool.capped = (id) => tools.capped(id);
   tts.capped = (id) => tools.capped(`tts:${id}`);
-  const models = new ModelRouter({ tools: () => tools.list(), pool, store, node: config.node.name, routes: config.tools.routes });
+  const models = new ModelRouter({ tools: () => tools.list(), pool, store, node: config.node.name, routes: config.tools.routes, preferred: preferredFor(store) });
   const gmail = new GmailReader(store, pool, {
     clientFile: resolve(config.gmail.clientFile),
     dataDir: resolve(config.dataDir),

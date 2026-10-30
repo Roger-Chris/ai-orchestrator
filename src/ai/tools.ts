@@ -10,40 +10,11 @@
 import { AGENTIC, type CapabilityMatrix } from "../brain/capabilities.js";
 import type { Config } from "../config.js";
 import type { ProviderPool } from "../providers/registry.js";
-import type { ProviderId, TaskKind } from "../types.js";
+import { COST_ORDER, type CostClass, type ProviderId, type TaskKind, type ToolInfo, type ToolState, type Usage } from "../types.js";
+
+// The shapes live in types.ts so the app can import them too.
+export { COST_ORDER, type CostClass, type ToolInfo, type ToolKind, type ToolState, type Usage } from "../types.js";
 import type { Tts, TtsProviderId } from "../voice/tts.js";
-
-/** local: runs on your own machine; free: a free tier; subscription: a plan you already pay for; paid: billed per use. */
-export type CostClass = "local" | "free" | "subscription" | "paid";
-export const COST_ORDER: CostClass[] = ["local", "free", "subscription", "paid"];
-
-/** What a tool does: agent (can work on files), chat (text in, text out), speech, transcribe, vision. */
-export type ToolKind = "agent" | "chat" | "speech" | "transcribe" | "vision";
-
-/** ready: can take work; busy: all its slots are taken; cooling: resting after a limit until `until`; limit: today's cap reached; off: disabled; not_set_up: no login or key. */
-export type ToolState = "ready" | "busy" | "cooling" | "limit" | "off" | "not_set_up";
-
-export interface ToolInfo {
-  id: string;
-  name: string;
-  kind: ToolKind;
-  cost: CostClass;
-  /** Kinds of work it is best at (score >= 8.5), best first. Empty for non-chat tools. */
-  strengths: TaskKind[];
-  /** Its score per kind of work (chat and agent tools). */
-  scores?: Partial<Record<TaskKind, number>>;
-  /** Can run tools and edit files. */
-  agentic: boolean;
-  limits: { maxConcurrent?: number; perDay?: number; spendPerDay?: number; note?: string };
-  state: ToolState;
-  /** When cooling or at its daily cap: when it can be used again. */
-  until?: number;
-  /** Slots in use / slots, 0..1+. */
-  load: number;
-  usageToday: Usage;
-  /** Why it isn't ready, or what model/version it is. */
-  detail?: string;
-}
 
 /** What each subscription costs and what its plan allows, as the owner described it (override in config `tools`). */
 const PROVIDER_FACTS: Record<ProviderId, { name: string; cost: CostClass; note: string }> = {
@@ -60,14 +31,6 @@ const TTS_FACTS: Record<TtsProviderId, { name: string; cost: CostClass; note: st
   gemini: { name: "Gemini voice", cost: "free", note: "Gemini API free tier (daily request limit), paid beyond it." },
   groq: { name: "Groq voice (Orpheus)", cost: "free", note: "Free tier, 200 characters per request." },
 };
-
-/** Calls today, failures, average time, and dollars spent (reported by the service, or estimated with costPerCall). */
-export interface Usage {
-  calls: number;
-  failed: number;
-  avgMs: number;
-  spentUsd: number;
-}
 
 export interface ToolRegistryDeps {
   config: Config;

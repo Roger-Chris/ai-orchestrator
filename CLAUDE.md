@@ -131,7 +131,7 @@ Hard-won details:
 - `src/ai/tools.ts` `ToolRegistry.list()` (`GET /api/tools`, `?fresh=1` re-detects logins): every AI the hub can use as `ToolInfo` {id, name, kind agent/chat/speech/transcribe/vision, cost local/free/subscription/paid, strengths (kinds scored >= 8.5 in the capability matrix), scores, limits {maxConcurrent, perDay, note}, state ready/busy/cooling/limit/off/not_set_up, until, load, usageToday}. Tool ids: the six providers (`local` included), `whisper:groq`, `tts:openai|gemini|groq`, and `ollama:<style.visionModel>` (Ollama `/api/tags`, cached 60 s; `ollama:<style.model>` only when it differs from the `local` provider's model).
 - Cost classes and plan notes are in `PROVIDER_FACTS`/`TTS_FACTS`; config `tools.overrides.<id>` sets `cost`, `perDay` (state `limit` until the next UTC day once today's calls reach it), `note`, `enabled: false`.
 - Usage today comes from the `usage` table (UTC day, every device that reported here). Providers were already recorded; TTS (`Tts` `onUse`) records `tts:<service>` and Groq Whisper (`GroqVoice` `onTranscribe`) records `whisper:groq`. `Store.recordUsage` takes any tool id.
-- R4 will show it in the app.
+- The shapes (`ToolInfo`, `Usage`, `Route`, `JobKind`, `AiHub`) live in `src/types.ts` so the app imports them.
 
 ## Model router (Jarvis phase 1, R2)
 
@@ -145,6 +145,12 @@ Hard-won details:
 - `local` is a ProviderId: `src/providers/local.ts` `LocalProvider` = the OpenAI-compatible provider at `<url>/v1` (Ollama ignores the key), ready only when `GET <url>/api/tags` answers and lists the model. Config `providers.local {enabled, url, model, maxConcurrent: 1}`; empty url/model fall back to `style.ollamaUrl` / `style.model`. Not agentic; low scores in `BASE_CAPABILITIES` (best: quick 6.5, writing 6), so it leads nothing and is the router's last resort for the hub's jobs (it isn't in `DEFAULT_ROUTES`, so it follows them). On the Linux hub (CPU, 8 GB) expect it to be slow; it shows `not_set_up` until a model is pulled.
 - Spend caps: `tools.overrides.<id>.spendPerDay` (USD per UTC day) and `costPerCall` (an estimate for services that don't report cost). The usage table has `cost_usd` (added to old databases on start); `recordUsage(..., costUsd)` is passed from every `ProviderResult` (`usage.costUsd`: Perplexity and Claude report it; Claude's is notional on a subscription). Spent today = max(reported, calls x costPerCall).
 - `ToolRegistry.capped(id)` (sync) gives the reason when `perDay` or `spendPerDay` is reached. cli.ts sets `pool.capped` (`ProviderPool.run` refuses with `"<id>: <reason>"`, `available()` leaves it out, so runs, drafts, Gmail, calls and the router all respect it) and `tts.capped` (skipped like a resting service; all capped: 503 and the phone speaks). The registry shows such a tool as `limit` until the next UTC day with `usageToday.spentUsd`.
+
+## AI hub (Jarvis phase 1, R4)
+
+- `GET /api/ai-hub` (`src/server/ai-hub.ts` `buildAiHub`; `?fresh=1` re-detects logins): `{tools, jobs: [{kind, label, route, preferred}], today: {calls, failed, spentUsd}, caps: [...], week: [...]}`. Jobs are previewed at size medium.
+- `PUT /api/ai-hub/prefer {job, provider | "auto"}`: the owner's pick to try first for a job, kept in the store's `prefs` table as `route.<job>` (`Store.getPref/setPref`; "auto" removes it). `ModelRouter` takes it through `preferred` (cli.ts: `preferredFor(store)`); an explicit override (a pinned config provider) still wins, and the router still falls back from the pick.
+- App: Settings -> AI hub (`mobile/src/app/ai-hub.tsx`): today and a 7-day bar row, "Who does what" (each job's chain, chips to pick Auto or a provider), caps and how close they are, every tool with state, cost class, use today and detail. Caps are set in config, not from the app.
 
 ## Talking to Jarvis (voice)
 

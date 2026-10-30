@@ -435,3 +435,74 @@ export interface Classification {
   needsWorkspace: boolean;
   scores: Partial<Record<TaskKind, number>>;
 }
+
+// ---- AI tools (Jarvis phase 1: src/ai/tools.ts, src/ai/route.ts; the app's AI hub screen)
+
+/** local: runs on your own machine; free: a free tier; subscription: a plan you already pay for; paid: billed per use. */
+export type CostClass = "local" | "free" | "subscription" | "paid";
+export const COST_ORDER: CostClass[] = ["local", "free", "subscription", "paid"];
+
+/** What a tool does: agent (can work on files), chat (text in, text out), speech, transcribe, vision. */
+export type ToolKind = "agent" | "chat" | "speech" | "transcribe" | "vision";
+
+/** ready: can take work; busy: all its slots are taken; cooling: resting after a limit until `until`; limit: today's cap reached; off: disabled; not_set_up: no login or key. */
+export type ToolState = "ready" | "busy" | "cooling" | "limit" | "off" | "not_set_up";
+
+export interface ToolInfo {
+  id: string;
+  name: string;
+  kind: ToolKind;
+  cost: CostClass;
+  /** Kinds of work it is best at (score >= 8.5), best first. Empty for non-chat tools. */
+  strengths: TaskKind[];
+  /** Its score per kind of work (chat and agent tools). */
+  scores?: Partial<Record<TaskKind, number>>;
+  /** Can run tools and edit files. */
+  agentic: boolean;
+  limits: { maxConcurrent?: number; perDay?: number; spendPerDay?: number; note?: string };
+  state: ToolState;
+  /** When cooling or at its daily cap: when it can be used again. */
+  until?: number;
+  /** Slots in use / slots, 0..1+. */
+  load: number;
+  usageToday: Usage;
+  /** Why it isn't ready, or what model/version it is. */
+  detail?: string;
+}
+
+/** Calls today, failures, average time, and dollars spent (reported by the service, or estimated with costPerCall). */
+export interface Usage {
+  calls: number;
+  failed: number;
+  avgMs: number;
+  spentUsd: number;
+}
+
+/** The hub's own jobs the model router chooses for. */
+export const JOB_KINDS = ["whatsapp_draft", "mail", "call", "brain"] as const;
+export type JobKind = (typeof JOB_KINDS)[number];
+
+export type JobSize = "small" | "medium" | "large";
+
+export interface Route {
+  kind: JobKind | TaskKind;
+  size: JobSize;
+  /** Try these in order. Empty when nothing can take the job right now. */
+  chain: ProviderId[];
+  /** Tools left out and why (off, not set up, cooling, daily cap). */
+  skipped: { id: ProviderId; why: string }[];
+  /** One line on how the chain was chosen. */
+  reason: string;
+}
+
+/** GET /api/ai-hub: everything the app's AI hub screen shows. */
+export interface AiHub {
+  tools: ToolInfo[];
+  /** Each job with the chain it would use now and the owner's pick (from the app), if any. */
+  jobs: { kind: JobKind; label: string; route: Route; preferred?: ProviderId }[];
+  today: { calls: number; failed: number; spentUsd: number };
+  /** Tools with a daily call or spend cap, and how close they are. */
+  caps: { id: string; name: string; perDay?: number; spendPerDay?: number; calls: number; spentUsd: number; reached?: string }[];
+  /** Calls and spend per day for the last 7 days (all tools). */
+  week: { day: string; calls: number; failed: number; spentUsd: number }[];
+}

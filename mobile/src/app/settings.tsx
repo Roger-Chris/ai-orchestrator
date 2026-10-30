@@ -109,6 +109,9 @@ export default function Settings() {
           <Button title="WhatsApp chats" onPress={() => router.push("/wa-chats")} />
         </Row>
         <Row>
+          <Button title="AI hub" onPress={() => router.push("/ai-hub" as never)} />
+        </Row>
+        <Row>
           <Button
             title="Send today's brief now"
             busy={busy === "brief"}
