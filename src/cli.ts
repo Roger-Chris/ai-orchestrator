@@ -44,6 +44,9 @@ import { WakeListener, wakeOptions } from "./voice/wake.js";
 import { ToolRegistry } from "./ai/tools.js";
 import { ModelRouter } from "./ai/route.js";
 import { BuildDesk } from "./builds/desk.js";
+import { FileClient } from "./files/client.js";
+import { PhoneDesk } from "./phone/desk.js";
+import { FileIndex } from "./files/index.js";
 import { PreviewMaker } from "./builds/preview.js";
 import { previewer } from "./server/builds.js";
 import { preferredFor } from "./server/ai-hub.js";
@@ -149,7 +152,17 @@ export function buildSystem(config: Config) {
     setup,
     task: (taskId) => store.tasksFor(localDay()).find((t) => t.id === `brain:${taskId}`),
   });
-  const actions = buildActions(config, { store, pool, replica, cluster, notifier });
+  // D2: the hub (no sharedMemory.hub) keeps every device's file list; the others send theirs to it.
+  const fileIndex = config.sharedMemory.hub ? undefined : new FileIndex(store.db);
+  const files = new FileClient({ config, index: fileIndex, replica, peers: () => cluster.list() });
+  const actions = buildActions(config, {
+    store,
+    pool,
+    replica,
+    cluster,
+    notifier,
+    extra: { files: { search: (q, o) => files.search(q, o), reindex: () => files.reindex() }, sendFile: (n, p, b) => files.sendFile(n, p, b) },
+  });
   // Phase 2: apps built on command; a ready build gets a preview on this hub.
   let preview: ReturnType<typeof previewer> | undefined;
   const builds = new BuildDesk({
@@ -161,7 +174,7 @@ export function buildSystem(config: Config) {
     node: config.node.name,
   });
   preview = previewer(builds, new PreviewMaker({ dataDir: resolve(config.dataDir), remote: config.branches.remote, timeoutMs: config.builds.previewTimeoutMinutes * 60_000 }));
-  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts, tools, models, builds, preview };
+  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts, tools, models, builds, preview, fileIndex, files, phone: new PhoneDesk(store, config, (p) => void notifier.notify(p)) };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */
@@ -203,6 +216,7 @@ async function cmdServe(config: Config) {
   sys.gmail.start(config.gmail.pollMinutes);
   sys.assistant?.start();
   sys.replica?.start(config.sharedMemory.pollSeconds);
+  if (config.actions.enabled) sys.files.start();
   // "Hey Jarvis" on this computer's microphone, when turned on for this device.
   if (config.wake.enabled) void new WakeListener(wakeOptions(config, ROOT)).start().then((code) => console.warn(`! the wake word listener stopped (exit ${code}); run \`orc wake\` to see why`));
 

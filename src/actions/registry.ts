@@ -7,6 +7,7 @@ import { runProcess } from "../providers/base.js";
 import type { ProviderPool } from "../providers/registry.js";
 import type { MemoryReplica } from "../shared/replica.js";
 import type { ProviderId } from "../types.js";
+import { DESKTOP_ACTIONS } from "./desktop.js";
 
 /**
  * What the assistant can do on a device (AI_Assistant docs/JARVIS.md, "Hands").
@@ -29,6 +30,13 @@ export interface ActionContext {
   signal?: AbortSignal;
   /** For tests: the clock used in backup names. */
   now?: () => Date;
+  /** The file index of every device (D2): searched on the hub, re-indexing sends this device's list there. */
+  files?: {
+    search(q: string, opts: { node?: string; ext?: string; limit?: number }): Promise<{ node: string; path: string; name: string; size: number; mtime: number }[]>;
+    reindex(): Promise<{ files: number; roots: string[]; truncated: boolean }>;
+  };
+  /** Sends a file to another device's assistant folder; returns where it was written there (D2). */
+  sendFile?: (node: string, relPath: string, bytes: Buffer) => Promise<string>;
 }
 
 export interface ActionResult {
@@ -117,7 +125,7 @@ const SHELL_META = /[;&|<>`$\n\r(){}@]/;
 
 /** A command runs without asking only when it is on the safe list and chains nothing else. */
 export function shellRisk(command: string, config: Config): Risk {
-  const c = command.trim();
+  const c = (command ?? "").trim();
   if (/\b(password|passwd|runas|sudo|ssh-keygen)\b/i.test(c)) return "never";
   if (SHELL_META.test(c)) return "ask";
   const safe = config.actions.safeCommands.some((s) => c === s || c.startsWith(`${s} `));
@@ -388,6 +396,9 @@ export const ACTIONS: ActionDef[] = [
     },
   }),
 ];
+
+// Phase 3: desktop control and files across devices (./desktop.ts).
+ACTIONS.push(...DESKTOP_ACTIONS);
 
 export const ACTION_NAMES = ACTIONS.map((a) => a.name);
 

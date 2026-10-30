@@ -114,6 +114,13 @@ const ConfigSchema = z.object({
       overrides: z.record(z.string(), z.record(z.string(), z.number().min(0).max(10))).prefault({}),
     })
     .prefault({}),
+  /** The file index (src/files): every device sends its list of files in actions.roots to the hub this often. 0: only when asked. */
+  files: z
+    .object({
+      indexHours: z.number().min(0).max(168).default(6),
+      maxFiles: z.number().int().min(1000).max(2_000_000).default(200_000),
+    })
+    .prefault({}),
   /** Building apps on command (src/builds): previews are made on the hub when a build is ready. */
   builds: z
     .object({
@@ -204,6 +211,15 @@ const ConfigSchema = z.object({
       safe: z.array(z.string()).default([]),
       /** Action names that are always refused on this device. */
       never: z.array(z.string()).default([]),
+      /** Biggest file `files.send` copies to another device, in MB. */
+      sendMaxMB: z.number().min(1).max(2048).default(200),
+      /**
+       * A computer-use agent for programs with no command line (`gui.task`, always asks), e.g.
+       * { command: "uvx", args: ["my-computer-use-agent", "--task", "{goal}"] }. Empty: not set up.
+       */
+      computerUse: z
+        .object({ command: z.string().default(""), args: z.array(z.string()).default([]), timeoutMinutes: z.number().min(1).max(120).default(15) })
+        .prefault({}),
       approvalMinutes: z.number().min(1).default(30),
       timeoutSeconds: z.number().min(5).default(120),
       outputChars: z.number().min(500).default(20_000),

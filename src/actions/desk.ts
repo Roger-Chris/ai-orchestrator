@@ -48,7 +48,7 @@ export type ApprovalCheck = (id: string, action: string, hash: string, node: str
 export class ActionRunner {
   constructor(
     private config: Config,
-    private deps: { pool?: ProviderPool; replica?: MemoryReplica; check?: ApprovalCheck },
+    private deps: { pool?: ProviderPool; replica?: MemoryReplica; check?: ApprovalCheck; extra?: Pick<ActionContext, "files" | "sendFile"> },
   ) {}
 
   get node() {
@@ -60,7 +60,7 @@ export class ActionRunner {
   }
 
   private ctx(signal?: AbortSignal): ActionContext {
-    return { config: this.config, pool: this.deps.pool, replica: this.deps.replica, signal };
+    return { config: this.config, pool: this.deps.pool, replica: this.deps.replica, signal, ...this.deps.extra };
   }
 
   async act(req: ActRequest, signal?: AbortSignal): Promise<ActResponse> {

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The Orchestrator node on the Mac mini, as a LaunchAgent (runs while you are logged in, so the
+     claude / codex / agy CLIs see your logins and screenshots can see the screen). install.sh fills @…@. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>dev.rogerchris.orchestrator</string>
+  <key>WorkingDirectory</key><string>@REPO@</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@REPO@/node_modules/.bin/tsx</string>
+    <string>src/cli.ts</string>
+    <string>serve</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>@PATH@</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>@LOGS@/orchestrator.log</string>
+  <key>StandardErrorPath</key><string>@LOGS@/orchestrator.log</string>
+</dict>
+</plist>

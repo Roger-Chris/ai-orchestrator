@@ -22,6 +22,10 @@ export interface NodeInfo {
   providers: NodeProviderInfo[];
   /** Takes coding steps on git branches (node.acceptBranchWork). */
   branchWork?: boolean;
+  /** win32 / darwin / linux, so the app can tell the Mac mini from the laptop (D4). */
+  platform?: string;
+  /** Device actions are on (actions.enabled). */
+  actions?: boolean;
 }
 
 export interface PeerState extends NodeInfo {
@@ -67,6 +71,8 @@ export class Cluster {
       name: this.name,
       version: VERSION,
       branchWork: this.config.node.acceptBranchWork,
+      platform: process.platform,
+      actions: this.config.actions.enabled,
       providers: status.map((s) => ({
         id: s.id,
         ready: s.installed && s.authenticated && !s.coolingDownUntil,

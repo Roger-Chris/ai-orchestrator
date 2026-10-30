@@ -1,8 +1,8 @@
 import * as SecureStore from "expo-secure-store";
 import { WaReply } from "./wareply";
-import type { AiHub, Build, BrainAlert, Home, Insights, JobKind, ProviderId, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
+import type { AiHub, Build, BrainAlert, PhoneAction, Home, Insights, JobKind, ProviderId, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
 
-export type { AiHub, Build, BuildBranch, JobKind, ProviderId, ToolInfo, ToolState } from "../../../src/types";
+export type { AiHub, Build, BuildBranch, PhoneAction, JobKind, ProviderId, ToolInfo, ToolState } from "../../../src/types";
 export type { AlertAction, Attention, BrainAlert, DayTask, Decision, Home, Insights, PendingApproval, QuietChat, ReplyDraft, RunEvent, RunOptions, RunRecord, Running, StepRecord, Thread } from "../../../src/types";
 
 /** Where the hub is and how to get in. Kept in Android's encrypted storage. */
@@ -69,6 +69,8 @@ export interface NodeInfo {
   branchWork?: boolean;
   online?: boolean;
   via?: string;
+  platform?: string;
+  actions?: boolean;
 }
 
 export interface Agent {
@@ -199,6 +201,16 @@ export const Api = {
   nodes: (refresh = false) => api<{ self: NodeInfo; peers: NodeInfo[] }>(refresh ? "/api/nodes/refresh" : "/api/nodes", refresh ? { body: {} } : {}),
   agents: () => api<Agent[]>("/api/agents"),
   usage: () => api<{ day: string; provider: string; node: string; calls: number; failed: number }[]>("/api/usage?days=7"),
+  // ---- devices (phase 3): their files, and actions run on them
+  fileNodes: () => api<{ node: string; files: number; roots: string[]; indexedAt: number; truncated: boolean }[]>("/api/files/nodes"),
+  findFiles: (text: string, node?: string) => api<{ node: string; path: string; name: string; size: number; mtime: number }[]>(`/api/files/search?${q({ q: text, node, limit: 40 })}`),
+  /** Runs an action on a device; risky ones come back `pending` and wait for Approve on Home. */
+  act: (node: string, action: string, args: Record<string, unknown> = {}, reason?: string) =>
+    api<{ status: "done" | "pending" | "refused"; result?: { ok: boolean; output: string }; error?: string }>("/api/act", { body: { node, action, args, reason }, timeoutMs: 120_000 }),
+  // ---- the phone's to-do from the assistant (alarms, reminders, apps, files; calls and texts drafted)
+  phoneActions: () => api<PhoneAction[]>("/api/phone/actions"),
+  phoneDone: (id: string) => api(`/api/phone/actions/${id}/done`, { body: {} }),
+  phoneDismiss: (id: string) => api(`/api/phone/actions/${id}/dismiss`, { body: {} }),
   // ---- builds (apps built on command)
   builds: () => api<Build[]>("/api/builds?limit=40"),
   build: (id: string) => api<Build>(`/api/builds/${id}`),

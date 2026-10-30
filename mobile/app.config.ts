@@ -23,7 +23,8 @@ const config: ExpoConfig = {
     },
     ...(firebase ? { googleServicesFile: "./google-services.json" } : {}),
     // Lets the app show Android's "always run in background?" dialog, so notifications arrive while it's closed.
-    permissions: ["android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"],
+    // SET_ALARM: the Phone screen sets an alarm in the clock app when you tap Do it (Jarvis D3).
+    permissions: ["android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS", "com.android.alarm.permission.SET_ALARM"],
     predictiveBackGestureEnabled: false,
   },
   plugins: [

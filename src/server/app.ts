@@ -25,6 +25,11 @@ import type { ToolRegistry } from "../ai/tools.js";
 import { JOB_KINDS, type JobKind, type ModelRouter, RouteError, sizeOf } from "../ai/route.js";
 import { buildAiHub, setPreferred } from "./ai-hub.js";
 import { mountBuilds } from "./builds.js";
+import { mountFiles } from "./files.js";
+import { mountPhone } from "./phone.js";
+import type { PhoneDesk } from "../phone/desk.js";
+import type { FileClient } from "../files/client.js";
+import type { FileIndex } from "../files/index.js";
 import type { BuildDesk } from "../builds/desk.js";
 import type { Build } from "../types.js";
 import type { StyleBook } from "../whatsapp/learn.js";
@@ -62,6 +67,11 @@ export interface AppDeps {
   /** Builds of apps on command (phase 2) and their previews. */
   builds?: BuildDesk;
   preview?: (b: Build) => Promise<void>;
+  /** The file index of every device (on the hub) and this device's side of it (D2). */
+  fileIndex?: FileIndex;
+  files?: FileClient;
+  /** Things to do on the phone, waiting for the owner's tap (D3). */
+  phone?: PhoneDesk;
   /** This device's copy of the shared memory pool; absent when sharedMemory.enabled is false. */
   replica?: MemoryReplica;
   /** How /node/memory/* reaches the brain; tests pass a fake. */
@@ -204,6 +214,8 @@ export function createApp(d: AppDeps) {
   mountActions(app, d);
   mountBrain(app, d);
   mountBuilds(app, d);
+  mountFiles(app, d);
+  mountPhone(app, d);
 
   // ---- providers & devices
   app.get("/api/providers", async (c) => c.json(await d.pool.status(c.req.query("refresh") === "1")));

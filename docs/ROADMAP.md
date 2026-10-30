@@ -40,10 +40,10 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 - [x] B4 App Builds screen.
 
 ### Phase 3: device control
-- [ ] D1 Desktop: open/focus/close apps, screenshot on request, computer-use model for GUI-only apps (ask level).
-- [ ] D2 File index of every device in shared memory; cross-device search; copy between devices (ask level).
-- [ ] D3 Android helper: accessibility + notification access; open apps, alarms, reminders, share files; calls/messages drafted only.
-- [ ] D4 Mac mini node. App Devices screen.
+- [x] D1 Desktop: open/focus/close apps, screenshot on request, computer-use model for GUI-only apps (ask level).
+- [x] D2 File index of every device in shared memory; cross-device search; copy between devices (ask level).
+- [x] D3 Android helper: accessibility + notification access; open apps, alarms, reminders, share files; calls/messages drafted only.
+- [x] D4 Mac mini node. App Devices screen.
 
 ### Phase 4: outside paid agents
 - [ ] A1 Per-agent tokens, scopes (devices, folders, risk ceiling), MCP over HTTP.
@@ -61,6 +61,7 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 - 2026-10-30 (scheduled run): R3 `local` provider (Ollama's OpenAI API, `providers.local`, defaults to `style.ollamaUrl`/`style.model`, last resort in the router, low capability scores) and spend caps (`tools.overrides.<id>.spendPerDay`/`costPerCall`, usage `cost_usd` column, `pool.capped` and `tts.capped` enforce `perDay` and spend caps everywhere). App: only the `local` label/colour (needs the APK rebuild that is already on the list).
 - 2026-10-30 (scheduled run): R4 `GET /api/ai-hub` (tools, each job's chain now, today, caps, 7 days) + `PUT /api/ai-hub/prefer` (owner's first pick per job, `prefs` table, router honours it) and the app's Settings → AI hub screen. Typechecked, not seen on a phone (needs the APK).
 - 2026-10-30 (owner asked for phases 2-4 now): B1-B4 builds: `src/builds` (BuildDesk over branch runs with tests and a second model's review, `builds` table), previews on the hub (`/p/<key>/` web, `/p/<key>/app.apk`), merge on the owner's tap, every build in shared memory (`project:<app>`, `work:build-<id>`) and "continue the X app" (here or from memory), brain tool `build`, app Settings → Builds. Deploy is not built (no target named); a preview is the check before Merge.
+- 2026-10-30 (owner asked for phases 2-4 now): D1-D4 device control: desktop actions (`apps.focus`, `apps.close` ask, `screen.shot` ask, `gui.task` ask through a configured computer-use agent), the file index of every device on the hub (+ summary in shared memory), cross-device search and `files.send` (ask, never replaces), phone actions on the app's Phone screen (alarm, reminder, open app, file; calls/texts only opened, never dialled or sent), Devices tab with OS, files, Screenshot, Re-index; `deploy/mac/install.sh` for the Mac mini. D3's accessibility service and general notification access are NOT built (native code that has to be built and tested on the phone); gui.task needs a computer-use agent configured. Not tried on real desktops from the cloud.
 
 ## Owner to-do
 - Rebuild and install the APK (`npm run build:apk` in mobile/ on the laptop, or the GitHub Actions build): V4 Settings → Voice, V5 "Hey Jarvis" and R4 Settings → AI hub are in the app (JS only, no new native packages since V2-V3's build).
@@ -69,3 +70,6 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 - Optional: `PLANNER_MODEL=auto` (with `PLANNER_BASE_URL=hub`) in the brain's `.env` lets the hub's router pick ChatGPT / Claude / Gemini / Groq for the brain's thinking and fall back between them; `codex` keeps it on ChatGPT as now. Restart the brain after the change.
 - Spend caps are off until you set them: e.g. in `orchestrator.config.yaml` `tools: { overrides: { perplexity: { spendPerDay: 0.5 }, "tts:openai": { costPerCall: 0.002, spendPerDay: 0.2 } } }`. A local model needs `ollama pull qwen3:8b` (or set `providers.local.model`) on a machine that has Ollama; `providers.local.enabled: false` turns it off.
 - Push: the 30 Oct run could not reach the laptop. Both repos' `jarvis/next` commits since GitHub's heads are in the claude.ai project under `claude/unpushed/` as base64 git bundles; the next run with the laptop connected pushes them (or: decode, `git fetch <bundle> jarvis/next`, push).
+- Mac mini: clone ai-orchestrator, then `HUB=http://100.104.185.17:4317 deploy/mac/install.sh`; copy `ORC_TOKEN` into its .env; allow Screen Recording (and Accessibility for apps.close) for node in System Settings; set `actions.roots`.
+- Desktop GUI automation (`gui.task`): pick a computer-use agent you trust and set `actions.computerUse.command`/`args` (with `{goal}`); until then it says it is not set up.
+- After the APK rebuild, Settings → Phone: the first alarm may ask which clock app to use.

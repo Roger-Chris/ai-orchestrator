@@ -4,12 +4,13 @@ import type { ProviderPool } from "../providers/registry.js";
 import type { Notifier } from "../server/push.js";
 import type { MemoryReplica } from "../shared/replica.js";
 import type { Store } from "../store/db.js";
+import type { ActionContext } from "./registry.js";
 import { ActionHub, type ActRequest, type ActResponse, ActionRunner, type ApprovalCheck, ApprovalDesk } from "./desk.js";
 
 /** Actions on this device, approvals kept here, and calls to peers over the tailnet. */
 export function buildActions(
   config: Config,
-  d: { store: Store; pool?: ProviderPool; replica?: MemoryReplica; cluster?: Cluster; notifier?: Notifier; fetchFn?: typeof fetch },
+  d: { store: Store; pool?: ProviderPool; replica?: MemoryReplica; cluster?: Cluster; notifier?: Notifier; fetchFn?: typeof fetch; extra?: Pick<ActionContext, "files" | "sendFile"> },
 ): ActionHub {
   const fetchFn = d.fetchFn ?? fetch;
   const headers = { "Content-Type": "application/json", ...(config.server.token ? { Authorization: `Bearer ${config.server.token}` } : {}) };
@@ -29,7 +30,7 @@ export function buildActions(
     });
     return res.ok && ((await res.json()) as { valid: boolean }).valid === true;
   };
-  const runner = new ActionRunner(config, { pool: d.pool, replica: d.replica, check });
+  const runner = new ActionRunner(config, { pool: d.pool, replica: d.replica, check, extra: d.extra });
   const peer = async (node: string, req: ActRequest): Promise<ActResponse> => {
     const p = d.cluster?.list().find((x) => x.name === node);
     if (!p) return { status: "refused", node, action: req.action, error: `device ${node} is not known (is \`orc serve\` running there?)` };

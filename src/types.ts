@@ -544,3 +544,26 @@ export interface Build {
   createdAt: number;
   updatedAt: number;
 }
+
+// ---- The phone (Jarvis D3: src/phone; the app's Phone screen)
+
+export type PhoneActionSpec =
+  | { kind: "alarm"; hour: number; minute: number; label?: string }
+  | { kind: "reminder"; at: string; text: string }
+  | { kind: "open_app"; app: string; package?: string }
+  | { kind: "call"; number: string; name?: string }
+  | { kind: "sms"; number: string; text: string; name?: string }
+  | { kind: "file"; path: string };
+
+export interface PhoneAction {
+  id: string;
+  action: PhoneActionSpec;
+  /** One line the owner reads. */
+  summary: string;
+  reason?: string;
+  status: "pending" | "done" | "dismissed" | "expired";
+  /** For a file: the key of its download link (/f/<key>). */
+  fileKey?: string;
+  createdAt: number;
+  closedAt?: number;
+}
