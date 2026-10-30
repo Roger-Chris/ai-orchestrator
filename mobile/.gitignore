@@ -48,3 +48,6 @@ yarn-error.*
 
 # Local build log
 build.log
+
+# Gradle output of local modules (their source in modules/<name>/android stays tracked)
+modules/*/android/build/
