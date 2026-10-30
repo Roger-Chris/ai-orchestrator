@@ -98,6 +98,20 @@ describe("Work: people, tasks and WhatsApp", () => {
     expect(await work.onMessages([{ ...msg(false, "done"), isGroup: true, chatId: "g@g.us" }, { ...msg(false, "done"), chatId: "other@s.whatsapp.net" }])).toEqual([]);
   });
 
+  it("a hidden-id chat gets its phone number from the link, so WhatsApp opens that chat", () => {
+    const { work, wa } = setup();
+    const LID = "123456789012345@lid";
+    wa.save([{ ...msg(false, "hi"), chatId: LID }]);
+    const p = work.addPerson({ name: "Varun", chatId: LID });
+    const t = work.addTask({ personId: p.id, title: "Send the deck" })!;
+    expect(work.message(t.id)!.phone).toBeUndefined(); // before: only the share menu
+    expect(wa.setPhones({ [LID]: "919812345678", "999@lid": "919800000000", [`${LID}x`]: "not-a-number" })).toBe(1); // unknown chats and bad numbers skipped
+    expect(work.message(t.id)!.phone).toBe("919812345678");
+    wa.save([{ ...msg(false, "again"), chatId: "555@lid", chatPhone: "919811111111" }]); // a live message carries it too
+    expect(wa.phone("555@lid")).toBe("919811111111");
+    expect(wa.phone(ARUN)).toBe("919876543210");
+  });
+
   it("reads plain replies in English and Tanglish", () => {
     expect(statusFromWords("Done da")).toBe("done");
     expect(statusFromWords("can't come today, stuck at college")).toBe("blocked");

@@ -25,7 +25,6 @@ export interface WorkDeskDeps {
   now?: () => number;
 }
 
-const phoneOf = (chatId?: string) => (chatId?.endsWith("@s.whatsapp.net") ? chatId.split("@")[0] : undefined);
 const id = () => randomBytes(6).toString("hex");
 const said = (m: WaMessage) => (m.transcript || m.text || "").trim();
 
@@ -95,7 +94,7 @@ export class WorkDesk {
           lastTs: last?.ts,
           last: last ? said(last).slice(0, 120) : undefined,
           lastFromMe: last?.fromMe,
-          phone: phoneOf(p.chatId),
+          phone: p.chatId ? this.d.wa.phone(p.chatId) : undefined,
         };
       })
       .sort((a, b) => b.overdue - a.overdue || b.open - a.open || (b.lastTs ?? 0) - (a.lastTs ?? 0));
@@ -115,7 +114,7 @@ export class WorkDesk {
       .chats()
       .filter((c) => !c.isGroup && (!needle || `${c.name ?? ""} ${c.id}`.toLowerCase().includes(needle)))
       .slice(0, 40)
-      .map((c) => ({ chatId: c.id, name: c.name || phoneOf(c.id) || c.id, phone: phoneOf(c.id) }));
+      .map((c) => ({ chatId: c.id, name: c.name || this.d.wa.phone(c.id) || c.id, phone: this.d.wa.phone(c.id) }));
   }
 
   // ---------------------------------------------------------------- tasks
@@ -167,7 +166,7 @@ export class WorkDesk {
     if (!t || !p) return undefined;
     const due = t.due ? ` by ${t.due.replace("T", " ")}` : "";
     const first = p.name.split(/\s+/)[0];
-    return { text: `Hi ${first}, can you ${t.title.charAt(0).toLowerCase()}${t.title.slice(1)}${due}?${t.details ? `\n${t.details}` : ""}`, phone: phoneOf(p.chatId) };
+    return { text: `Hi ${first}, can you ${t.title.charAt(0).toLowerCase()}${t.title.slice(1)}${due}?${t.details ? `\n${t.details}` : ""}`, phone: p.chatId ? this.d.wa.phone(p.chatId) : undefined };
   }
 
   overdue(t: WorkTask, now = this.now()): boolean {

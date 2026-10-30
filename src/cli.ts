@@ -459,6 +459,17 @@ async function cmdWhatsApp(config: Config, sub = "status") {
   await link.start();
   console.log("Keep this running while history arrives (Ctrl+C to stop; run it again any time to catch up).");
   linked = link;
+  // The hub needs hidden-id chats' numbers so "Send in WhatsApp" opens the chat, not a share menu.
+  const sendPhones = async () => {
+    const phones = link.phones();
+    if (!Object.keys(phones).length) return;
+    for (const base of [hubUrl(config), localHub(config)]) {
+      const r = await hubCall(config, "POST", "/api/whatsapp/phones", { phones }, base).catch(() => undefined);
+      if (r) return console.log(`${Object.keys(phones).length} hidden-id chats' numbers sent to ${base} (${r.updated} new).`);
+    }
+  };
+  setTimeout(() => void sendPhones(), 20_000).unref();
+  setInterval(() => void sendPhones(), 6 * 3600_000).unref();
   const timer = setInterval(show, 60_000);
   process.once("SIGINT", () => {
     clearInterval(timer);

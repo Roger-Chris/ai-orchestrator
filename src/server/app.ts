@@ -330,6 +330,7 @@ export function createApp(d: AppDeps) {
     transcript: z.string().optional(),
     quoted: z.string().optional(),
     ts: z.number(),
+    chatPhone: z.string().regex(/^\d{6,15}$/).optional(),
   });
   app.post("/api/whatsapp/messages", async (c) => {
     if (!d.drafter) return noDrafter(c);
@@ -338,6 +339,12 @@ export function createApp(d: AppDeps) {
     // a live message with one of your Work people can move their task on (in the background)
     if (body.live && d.work) void d.work.onMessages(body.messages).catch(() => undefined);
     return c.json(out);
+  });
+  // Hidden-id chats' phone numbers, which the link learns from WhatsApp: "Send in WhatsApp" then opens that chat.
+  app.post("/api/whatsapp/phones", async (c) => {
+    if (!d.drafter) return noDrafter(c);
+    const pairs = z.record(z.string().regex(/@lid$/), z.string().regex(/^\d{6,15}$/)).parse((await c.req.json()).phones ?? {});
+    return c.json({ updated: d.drafter.wa.setPhones(pairs) });
   });
   app.get("/api/whatsapp/drafts", (c) => (d.drafter ? c.json(d.drafter.drafts()) : noDrafter(c)));
   // A chat that went quiet after your message: hide it from Home until it moves again.

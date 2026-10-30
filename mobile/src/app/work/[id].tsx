@@ -1,9 +1,10 @@
 import { Stack, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useState } from "react";
-import { KeyboardAvoidingView, Linking, Pressable, RefreshControl, ScrollView, Share, Text, View } from "react-native";
+import { KeyboardAvoidingView, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { Button, Card, Chip, ErrorText, Field, Muted, Row } from "../../components/ui";
 import { Api, type WorkStatus, type WorkTask } from "../../lib/api";
 import { type Colors, useColors } from "../../lib/theme";
+import { openWhatsApp } from "../../lib/whatsapp";
 
 type Page = Awaited<ReturnType<typeof Api.workPerson>>;
 
@@ -60,8 +61,7 @@ export default function WorkPerson() {
   const give = (t: WorkTask) =>
     run(async () => {
       const m = await Api.workMessage(t.id);
-      if (m.phone) await Linking.openURL(`https://wa.me/${m.phone}?text=${encodeURIComponent(m.text)}`);
-      else await Share.share({ message: m.text });
+      await openWhatsApp(m.text, m.phone);
     });
 
   const chat = page?.chat ?? [];

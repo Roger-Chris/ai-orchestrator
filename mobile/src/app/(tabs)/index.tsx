@@ -1,10 +1,11 @@
 import { router, useFocusEffect } from "expo-router";
 import { type ReactNode, useCallback, useState } from "react";
-import { ActivityIndicator, KeyboardAvoidingView, Linking, Pressable, RefreshControl, ScrollView, Share, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Linking, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ErrorText } from "../../components/ui";
 import { type AlertAction, Api, type Attention, type BrainAlert, type DayTask, type Decision, type Home as HomeData, type HomeBuild, hubUrl, type PendingApproval, type QuietChat, type ReplyDraft, type Running, Unauthorized } from "../../lib/api";
 import { useColors } from "../../lib/theme";
+import { openWhatsApp } from "../../lib/whatsapp";
 
 function ago(ts: number): string {
   const m = Math.round((Date.now() - ts) / 60_000);
@@ -264,8 +265,7 @@ function ReplyRow({ r, first, onDone }: { r: ReplyDraft; first: boolean; onDone:
   };
   const send = () =>
     act(async () => {
-      if (r.phone) await Linking.openURL(`https://wa.me/${r.phone}?text=${encodeURIComponent(text)}`);
-      else await Share.share({ message: text });
+      await openWhatsApp(text, r.phone);
       await Api.closeDraft(r.id, "sent");
     });
   return (

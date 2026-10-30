@@ -19,6 +19,8 @@ export interface WaMessage {
   /** The message this one replied to, a few words of it. */
   quoted?: string;
   ts: number;
+  /** For a chat under a hidden id (…@lid): their phone number (digits), when WhatsApp told the link. */
+  chatPhone?: string;
 }
 
 export interface WaChat {
@@ -42,6 +44,23 @@ export class WaStore {
       );
       CREATE INDEX IF NOT EXISTS wa_messages_chat ON wa_messages(chat_id, ts);
     `);
+    // The phone number behind a hidden-id chat, so "Send in WhatsApp" can open that chat (wa.me needs a number).
+    const cols = store.db.prepare("PRAGMA table_info(wa_chats)").all() as { name: string }[];
+    if (!cols.some((c) => c.name === "phone")) store.db.exec("ALTER TABLE wa_chats ADD COLUMN phone TEXT");
+  }
+
+  /** The chat's phone number (digits): from its id when it is one, else what the link learnt for a hidden id. */
+  phone(chatId: string): string | undefined {
+    if (chatId.endsWith("@s.whatsapp.net")) return chatId.split("@")[0];
+    return (this.store.db.prepare("SELECT phone FROM wa_chats WHERE id = ?").get(chatId) as { phone?: string } | undefined)?.phone ?? undefined;
+  }
+
+  /** Hidden id → phone number pairs from the link; only chats that are stored get one. Returns how many changed. */
+  setPhones(pairs: Record<string, string>): number {
+    const set = this.store.db.prepare("UPDATE wa_chats SET phone = ? WHERE id = ? AND (phone IS NULL OR phone <> ?)");
+    let n = 0;
+    for (const [lid, phone] of Object.entries(pairs)) if (/^\d{6,15}$/.test(phone)) n += Number(set.run(phone, lid, phone).changes);
+    return n;
   }
 
   /** Saves new messages; a message seen again keeps its transcript and fills in a media path it lacked. */
@@ -57,6 +76,7 @@ export class WaStore {
     for (const m of messages) {
       if (m.chatName) this.nameChat(m.chatId, m.chatName, m.isGroup);
       else this.store.db.prepare("INSERT OR IGNORE INTO wa_chats (id, is_group) VALUES (?, ?)").run(m.chatId, m.isGroup ? 1 : 0);
+      if (m.chatPhone) this.setPhones({ [m.chatId]: m.chatPhone });
       if (!known.get(m.id)) added++;
       insert.run(
         m.id,

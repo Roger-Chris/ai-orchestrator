@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import makeWASocket, { DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, jidNormalizedUser, useMultiFileAuthState, type WAMessage } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
@@ -115,6 +115,7 @@ export class WhatsAppLink {
   async start(): Promise<void> {
     const authDir = join(this.opts.dataDir, "whatsapp", "auth");
     mkdirSync(authDir, { recursive: true });
+    this.loadLidMappings(authDir);
     mkdirSync(join(this.opts.dataDir, "whatsapp", "voice"), { recursive: true });
     mkdirSync(join(this.opts.dataDir, "whatsapp", "images"), { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
@@ -272,6 +273,31 @@ export class WhatsAppLink {
     this.pnToLid.set(pn, lid);
   }
 
+  /**
+   * Baileys keeps every hidden id it has learnt in the sign-in folder (lid-mapping-<lid>_reverse.json
+   * holds the phone number). Loaded at start so a hidden-id chat's number is known before WhatsApp
+   * mentions it again: "Send in WhatsApp" needs the number to open that chat.
+   */
+  private loadLidMappings(authDir: string) {
+    for (const f of readdirSync(authDir)) {
+      const m = f.match(/^lid-mapping-(\d+)_reverse\.json$/);
+      if (!m) continue;
+      try {
+        const pn = String(JSON.parse(readFileSync(join(authDir, f), "utf8")));
+        if (/^\d{6,15}$/.test(pn)) this.mapLid(`${m[1]}@lid`, `${pn}@s.whatsapp.net`);
+      } catch {
+        // a file Baileys was writing: skip it
+      }
+    }
+  }
+
+  /** Hidden-id chats this device stores, with their phone numbers (digits), for the hub. */
+  phones(): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const [lid, pn] of this.lidToPn) if (this.store.hasChat(lid)) out[lid] = pn.split("@")[0];
+    return out;
+  }
+
   private convert(msg: WAMessage): WaMessage | undefined {
     const key = msg.key as any;
     let chatId: string | undefined = key.remoteJid;
@@ -290,7 +316,8 @@ export class WhatsAppLink {
       this.store.nameChat(chatId, msg.pushName, false);
     }
     const ts = Number(msg.messageTimestamp ?? 0) || Math.floor(Date.now() / 1000);
-    return { id: key.id, chatId, senderId, senderName, fromMe, isGroup, text: c.text, mediaType: c.mediaType, quoted: c.quoted, ts };
+    const chatPhone = chatId.endsWith("@lid") ? this.lidToPn.get(chatId)?.split("@")[0] : undefined;
+    return { id: key.id, chatId, senderId, senderName, fromMe, isGroup, text: c.text, mediaType: c.mediaType, quoted: c.quoted, ts, chatPhone };
   }
 
   /** Downloads queued voice notes and photos one at a time; old ones WhatsApp no longer has are skipped. */

@@ -68,7 +68,6 @@ export function replyOptions(answer: string, p: ContextPool): ReplyOption[] {
   return out.slice(0, 4);
 }
 
-const phoneOf = (chatId: string) => (chatId.endsWith("@s.whatsapp.net") ? chatId.split("@")[0] : undefined);
 
 /** How long after a phone's last suggestion request the hub leaves WhatsApp notifications to it. */
 const PHONE_HANDLES_MS = 24 * 3600_000;
@@ -96,7 +95,7 @@ export class ReplyDrafter {
 
   constructor(
     private store: Store,
-    private wa: WaStore,
+    readonly wa: WaStore,
     private pool: Pick<ProviderPool, "available" | "run">,
     private opts: DrafterOptions,
     private notify?: (p: PushPayload) => void,
@@ -190,7 +189,7 @@ export class ReplyDrafter {
       chatId,
       name: p.name,
       isGroup,
-      phone: phoneOf(chatId),
+      phone: this.wa.phone(chatId),
       incoming: (p.incoming.length ? p.incoming : p.recent.slice(-1)).map(spoken).join("\n").slice(0, 500),
       text,
       options,
@@ -284,7 +283,7 @@ export class ReplyDrafter {
       chatId: r.chat_id,
       name: [this.wa.chatName(r.chat_id), book?.contacts.find((c) => c.chatId === r.chat_id)?.name].find((n) => n && !n.startsWith("+")) ?? `+${r.chat_id.split("@")[0]}`,
       isGroup: r.chat_id.endsWith("@g.us"),
-      phone: phoneOf(r.chat_id),
+      phone: this.wa.phone(r.chat_id),
       incoming: r.incoming,
       text: r.text,
       options: r.options ? JSON.parse(r.options) : [{ label: "Reply", text: r.text }],
