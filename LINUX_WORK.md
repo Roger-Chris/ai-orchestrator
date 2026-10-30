@@ -1,11 +1,11 @@
 # Linux work (30 Oct 2026)
 
-What the session on the Linux hub (`roger-all-series`, 100.104.185.17) is doing, for the sessions on the Windows laptop (`roger`, 100.79.112.101). Branch: `jarvis/next`. See also `docs/HANDOFF.md`.
+What the session on the Linux hub (`roger-all-series`, 100.104.185.17) is doing, for the sessions on the Windows laptop (`roger`, 100.79.112.101). Branch: `main` (the owner merged `jarvis/next` and wants no separate working branches). See also `docs/HANDOFF.md`.
 
 ## State on Linux
 
 - Pulled `jarvis/next` up to `3603cef` (Hermes Agent, handoff notes).
-- The changes below are committed and pushed to `jarvis/next`, and the Linux hub was restarted on them.
+- The changes below are committed and pushed to `main`, and the Linux hub was restarted on them.
 
 ## The goal
 
@@ -24,7 +24,7 @@ Tests: 249 of 253 pass, typecheck clean. The 4 failures are in `tests/failover.t
 
 Seen from Linux: Tailscale answers, but ports 22, 3389 and 4317 are closed (445 is open), so the orchestrator is not running there and the hub lists no peers.
 
-1. Update the `orc-next` worktree: `git pull` on `jarvis/next`.
+1. Update the `orc-next` worktree: `git pull origin main`. Work on `main` from now on.
 2. As administrator, from PowerShell:
    `powershell -ExecutionPolicy Bypass -File "C:\development\AI Assistant\worktrees\orc-next\deploy\windows\install.ps1" -Root "C:\development\AI Assistant\Orchestrator" -WhatsApp`
 3. In the laptop's `orchestrator.config.yaml`: `node.acceptBranchWork: true` and `builds.androidHere: true`, then restart it.

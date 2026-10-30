@@ -1,6 +1,6 @@
 # Jarvis handoff (30 Oct 2026)
 
-Where the work stands, so another session can pick it up. Both repos: branch `main` only (the owner dropped separate working branches on 30 Oct 2026; the `jarvis/next` paths below are from before that).
+Where the work stands, so another session can pick it up. Both repos: branch `main` only (`jarvis/next` was merged into it on 30 Oct 2026; the owner wants no separate working branches, and the `jarvis/next` paths below are from before that).
 
 | Repo | Laptop worktree | Head |
 |---|---|---|

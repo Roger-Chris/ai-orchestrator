@@ -8,11 +8,11 @@ The owner decided on 30 Oct 2026 to stop using separate working branches. `jarvi
 
 `git fetch origin && git checkout main && git pull --ff-only`
 
-Linux: do this in `~/Desktop/ai-orchestrator` and `~/Desktop/AI_Assistant` before the next `deploy/linux/update.sh`, because that script pulls whichever branch is checked out. `jarvis/next` still exists on GitHub but gets no new work.
+Linux: the hub repo is already on `main`. Do the same in `~/Desktop/AI_Assistant` before its next `deploy/linux/update.sh`, because that script pulls whichever branch is checked out. `jarvis/next` still exists on GitHub in both repos but gets no new work.
 
 ## State on Windows
 
-- Merged up to Linux's `f75223e` (read and rebased on, not run or tested here).
+- Merged up to Linux's `5817143`. Its `f75223e` passes the test suite here but has not been run against real devices.
 - No work exists only on the laptop: no unpushed commits in either repo apart from this file, and the main clones and the other worktrees have no uncommitted changes.
 - Done here this session: Hermes Agent as a provider and `deploy/linux/hermes.sh` (`3603cef`). Hermes has not been run anywhere.
 
