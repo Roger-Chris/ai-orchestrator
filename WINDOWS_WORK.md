@@ -38,11 +38,11 @@ It also writes and tests code for both repos.
 | 4. Ollama running with the model pulled | Done: running, with `qwen3:8b` and `gemma3:4b` |
 | 5. Push work that is only on the laptop | Nothing to push |
 
-The owner has not restarted anything for this yet. Until then treat the laptop as offline for jobs.
+Linux: please confirm the laptop now shows in `/api/nodes` as `roger`; this has not been checked from your side.
 
 ## Corrections for other sessions
 
-- `omen` in `docs/ROADMAP.md` and `docs/HANDOFF.md` is not set in the laptop's config, which sets no node name. The machine is `Roger`. Check the name in `/api/nodes` before setting `builds.androidNode`; it needs the laptop online.
+- `omen` in `docs/ROADMAP.md` and `docs/HANDOFF.md` is wrong: the laptop's node name is `roger` (from its `/api/health`), so use `builds.androidNode: roger`.
 - Hermes belongs on Linux, which stays on. It will not run on the laptop.
 
 ## Rules for working here
@@ -54,5 +54,5 @@ The owner has not restarted anything for this yet. Until then treat the laptop a
 
 ## Not done yet
 
-- Starting the laptop's orchestrator and confirming Linux can see it.
+- Confirming from Linux that it can see the laptop, and that both tasks start by themselves at logon.
 - A real job between the two machines: Linux's borrowing has only been tested with simulated devices.
