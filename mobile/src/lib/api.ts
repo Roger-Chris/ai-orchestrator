@@ -192,6 +192,8 @@ export interface NodeInfo {
   via?: string;
   platform?: string;
   actions?: boolean;
+  /** A peer's address on the tailnet (the hub itself has none). */
+  url?: string;
 }
 
 export interface Agent {
