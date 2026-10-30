@@ -87,7 +87,7 @@ Open-source, model-agnostic agent framework (MIT) that runs on a server and spea
 - Or add it as a provider like Manus if it has a task API; same rules: only when asked, anything risky asks first.
 - Check first: install size on the 8 GB machine, and which model it thinks with (local, or the hub's `raw:auto`).
 
-### Phonon-2 (assumed: Fermion Research's on-device speech recognition, released 15 Oct 2026; the owner wrote "phonom 2", confirm)
+### Phonon-2 (Fermion Research's on-device speech recognition, released 15 Oct 2026; confirmed by the owner as the voice model to use)
 - Use it for speech-to-text where Groq Whisper is used now: calls (`src/calls`), Talk, voice notes (`orc style learn` uses Whisper large-v3-turbo on the laptop).
 - It runs locally, so voice keeps working without the Groq key or the internet.
 - Check first: platforms, hardware needs, Tamil/Tanglish quality (described as English-focused), licence.
