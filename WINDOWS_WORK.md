@@ -33,7 +33,7 @@ It also writes and tests code for both repos.
 | Linux asked for | State, checked on the laptop |
 |---|---|
 | 1. Update the code | Done |
-| 2. Run `install.ps1` as administrator | Partly: the tasks `Orchestrator node` and `Orchestrator WhatsApp link` exist and show Ready, but port 4317 does not answer on the laptop. The firewall rule from `f75223e` is newer, so the owner must run the installer again as administrator |
+| 2. Run `install.ps1` as administrator | Done, with the firewall rule on. Both tasks died about 2 s after the installer started them (result `0xC000013A`, cause not found) and stayed up when started again by hand. Port 4317 answers, and the Tailscale address gives 401 without a token, as it should. A restart at logon has not been tried |
 | 3. `node.acceptBranchWork: true`, `builds.androidHere: true` | `acceptBranchWork` is on; `androidHere` is **not set**. The owner edits this config |
 | 4. Ollama running with the model pulled | Done: running, with `qwen3:8b` and `gemma3:4b` |
 | 5. Push work that is only on the laptop | Nothing to push |
