@@ -11,6 +11,7 @@
  * context) to the end; small ones let a cheaper tool go first among equals.
  */
 
+import type { Cluster } from "../cluster/cluster.js";
 import type { ProviderPool } from "../providers/registry.js";
 import { ONLY_WHEN_ASKED } from "../brain/capabilities.js";
 import type { Store } from "../store/db.js";
@@ -57,6 +58,8 @@ export interface ModelRouterDeps {
   routes?: Partial<Record<string, ProviderId[]>>;
   /** The owner's pick per job from the app's AI hub (R4): tried first, the rest still follow. */
   preferred?: (kind: JobKind) => ProviderId | undefined;
+  /** Runs a tool this device lacks on the peer that has it (the laptop's GPU model). */
+  cluster?: Pick<Cluster, "borrowFor" | "run">;
 }
 
 export interface RoutedResult {
@@ -156,8 +159,9 @@ export class ModelRouter {
     const failed: RoutedResult["failed"] = [];
     let limited = true;
     for (const id of route.chain) {
-      const r = await this.d.pool.run(id, { permission: "read", ...req });
-      this.d.store?.recordUsage(id, this.d.node, r.ok, r.durationMs, r.usage?.costUsd);
+      const on = (await this.d.cluster?.borrowFor(id))?.node;
+      const r = on ? await this.d.cluster!.run(on, id, { permission: "read", ...req }) : await this.d.pool.run(id, { permission: "read", ...req });
+      this.d.store?.recordUsage(id, on ?? this.d.node, r.ok, r.durationMs, r.usage?.costUsd);
       if (r.ok) return { provider: id, text: r.text, route, failed };
       limited &&= !!r.rateLimited;
       failed.push({ id, error: r.error ?? "failed" });

@@ -10,6 +10,9 @@ import { tailnetDevices } from "./tailscale.js";
 
 export const VERSION = "0.1.0";
 
+/** Tools tied to one machine's hardware; the hub's own jobs may use another device's copy. */
+const BORROWABLE: ProviderId[] = ["local"];
+
 export interface NodeProviderInfo {
   id: ProviderId;
   ready: boolean;
@@ -112,6 +115,11 @@ export class Cluster {
       }
     }
 
+    // A device that left the tailnet is no longer a target, so nothing below would ever mark it offline.
+    for (const peer of this.peers.values()) {
+      if (!targets.has(peer.url)) Object.assign(peer, { online: false, error: "not on the tailnet" });
+    }
+
     await Promise.all(
       [...targets].map(async ([url, via]) => {
         try {
@@ -142,6 +150,19 @@ export class Cluster {
       }
     }
     return out;
+  }
+
+  /**
+   * The peer to borrow a machine-bound tool from when this device can't run it (the Linux hub has no
+   * GPU, the laptop has Ollama on one). Undefined when it runs here or no online peer has it ready.
+   */
+  async borrowFor(id: ProviderId): Promise<{ node: string; load: number } | undefined> {
+    if (!BORROWABLE.includes(id) || (await this.pool.available()).includes(id)) return undefined;
+    const offers = this.list().flatMap((peer) => {
+      const p = peer.online ? peer.providers.find((x) => x.id === id && x.ready) : undefined;
+      return p ? [{ node: peer.name, load: p.load }] : [];
+    });
+    return offers.sort((a, b) => a.load - b.load)[0];
   }
 
   /** Runs a provider call on this device or a peer. */

@@ -37,6 +37,8 @@ const TTS_FACTS: Record<TtsProviderId, { name: string; cost: CostClass; note: st
 export interface ToolRegistryDeps {
   config: Config;
   pool: ProviderPool;
+  /** The peer that can run a tool this device lacks (Cluster.borrowFor). */
+  borrow?: (id: ProviderId) => Promise<{ node: string; load: number } | undefined>;
   capabilities: CapabilityMatrix;
   /** Rows of the usage table (day, provider, calls, failed, duration_ms…). */
   usage: () => unknown[];
@@ -121,6 +123,10 @@ export class ToolRegistry {
       else if (!s.installed || !s.authenticated) state = "not_set_up";
       else if (s.coolingDownUntil) (state = "cooling"), (until = s.coolingDownUntil);
       else if (this.d.pool.load(id) >= 1) state = "busy";
+      if (state === "not_set_up") {
+        const on = await this.d.borrow?.(id);
+        if (on) (state = on.load >= 1 ? "busy" : "ready"), (detail = `runs on ${on.node}`);
+      }
       tools.push(
         this.finish(usage, {
           id,

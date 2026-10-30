@@ -31,6 +31,12 @@ if (-not ((Test-Path $envFile) -and (Select-String -Path $envFile -Pattern '^ORC
 if (-not (Test-Path (Join-Path $Root "fcm-service-account.json"))) { Warn "no fcm-service-account.json in ${Root}: this PC can't send phone notifications while it is the hub" }
 if (-not (Get-Command tailscale -ErrorAction SilentlyContinue)) { Warn "Tailscale is not installed: the phone can't reach this PC" }
 
+Say "Firewall: port 4317 for Tailscale addresses only"
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (Get-NetFirewallRule -Name "Orchestrator-Tailscale" -ErrorAction SilentlyContinue) { Write-Host "already open" }
+elseif ($admin) { New-NetFirewallRule -Name "Orchestrator-Tailscale" -DisplayName "AI Orchestrator (Tailscale)" -Direction Inbound -Protocol TCP -LocalPort 4317 -RemoteAddress 100.64.0.0/10 -Action Allow -Profile Any | Out-Null; Write-Host "opened" }
+else { Warn "not an administrator, so other devices may not reach this PC: run this script once as administrator" }
+
 $runner = Join-Path $Code "deploy\windows\keep-running.ps1"
 function Install-Task($name, $label, [string[]]$command) {
   $argLine = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$runner`" -Code `"$Code`" -Root `"$Root`" -Name $label -Command $($command -join ',')"
