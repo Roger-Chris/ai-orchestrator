@@ -1,8 +1,8 @@
 import * as SecureStore from "expo-secure-store";
 import { WaReply } from "./wareply";
-import type { AiHub, BrainAlert, Home, Insights, JobKind, ProviderId, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
+import type { AiHub, Build, BrainAlert, Home, Insights, JobKind, ProviderId, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
 
-export type { AiHub, JobKind, ProviderId, ToolInfo, ToolState } from "../../../src/types";
+export type { AiHub, Build, BuildBranch, JobKind, ProviderId, ToolInfo, ToolState } from "../../../src/types";
 export type { AlertAction, Attention, BrainAlert, DayTask, Decision, Home, Insights, PendingApproval, QuietChat, ReplyDraft, RunEvent, RunOptions, RunRecord, Running, StepRecord, Thread } from "../../../src/types";
 
 /** Where the hub is and how to get in. Kept in Android's encrypted storage. */
@@ -199,6 +199,16 @@ export const Api = {
   nodes: (refresh = false) => api<{ self: NodeInfo; peers: NodeInfo[] }>(refresh ? "/api/nodes/refresh" : "/api/nodes", refresh ? { body: {} } : {}),
   agents: () => api<Agent[]>("/api/agents"),
   usage: () => api<{ day: string; provider: string; node: string; calls: number; failed: number }[]>("/api/usage?days=7"),
+  // ---- builds (apps built on command)
+  builds: () => api<Build[]>("/api/builds?limit=40"),
+  build: (id: string) => api<Build>(`/api/builds/${id}`),
+  startBuild: (b: { name: string; spec: string; repo?: string; agent?: "claude" | "codex"; continue?: boolean }) => api<Build>("/api/builds", { body: b }),
+  /** Your tap: merges the build's branches into the branch checked out in its folder. */
+  mergeBuild: (id: string) => api<Build>(`/api/builds/${id}/merge`, { body: {}, timeoutMs: 180_000 }),
+  previewBuild: (id: string) => api(`/api/builds/${id}/preview`, { body: {} }),
+  cancelBuild: (id: string) => api<Build>(`/api/builds/${id}/cancel`, { body: {} }),
+  /** Full address of a preview link (/p/<key>/...); it carries its own key, so a browser can open it. */
+  hubUrl: (path: string) => `${current?.url ?? ""}${path}`,
   /** The AI hub: every AI tool's state and use, what each job would use now, caps, the week. */
   aiHub: (fresh = false) => api<AiHub>(`/api/ai-hub${fresh ? "?fresh=1" : ""}`, { timeoutMs: 30_000 }),
   /** The tool to try first for a job; "auto" gives the choice back to the router. */

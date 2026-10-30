@@ -24,6 +24,9 @@ import { TTS_PROVIDERS, type Tts, TtsError } from "../voice/tts.js";
 import type { ToolRegistry } from "../ai/tools.js";
 import { JOB_KINDS, type JobKind, type ModelRouter, RouteError, sizeOf } from "../ai/route.js";
 import { buildAiHub, setPreferred } from "./ai-hub.js";
+import { mountBuilds } from "./builds.js";
+import type { BuildDesk } from "../builds/desk.js";
+import type { Build } from "../types.js";
 import type { StyleBook } from "../whatsapp/learn.js";
 import type { MemoryReplica } from "../shared/replica.js";
 import { type Ask, AskBody, askBrain, mountSharedMemory } from "./shared-memory.js";
@@ -56,6 +59,9 @@ export interface AppDeps {
   tools?: ToolRegistry;
   /** The model router (R2): fallback chains for the hub's own jobs and raw:auto. */
   models?: ModelRouter;
+  /** Builds of apps on command (phase 2) and their previews. */
+  builds?: BuildDesk;
+  preview?: (b: Build) => Promise<void>;
   /** This device's copy of the shared memory pool; absent when sharedMemory.enabled is false. */
   replica?: MemoryReplica;
   /** How /node/memory/* reaches the brain; tests pass a fake. */
@@ -197,6 +203,7 @@ export function createApp(d: AppDeps) {
   mountSharedMemory(app, d);
   mountActions(app, d);
   mountBrain(app, d);
+  mountBuilds(app, d);
 
   // ---- providers & devices
   app.get("/api/providers", async (c) => c.json(await d.pool.status(c.req.query("refresh") === "1")));

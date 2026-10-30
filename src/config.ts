@@ -114,6 +114,13 @@ const ConfigSchema = z.object({
       overrides: z.record(z.string(), z.record(z.string(), z.number().min(0).max(10))).prefault({}),
     })
     .prefault({}),
+  /** Building apps on command (src/builds): previews are made on the hub when a build is ready. */
+  builds: z
+    .object({
+      autoPreview: z.boolean().default(true),
+      previewTimeoutMinutes: z.number().min(1).max(120).default(20),
+    })
+    .prefault({}),
   /** Coding on branches across devices (run option `branches`). */
   branches: z
     .object({

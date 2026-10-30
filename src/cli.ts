@@ -43,6 +43,9 @@ import { ttsFromConfig } from "./voice/tts.js";
 import { WakeListener, wakeOptions } from "./voice/wake.js";
 import { ToolRegistry } from "./ai/tools.js";
 import { ModelRouter } from "./ai/route.js";
+import { BuildDesk } from "./builds/desk.js";
+import { PreviewMaker } from "./builds/preview.js";
+import { previewer } from "./server/builds.js";
 import { preferredFor } from "./server/ai-hub.js";
 import { addTerms } from "./whatsapp/address.js";
 
@@ -147,7 +150,18 @@ export function buildSystem(config: Config) {
     task: (taskId) => store.tasksFor(localDay()).find((t) => t.id === `brain:${taskId}`),
   });
   const actions = buildActions(config, { store, pool, replica, cluster, notifier });
-  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts, tools, models };
+  // Phase 2: apps built on command; a ready build gets a preview on this hub.
+  let preview: ReturnType<typeof previewer> | undefined;
+  const builds = new BuildDesk({
+    store,
+    runner: orchestrator,
+    replica,
+    notify: (p) => void notifier.notify(p),
+    onReady: (b) => void (config.builds.autoPreview ? preview?.(b) : undefined),
+    node: config.node.name,
+  });
+  preview = previewer(builds, new PreviewMaker({ dataDir: resolve(config.dataDir), remote: config.branches.remote, timeoutMs: config.builds.previewTimeoutMinutes * 60_000 }));
+  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts, tools, models, builds, preview };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */

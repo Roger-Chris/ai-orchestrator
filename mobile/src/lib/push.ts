@@ -64,5 +64,8 @@ export function routeFor(response: Notifications.NotificationResponse | null | u
   const call = data?.url?.match(/#\/call\/(\d+)/);
   if (call) return `/call/${call[1]}`;
   const m = data?.url?.match(/#\/t\/([\w-]+)/);
-  return m ? `/t/${m[1]}` : undefined;
+  if (m) return `/t/${m[1]}`;
+  // Screens that link themselves: "/builds?id=b1", "/agents", "/phone"
+  const screen = data?.url?.match(/^\/(builds|agents|phone)(\?[\w=&%-]*)?$/);
+  return screen ? data!.url : undefined;
 }

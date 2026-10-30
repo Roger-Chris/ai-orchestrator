@@ -34,10 +34,10 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 - [x] R4 `/api/ai-hub` (status, usage, caps, preferred tool per job kind) + app AI hub screen.
 
 ### Phase 2: build apps on command
-- [ ] B1 Brain tool `build` -> hub `/api/builds`: spec, repo/branch, device choice, coding agent (Claude Code / Codex), second-model review, tests.
-- [ ] B2 Previews: web preview URL, Android debug APK sent to the phone; approve merge/deploy from the phone.
-- [ ] B3 Builds recorded in shared memory; "continue the X app" resumes.
-- [ ] B4 App Builds screen.
+- [x] B1 Brain tool `build` -> hub `/api/builds`: spec, repo/branch, device choice, coding agent (Claude Code / Codex), second-model review, tests.
+- [x] B2 Previews: web preview URL, Android debug APK sent to the phone; approve merge/deploy from the phone.
+- [x] B3 Builds recorded in shared memory; "continue the X app" resumes.
+- [x] B4 App Builds screen.
 
 ### Phase 3: device control
 - [ ] D1 Desktop: open/focus/close apps, screenshot on request, computer-use model for GUI-only apps (ask level).
@@ -60,6 +60,7 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 - 2026-10-30 (scheduled run): R2 model router `src/ai/route.ts` (`routeFor`/`run`, job orders + `tools.routes`, skip cooling/capped/not set up, Groq last for long prompts, cheaper first for small TaskKind jobs) used by WhatsApp drafts, Gmail, call answers and `raw:auto`; `GET /api/tools/route`; brain `PLANNER_MODEL=auto` -> `raw:auto`. Calls now fall back to Groq last (before: Claude, ChatGPT, Gemini only). Hub + one brain line (AI_Assistant `jarvis/next`), no app change. The laptop was not connected, so this run's commits and the 29 Oct ones are kept as a bundle in the claude.ai project (`claude/unpushed/`).
 - 2026-10-30 (scheduled run): R3 `local` provider (Ollama's OpenAI API, `providers.local`, defaults to `style.ollamaUrl`/`style.model`, last resort in the router, low capability scores) and spend caps (`tools.overrides.<id>.spendPerDay`/`costPerCall`, usage `cost_usd` column, `pool.capped` and `tts.capped` enforce `perDay` and spend caps everywhere). App: only the `local` label/colour (needs the APK rebuild that is already on the list).
 - 2026-10-30 (scheduled run): R4 `GET /api/ai-hub` (tools, each job's chain now, today, caps, 7 days) + `PUT /api/ai-hub/prefer` (owner's first pick per job, `prefs` table, router honours it) and the app's Settings → AI hub screen. Typechecked, not seen on a phone (needs the APK).
+- 2026-10-30 (owner asked for phases 2-4 now): B1-B4 builds: `src/builds` (BuildDesk over branch runs with tests and a second model's review, `builds` table), previews on the hub (`/p/<key>/` web, `/p/<key>/app.apk`), merge on the owner's tap, every build in shared memory (`project:<app>`, `work:build-<id>`) and "continue the X app" (here or from memory), brain tool `build`, app Settings → Builds. Deploy is not built (no target named); a preview is the check before Merge.
 
 ## Owner to-do
 - Rebuild and install the APK (`npm run build:apk` in mobile/ on the laptop, or the GitHub Actions build): V4 Settings → Voice, V5 "Hey Jarvis" and R4 Settings → AI hub are in the app (JS only, no new native packages since V2-V3's build).

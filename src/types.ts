@@ -506,3 +506,41 @@ export interface AiHub {
   /** Calls and spend per day for the last 7 days (all tools). */
   week: { day: string; calls: number; failed: number; spentUsd: number }[];
 }
+
+// ---- Builds (Jarvis phase 2: src/builds; the app's Builds screen)
+
+export interface BuildBranch {
+  step: string;
+  title: string;
+  name: string;
+  node: string;
+  commit?: string;
+  /** passed / failed / none (no tests found or run) */
+  tests: string;
+  files: number;
+  merged?: boolean;
+}
+
+export interface Build {
+  id: string;
+  /** The app's name; builds of the same app share it ("continue the X app"). */
+  name: string;
+  spec: string;
+  /** The git folder on the hub's machine. */
+  repo: string;
+  node?: string;
+  agent: ProviderId;
+  reviewer: ProviderId;
+  status: "running" | "ready" | "failed" | "merged" | "cancelled";
+  runId: string;
+  branches: BuildBranch[];
+  summary?: string;
+  error?: string;
+  mergeError?: string;
+  continuedFrom?: string;
+  /** Unguessable key in the preview links (/p/<key>/...), so the phone's browser can open them without the token. */
+  previewKey: string;
+  preview?: { status: "building" | "ready" | "failed"; web?: string; apk?: string; webRoot?: string; apkFile?: string; error?: string; log?: string; at: number };
+  createdAt: number;
+  updatedAt: number;
+}
