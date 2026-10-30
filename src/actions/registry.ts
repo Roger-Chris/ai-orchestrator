@@ -7,6 +7,7 @@ import { runProcess } from "../providers/base.js";
 import type { ProviderPool } from "../providers/registry.js";
 import type { MemoryReplica } from "../shared/replica.js";
 import type { ProviderId } from "../types.js";
+import { REPO_ACTIONS } from "../repos/actions.js";
 import { DESKTOP_ACTIONS } from "./desktop.js";
 
 /**
@@ -17,8 +18,10 @@ import { DESKTOP_ACTIONS } from "./desktop.js";
  * - ask:   runs only after the owner taps Approve on the phone (anything that changes things)
  * - never: refused (secrets, passwords)
  *
- * There is deliberately no delete action, and nothing overwrites a file without keeping the old
- * one: a changed file is backed up first, so the old version is there until the new one is checked.
+ * There is deliberately no delete action for files on a device, and nothing overwrites a file without
+ * keeping the old one: a changed file is backed up first, so the old version is there until the new
+ * one is checked. The only delete is repos.delete, for committed files in repos it looks after, behind
+ * the checks in ../repos/actions.ts.
  */
 
 export type Risk = "safe" | "ask" | "never";
@@ -400,6 +403,8 @@ export const ACTIONS: ActionDef[] = [
 
 // Phase 3: desktop control and files across devices (./desktop.ts).
 ACTIONS.push(...DESKTOP_ACTIONS);
+// Repos the orchestrator looks after (../repos/actions.ts).
+ACTIONS.push(...REPO_ACTIONS);
 
 export const ACTION_NAMES = ACTIONS.map((a) => a.name);
 

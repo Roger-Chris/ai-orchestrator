@@ -112,7 +112,7 @@ Hard-won details:
 ## Device actions and approvals
 
 - `src/actions/registry.ts`: what the assistant can do on a device (`system.info`, `files.list/find/read/write/copy/move`, `shell.run`, `apps.list/open`, `ai.run`, `memory.search`). Each call has a risk: safe runs, ask waits for the owner, never is refused. `actions.safe` / `actions.never` in config override per action; `actions.safeCommands` is the shell safe list (anything with `; | & > < $ \``, or not on the list, asks).
-- The owner's rule: nothing old is lost before the new version is checked. So there is no delete action, `files.write` backs an existing file up as `<name>.bak-<time>` first, and copy/move refuse to replace anything. Keep it that way.
+- The owner's rule: nothing old is lost before the new version is checked. So `files.*` has no delete action (the one delete is `repos.delete`, below), `files.write` backs an existing file up as `<name>.bak-<time>` first, and copy/move refuse to replace anything. Keep it that way.
 - Files only inside `actions.roots` (default: `node.workRoot`), links resolved first; secret-looking names (.env, keys, tokens, credentials, service accounts) are never read, listed or written. Every output goes through `redact()` (GitHub/OpenAI/Groq/Google/Slack tokens, `user:pass@` in URLs): a git remote with an embedded token was found on the owner's laptop.
 - `ai.run` drives the subscriptions' CLIs through the provider pool: claude, codex (ChatGPT), gemini (Antigravity/agy), perplexity, groq. `write: true` (permission edit) asks.
 - Flow (`src/actions/desk.ts`): `POST /api/act {node, action, args, reason}` on the hub → the device's `POST /node/act`. Safe: done. Ask: the device answers `needs_approval`, the hub stores an approval (`approvals` table, 30 min), pushes "Approve on <device>?" and lists it in `/api/home` `approvals` (the app's "Approve?" section). `POST /api/approvals/:id/approve` sends the call again with the approval id; the device claims it with the hub that holds it (`/node/approvals/:id/claim`: same action, same args hash, unused, unexpired; claiming uses it up). Approved actions are written to shared memory as `work`.
@@ -193,6 +193,12 @@ Hard-won details:
 
 - Tailscale is the secure channel: devices reach each other by 100.x address from any network, and `/node/*` also needs `ORC_TOKEN`. The laptop must run `deploy/windows/install.ps1` once as administrator (scheduled task, firewall rule for 4317 from Tailscale addresses only). Peers that leave the tailnet are marked offline on the next poll.
 - `Cluster.borrowFor` (only `local`, the Ollama model): when this machine can't run it, the router and the tool registry use an online peer's copy through `/node/exec`. Ollama itself stays on the laptop's localhost. Subscription tools are never borrowed.
+
+## Repos it looks after
+
+- `src/repos/actions.ts`, actions on the device that holds the repo: `repos.list`, `repos.create` (asks; always private, in `<node.workRoot>/repos/<name>`), `repos.adopt` (asks; an existing clone inside `actions.roots`), `repos.sync` (fast-forward only), `repos.files`, `repos.read`, `repos.write` (asks; commit + push), `repos.check_delete`, `repos.delete` (asks). The list is `<dataDir>/repos/registry.json`, per device. Nothing outside these repos, nothing in `.git`, no secret names, and writes refuse a repo with uncommitted changes.
+- `repos.delete` removes one committed file, and `verifyDelete` runs again at the moment of deleting. Every gate must pass and anything unproven fails: `clean`, `on_github` (same version on the origin branch, nothing unpushed), `references` (no other tracked file names it), `review` (an AI finds nothing only it holds; no model, unreadable answer, binary or over 40 kB all fail), `tests` (on a throwaway worktree without the file; only at the real delete). A copy and the report stay in `<dataDir>/repos/deleted/<repo>/<time>/`. Whole repos can't be deleted. Keep it that way.
+- Outside agents held to folders can't use `repos.*` (`UNBOUNDED` in `src/outside/mcp.ts`).
 
 ## Conventions
 
