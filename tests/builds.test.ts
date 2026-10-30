@@ -88,11 +88,13 @@ describe("builds (phase 2)", () => {
   it("a finished run makes the build ready, tells the phone and writes the shared memory (B3)", async () => {
     const s = setup();
     const b = s.desk.start({ name: "Expense Tracker", spec: "Track expenses", repo: s.repo });
-    s.runs[0].resolve({ ...s.runs[0].record, status: "done", result: "Built it.", steps: [branchStep("s1", "orc/r1-s1") as any, { id: "rev", title: "review", status: "done" } as any] });
+    s.runs[0].resolve({ ...s.runs[0].record, status: "done", result: "Built it.", steps: [branchStep("s1", "orc/r1-s1") as any, { id: "rev", title: "review", status: "failed", error: "no available model can run a code_review step" } as any] });
     await settle();
     const got = s.desk.get(b.id)!;
     expect(got).toMatchObject({ status: "ready", summary: "Built it.", branches: [{ step: "s1", name: "orc/r1-s1", tests: "passed", files: 2 }] });
     expect(s.pushes[0]).toMatchObject({ title: "Expense Tracker: ready to review", url: `/builds?id=${b.id}` });
+    expect(s.pushes[0].body).toContain("Did not run: 1 step(s)");
+    expect(got.notes).toEqual(["review: failed (no available model can run a code_review step)"]);
     expect(s.ready).toEqual([b.id]);
     const project = s.replica.get("project:expense-tracker")!;
     expect(project).toMatchObject({ kind: "project", title: "Expense Tracker" });

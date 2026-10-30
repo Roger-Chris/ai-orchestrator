@@ -250,3 +250,30 @@ describe("branch work across devices", { timeout: 60_000 }, () => {
     expect((await createApp({ ...on, publicDir: "public" }).request("/node/branch-job", { method: "POST", headers: auth, body: bad })).status).toBe(400);
   });
 });
+
+describe("dependency folders stay out of branches", () => {
+  it("excludes node_modules in a worktree through the common git dir", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { excludeDependencyFolders } = await import("../src/cluster/branchwork.js");
+    const dir = mkdtempSync(join(tmpdir(), "orc-excl-"));
+    try {
+      const g = (cwd: string, ...a: string[]) => execFileSync("git", a, { cwd, stdio: "pipe", env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } }).toString();
+      g(dir, "init", "-q", "main");
+      const main = join(dir, "main");
+      g(main, "commit", "-q", "--allow-empty", "-m", "init");
+      g(main, "worktree", "add", "-q", join(dir, "wt"));
+      const wt = join(dir, "wt");
+      mkdirSync(join(wt, "node_modules", "x"), { recursive: true });
+      writeFileSync(join(wt, "node_modules", "x", "i.js"), "1");
+      writeFileSync(join(wt, "app.js"), "1");
+      excludeDependencyFolders(wt);
+      excludeDependencyFolders(wt); // twice: no duplicate lines
+      expect(g(wt, "status", "--porcelain", "-uall").trim()).toBe("?? app.js");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -51,8 +51,12 @@ function Section({ label, right, children }: { label: string; right?: ReactNode;
 
 function Row({ first, children, onPress }: { first?: boolean; children: ReactNode; onPress?: () => void }) {
   const c = useColors();
+  const style = { paddingVertical: 12, borderTopWidth: first ? 0 : 1, borderTopColor: c.border };
+  // A row without its own tap is a plain View: a disabled Pressable around Approve / Deny disabled
+  // those buttons too (found by tapping Approve in a browser test of the app).
+  if (!onPress) return <View style={style}>{children}</View>;
   return (
-    <Pressable disabled={!onPress} onPress={onPress} style={({ pressed }) => ({ paddingVertical: 12, borderTopWidth: first ? 0 : 1, borderTopColor: c.border, opacity: pressed ? 0.6 : 1 })}>
+    <Pressable onPress={onPress} style={({ pressed }) => ({ ...style, opacity: pressed ? 0.6 : 1 })}>
       {children}
     </Pressable>
   );

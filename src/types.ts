@@ -537,6 +537,8 @@ export interface Build {
   summary?: string;
   error?: string;
   mergeError?: string;
+  /** Steps of the run that failed or were skipped (a review with no second model free, say). */
+  notes?: string[];
   continuedFrom?: string;
   /** Unguessable key in the preview links (/p/<key>/...), so the phone's browser can open them without the token. */
   previewKey: string;

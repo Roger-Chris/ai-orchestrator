@@ -4,7 +4,7 @@
  * (or fetches) the repo, branches from the run's base commit, lets the model
  * edit, runs the tests, commits and pushes. Your laptop then reviews and merges.
  */
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runProcess } from "../providers/base.js";
 import type { ProviderPool } from "../providers/registry.js";
@@ -118,7 +118,7 @@ export async function runBranchJob(job: BranchJob, o: BranchRunOptions): Promise
       }
     }
 
-    const testCommand = job.testCommand === "auto" ? detectTestCommand(wt) : job.testCommand || undefined;
+    let testCommand = job.testCommand === "auto" ? detectTestCommand(wt) : job.testCommand || undefined;
     progress(`editing in ${wt}`);
     agent = await o.pool.run(job.provider, {
       prompt: branchPrompt(job, testCommand),
@@ -133,6 +133,12 @@ export async function runBranchJob(job: BranchJob, o: BranchRunOptions): Promise
       onProgress: o.onProgress,
     });
     if (!agent.ok) return { ...base, agent, error: agent.error ?? "the model failed", durationMs: Date.now() - started };
+
+    // A new project only has its package.json (or pyproject…) after the agent's edit: look again.
+    // (Found by an end-to-end build of a new app: no tests ran because detection came first.)
+    if (!testCommand && job.testCommand === "auto") testCommand = detectTestCommand(wt);
+    // Installing dependencies to test must never commit them: keep them out locally (.git/info/exclude).
+    excludeDependencyFolders(wt);
 
     if (testCommand) {
       let tests = await runTests(testCommand, wt, o.testTimeoutMs, exec, progress);
@@ -187,6 +193,24 @@ export async function runBranchJob(job: BranchJob, o: BranchRunOptions): Promise
       await git(["worktree", "remove", "--force", wt], mirror, exec);
       rmSync(wt, { recursive: true, force: true });
     }
+  }
+}
+
+/** node_modules, virtualenvs and caches stay out of the branch even when the project has no .gitignore. */
+export function excludeDependencyFolders(wt: string) {
+  try {
+    const gitDir = join(wt, ".git");
+    // a worktree's .git is a file pointing at its real git dir
+    const dir = existsSync(gitDir) && statSync(gitDir).isFile() ? readFileSync(gitDir, "utf8").replace(/^gitdir:\s*/, "").trim() : gitDir;
+    // git reads info/exclude from the common git dir, not a worktree's own one
+    const common = existsSync(join(dir, "commondir")) ? resolve(dir, readFileSync(join(dir, "commondir"), "utf8").trim()) : dir;
+    const file = join(common, "info", "exclude");
+    mkdirSync(join(common, "info"), { recursive: true });
+    const cur = existsSync(file) ? readFileSync(file, "utf8") : "";
+    const want = ["node_modules/", ".venv/", "__pycache__/", ".pytest_cache/"].filter((p) => !cur.split("\n").includes(p));
+    if (want.length) writeFileSync(file, `${cur.replace(/\n?$/, "\n")}${want.join("\n")}\n`);
+  } catch {
+    /* best effort: a project with a .gitignore is fine anyway */
   }
 }
 

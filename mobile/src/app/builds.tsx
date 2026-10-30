@@ -120,6 +120,9 @@ export default function Builds() {
                 </Text>
               ))}
               {!!b.error && <ErrorText text={b.error} />}
+              {b.notes?.map((n) => (
+                <Text key={n} style={{ color: c.warn, fontSize: 13 }}>{`Did not run: ${n}`}</Text>
+              ))}
               {!!b.mergeError && <ErrorText text={b.mergeError} />}
               {!!b.summary && <Muted small>{b.summary.slice(0, 1200)}</Muted>}
               {b.preview?.status === "building" && <Muted small>Making the preview…</Muted>}

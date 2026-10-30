@@ -160,6 +160,8 @@ export class BuildDesk {
       .filter((s) => s.branch?.pushed)
       .map((s) => ({ step: s.id, title: s.title, name: s.branch!.name, node: s.branch!.node, commit: s.branch!.commit, tests: s.branch!.tests ? (s.branch!.tests.ok ? "passed" : "failed") : "none", files: s.branch!.changedFiles.length }));
     b.summary = run.result?.slice(0, 4000);
+    // Steps that did not run (e.g. no second model free for the review) are said plainly, not hidden.
+    b.notes = run.steps.filter((s) => s.status === "failed" || s.status === "skipped").map((s) => `${s.title}: ${s.status}${s.error ? ` (${s.error.slice(0, 300)})` : ""}`);
     if (run.status === "done" && b.branches.length) b.status = "ready";
     else if (run.status === "cancelled") b.status = "cancelled";
     else {
@@ -170,7 +172,10 @@ export class BuildDesk {
     this.remember(b);
     this.d.notify?.({
       title: b.status === "ready" ? `${b.name}: ready to review` : `${b.name}: build ${b.status}`,
-      body: b.status === "ready" ? `${b.branches.length} branch(es), tests ${b.branches.map((x) => x.tests).join(", ")}. Check the preview, then Merge.` : (b.error ?? ""),
+      body:
+        b.status === "ready"
+          ? `${b.branches.length} branch(es), tests ${b.branches.map((x) => x.tests).join(", ")}.${b.notes.length ? ` Did not run: ${b.notes.length} step(s), see Builds.` : ""} Check the preview, then Merge.`
+          : (b.error ?? ""),
       url: `/builds?id=${b.id}`,
       tag: `build-${b.id}`,
     });
@@ -284,7 +289,7 @@ export function buildTask(p: { name: string; spec: string; agent: ProviderId; re
   lines.push(
     "HOW:",
     `- Do the coding with ${p.agent} on its own branch; keep the app runnable after each step.`,
-    "- Write tests for what you build and run them; fix failures before finishing.",
+    "- Write tests for what you build and run them; fix failures before finishing. If you may not run commands, still write the tests: the orchestrator installs the dependencies and runs them after your edit, and sends you the failures.",
     `- Then a review step with ${p.reviewer} (a different model, read-only): it reads the diff for bugs, security problems and missing tests; fix what it finds.`,
     "- Never touch the main branch, never delete files the owner made, never put keys or tokens in the code.",
     "- If it is a web app, make `npm run build` produce a static site (dist/ or build/) so a preview can be served. If it is an Android app, make a debug APK buildable (`./gradlew assembleDebug` or `npm run build:apk`).",
