@@ -93,6 +93,19 @@ const ConfigSchema = z.object({
         })
         .prefault({}),
       /**
+       * Hermes Agent (Nous Research) in its own container (deploy/linux/hermes.sh), through its API
+       * server (HERMES_API_KEY = its API_SERVER_KEY). model = the name its API server answers to.
+       */
+      hermes: z
+        .object({
+          ...providerBase,
+          apiKey: z.string().optional(),
+          baseUrl: z.string().default("http://127.0.0.1:8642/v1"),
+          model: z.string().default("hermes-agent"),
+          maxConcurrent: z.number().int().min(1).default(1),
+        })
+        .prefault({}),
+      /**
        * Groq: a fast OpenAI-compatible API with a free tier (console.groq.com). Takes quick
        * questions and reads Gmail. Any other OpenAI-compatible service works the same way.
        */
@@ -438,6 +451,7 @@ export function parseConfig(raw: unknown): Config {
   // Without a key Perplexity stays listed but reports itself as not logged in.
   if (!cfg.providers.perplexity.apiKey) cfg.providers.perplexity.apiKey = process.env.PERPLEXITY_API_KEY || undefined;
   if (!cfg.providers.manus.apiKey) cfg.providers.manus.apiKey = process.env.MANUS_API_KEY || undefined;
+  if (!cfg.providers.hermes.apiKey) cfg.providers.hermes.apiKey = process.env.HERMES_API_KEY || undefined;
   if (!cfg.profile.name) cfg.profile.name = process.env.OWNER_NAME || undefined;
   if (!cfg.assistant.token) cfg.assistant.token = process.env.BRAIN_TOKEN || undefined;
   if (!cfg.sharedMemory.hub) cfg.sharedMemory.hub = process.env.MEMORY_HUB || undefined;

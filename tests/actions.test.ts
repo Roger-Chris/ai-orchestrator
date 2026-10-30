@@ -125,6 +125,8 @@ describe("running actions on a device", () => {
     expect(await r.act({ action: "ai.run", args: { tool: "claude", task: "fix the bug", write: true } })).toMatchObject({ status: "needs_approval" });
     // Manus spends paid credits: even a read-only task waits for the owner's tap
     expect(await r.act({ action: "ai.run", args: { tool: "manus", task: "compare flights to Delhi" } })).toMatchObject({ status: "needs_approval" });
+    // Hermes has its own terminal, so write=false binds nothing
+    expect(await r.act({ action: "ai.run", args: { tool: "hermes", task: "compare flights to Delhi" } })).toMatchObject({ status: "needs_approval" });
     expect(calls).toHaveLength(1);
   });
 });

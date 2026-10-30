@@ -80,12 +80,12 @@ Tests at the end: hub 245 passing (`npx vitest run`), hub, web and app typecheck
 
 ## Planned (next)
 
-### Hermes Agent (Nous Research)
-Open-source, model-agnostic agent framework (MIT) that runs on a server and speaks MCP. Plan:
-- Run it on the Linux hub as another agent next to Claude, Codex, Gemini and Manus.
-- Connect it through the hub's MCP at `/mcp` as an outside agent with its own token and scopes (Settings → Outside agents): memory read, the devices it may touch, risk ceiling "safe" first.
-- Or add it as a provider like Manus if it has a task API; same rules: only when asked, anything risky asks first.
-- Check first: install size on the 8 GB machine, and which model it thinks with (local, or the hub's `raw:auto`).
+### Hermes Agent (Nous Research): connected in code, not yet running
+- Provider `hermes` (`src/providers/hermes.ts`): the hub calls Hermes' API server on `127.0.0.1:8642`. Only when asked for by name; every `ai.run` with Hermes asks first, because it has its own terminal.
+- `deploy/linux/hermes.sh` runs it in Docker (1.5 GB, 1 CPU, `~/.hermes` only). It must stay in the container: on the host it could read the hub's `.env` and get around every scope. Hermes' docs ask for 1 GB minimum, 2-4 GB recommended.
+- Hermes reaches the hub through `/mcp` with its own outside-agent token. The official MCP Python SDK connects to `/mcp`; Hermes itself has not been tried.
+- Its model needs its own key. The hub's `raw:auto` cannot serve it: it returns plain text, and Hermes needs tool calling and 64k of context. Groq's free tier may be too small for this; not tried.
+- To start it: in the app, Settings → Outside agents → add "hermes" (safe only). Then run `deploy/linux/hermes.sh` on Linux, add a model key to `~/.hermes/.env`, run it again and restart the hub.
 
 ### Phonon-2 (Fermion Research's on-device speech recognition, released 15 Oct 2026; confirmed by the owner as the voice model to use)
 - Use it for speech-to-text where Groq Whisper is used now: calls (`src/calls`), Talk, voice notes (`orc style learn` uses Whisper large-v3-turbo on the laptop).

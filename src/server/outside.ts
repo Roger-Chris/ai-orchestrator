@@ -21,6 +21,7 @@ const Create = z.object({ name: z.string().min(1).max(80), scopes: Scopes.prefau
 
 export function mountOutside(app: Hono, d: { outside?: OutsideAgents } & Omit<McpDeps, "agents">) {
   app.get("/mcp", (c) => c.json({ error: "POST JSON-RPC messages here (no event stream)" }, 405));
+  app.delete("/mcp", (c) => c.json({ error: "no sessions to end" }, 405));
   app.post("/mcp", async (c) => {
     if (!d.outside) return c.json({ error: "outside agents are not set up on this hub" }, 404);
     const agent = d.outside.verify(c.req.header("authorization")?.replace(/^Bearer\s+/i, ""));

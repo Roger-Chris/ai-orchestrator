@@ -25,6 +25,7 @@ const PROVIDER_FACTS: Record<ProviderId, { name: string; cost: CostClass; note: 
   groq: { name: "Groq", cost: "free", note: "Free tier: per-minute and per-day request limits per model; keys rotate on 429." },
   local: { name: "Local model (Ollama)", cost: "local", note: "Runs on this machine: free and private; small, and slow without a GPU." },
   manus: { name: "Manus", cost: "paid", note: "API key: a cloud agent with its own browser; each task uses Manus credits and takes minutes." },
+  hermes: { name: "Hermes", cost: "paid", note: "API key: Hermes Agent in its own container on the hub; it thinks with its own model key and can use its own terminal and web tools." },
 };
 
 const TTS_FACTS: Record<TtsProviderId, { name: string; cost: CostClass; note: string }> = {

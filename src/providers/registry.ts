@@ -5,6 +5,7 @@ import { ClaudeProvider } from "./claude.js";
 import { CodexProvider } from "./codex.js";
 import { GeminiProvider } from "./gemini.js";
 import { LocalProvider } from "./local.js";
+import { HermesProvider } from "./hermes.js";
 import { ManusProvider } from "./manus.js";
 import { OpenAICompatProvider } from "./openai-compat.js";
 import { PerplexityProvider } from "./perplexity.js";
@@ -60,6 +61,7 @@ export class ProviderPool {
       overrides?.gemini ?? new GeminiProvider(p.gemini),
       overrides?.perplexity ?? new PerplexityProvider(p.perplexity),
       overrides?.manus ?? new ManusProvider(p.manus),
+      overrides?.hermes ?? new HermesProvider(p.hermes),
       overrides?.groq ?? new OpenAICompatProvider("groq", p.groq, "Optional. Set GROQ_API_KEY (free at console.groq.com) for fast answers to quick questions and Gmail reading."),
       overrides?.local ?? new LocalProvider(p.local.url ?? config.style.ollamaUrl, p.local.model ?? config.style.model),
     ];

@@ -155,7 +155,7 @@ const AI_TOOLS: Record<string, ProviderId> = {
   claude: "claude", "claude-code": "claude",
   codex: "codex", chatgpt: "codex", openai: "codex",
   gemini: "gemini", antigravity: "gemini", agy: "gemini",
-  perplexity: "perplexity", groq: "groq", manus: "manus",
+  perplexity: "perplexity", groq: "groq", manus: "manus", hermes: "hermes",
 };
 
 function backupName(file: string, now: Date) {
@@ -358,7 +358,7 @@ export const ACTIONS: ActionDef[] = [
   def({
     name: "ai.run",
     describe:
-      "Give a task to one of the owner's AI tools on this device: claude (Claude Code), codex (ChatGPT), gemini (Antigravity / Gemini), perplexity, groq, manus (a cloud agent with its own browser; every task uses paid Manus credits, so it always asks). write=false is read-only and runs at once; write=true lets it change files in `cwd` and asks first.",
+      "Give a task to one of the owner's AI tools on this device: claude (Claude Code), codex (ChatGPT), gemini (Antigravity / Gemini), perplexity, groq, manus (a cloud agent with its own browser; every task uses paid Manus credits, so it always asks), hermes (Hermes Agent in its own container with its own tools, so it always asks). write=false is read-only and runs at once; write=true lets it change files in `cwd` and asks first.",
     args: z.object({
       tool: z.string(),
       task: z.string().min(1),
@@ -366,8 +366,8 @@ export const ACTIONS: ActionDef[] = [
       write: z.boolean().default(false),
       timeoutMinutes: z.number().min(1).max(120).default(20),
     }),
-    // Manus spends paid credits on every task: never without the owner's tap.
-    risk: (a) => (a.write || AI_TOOLS[a.tool?.toLowerCase() ?? ""] === "manus" ? "ask" : "safe"),
+    // Manus spends paid credits on every task, and Hermes has its own terminal so write=false binds nothing: never without the owner's tap.
+    risk: (a) => (a.write || ["manus", "hermes"].includes(AI_TOOLS[a.tool?.toLowerCase() ?? ""]) ? "ask" : "safe"),
     summary: (a) => `${a.write ? "Let" : "Ask"} ${a.tool} ${a.write ? "change files" : "(read-only)"}${a.cwd ? ` in ${a.cwd}` : ""}: ${a.task.slice(0, 160)}`,
     run: async (a, ctx) => {
       const provider = AI_TOOLS[a.tool.toLowerCase()];
