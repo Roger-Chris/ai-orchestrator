@@ -162,7 +162,7 @@ export class ModelRouter {
     let limited = true;
     for (const id of route.chain) {
       const r = await this.d.pool.run(id, { permission: "read", ...req });
-      this.d.store?.recordUsage(id, this.d.node, r.ok, r.durationMs);
+      this.d.store?.recordUsage(id, this.d.node, r.ok, r.durationMs, r.usage?.costUsd);
       if (r.ok) return { provider: id, text: r.text, route, failed };
       limited &&= !!r.rateLimited;
       failed.push({ id, error: r.error ?? "failed" });

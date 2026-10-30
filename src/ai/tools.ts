@@ -34,13 +34,13 @@ export interface ToolInfo {
   scores?: Partial<Record<TaskKind, number>>;
   /** Can run tools and edit files. */
   agentic: boolean;
-  limits: { maxConcurrent?: number; perDay?: number; note?: string };
+  limits: { maxConcurrent?: number; perDay?: number; spendPerDay?: number; note?: string };
   state: ToolState;
   /** When cooling or at its daily cap: when it can be used again. */
   until?: number;
   /** Slots in use / slots, 0..1+. */
   load: number;
-  usageToday: { calls: number; failed: number; avgMs: number };
+  usageToday: Usage;
   /** Why it isn't ready, or what model/version it is. */
   detail?: string;
 }
@@ -52,6 +52,7 @@ const PROVIDER_FACTS: Record<ProviderId, { name: string; cost: CostClass; note: 
   gemini: { name: "Gemini (Antigravity)", cost: "subscription", note: "Google AI Pro through the agy CLI: generous limits, slow to start." },
   perplexity: { name: "Perplexity", cost: "paid", note: "API key: billed per request; for live web research." },
   groq: { name: "Groq", cost: "free", note: "Free tier: per-minute and per-day request limits per model; keys rotate on 429." },
+  local: { name: "Local model (Ollama)", cost: "local", note: "Runs on this machine: free and private; small, and slow without a GPU." },
 };
 
 const TTS_FACTS: Record<TtsProviderId, { name: string; cost: CostClass; note: string }> = {
@@ -59,6 +60,14 @@ const TTS_FACTS: Record<TtsProviderId, { name: string; cost: CostClass; note: st
   gemini: { name: "Gemini voice", cost: "free", note: "Gemini API free tier (daily request limit), paid beyond it." },
   groq: { name: "Groq voice (Orpheus)", cost: "free", note: "Free tier, 200 characters per request." },
 };
+
+/** Calls today, failures, average time, and dollars spent (reported by the service, or estimated with costPerCall). */
+export interface Usage {
+  calls: number;
+  failed: number;
+  avgMs: number;
+  spentUsd: number;
+}
 
 export interface ToolRegistryDeps {
   config: Config;
@@ -77,6 +86,7 @@ interface UsageRow {
   calls: number;
   failed: number;
   duration_ms: number;
+  cost_usd?: number;
 }
 
 const STRONG = 8.5;
@@ -92,24 +102,45 @@ export class ToolRegistry {
   }
 
   /** Usage per tool id for today (UTC day, as the usage table keeps it), across every device that reported here. */
-  usageToday(): Map<string, { calls: number; failed: number; avgMs: number }> {
+  usageToday(): Map<string, Usage> {
     const day = new Date(this.now()).toISOString().slice(0, 10);
-    const out = new Map<string, { calls: number; failed: number; ms: number }>();
+    const out = new Map<string, { calls: number; failed: number; ms: number; cost: number }>();
     for (const r of this.d.usage() as UsageRow[]) {
       if (r.day !== day) continue;
-      const u = out.get(r.provider) ?? { calls: 0, failed: 0, ms: 0 };
+      const u = out.get(r.provider) ?? { calls: 0, failed: 0, ms: 0, cost: 0 };
       u.calls += r.calls;
       u.failed += r.failed;
       u.ms += r.duration_ms;
+      u.cost += r.cost_usd ?? 0;
       out.set(r.provider, u);
     }
-    return new Map([...out].map(([k, u]) => [k, { calls: u.calls, failed: u.failed, avgMs: u.calls ? Math.round(u.ms / u.calls) : 0 }]));
+    return new Map(
+      [...out].map(([k, u]) => {
+        // What the service reported, or the owner's per-call estimate when that is higher (most don't report).
+        const estimate = u.calls * (this.d.config.tools.overrides[k]?.costPerCall ?? 0);
+        return [k, { calls: u.calls, failed: u.failed, avgMs: u.calls ? Math.round(u.ms / u.calls) : 0, spentUsd: round2(Math.max(u.cost, estimate)) }];
+      }),
+    );
+  }
+
+  /**
+   * Why this tool may not be used again today (its daily call cap or spend cap is reached), or
+   * undefined. Synchronous, so the provider pool and the speech services can ask before every call.
+   */
+  capped(id: string, usage = this.usageToday()): string | undefined {
+    const o = this.d.config.tools.overrides[id];
+    if (!o?.perDay && !o?.spendPerDay) return undefined;
+    const u = usage.get(id);
+    if (!u) return undefined;
+    if (o.perDay && u.calls >= o.perDay) return `daily cap of ${o.perDay} reached`;
+    if (o.spendPerDay && u.spentUsd >= o.spendPerDay) return `spend cap of $${o.spendPerDay} a day reached ($${u.spentUsd.toFixed(2)} today)`;
+    return undefined;
   }
 
   /** Every tool with its live state. `fresh` re-detects logins instead of using the 5-minute cache. */
   async list(fresh = false): Promise<ToolInfo[]> {
     const usage = this.usageToday();
-    const zero = { calls: 0, failed: 0, avgMs: 0 };
+    const zero: Usage = { calls: 0, failed: 0, avgMs: 0, spentUsd: 0 };
     const tools: ToolInfo[] = [];
 
     const status = await this.d.pool.status(fresh);
@@ -126,7 +157,7 @@ export class ToolRegistry {
       else if (s.coolingDownUntil) (state = "cooling"), (until = s.coolingDownUntil);
       else if (this.d.pool.load(id) >= 1) state = "busy";
       tools.push(
-        this.finish({
+        this.finish(usage, {
           id,
           name: facts.name,
           kind: AGENTIC[id] ? "agent" : "chat",
@@ -148,7 +179,7 @@ export class ToolRegistry {
     const groq = this.d.config.providers.groq;
     const groqKeys = [...groq.apiKeys, groq.apiKey ?? ""].some((k) => k.trim());
     tools.push(
-      this.finish({
+      this.finish(usage, {
         id: "whisper:groq",
         name: "Groq Whisper",
         kind: "transcribe",
@@ -170,7 +201,7 @@ export class ToolRegistry {
       const facts = TTS_FACTS[id];
       const set = !!p && (p.ready || !!p.restingUntil);
       tools.push(
-        this.finish({
+        this.finish(usage, {
           id: `tts:${id}`,
           name: facts.name,
           kind: "speech",
@@ -187,16 +218,19 @@ export class ToolRegistry {
       );
     }
 
-    // Local models on this machine (Ollama), the ones the config uses.
+    // Other local models on this machine (Ollama) the config uses; the chat model the `local`
+    // provider runs is already listed above as `local`.
     const local = await this.ollamaModels();
     const style = this.d.config.style;
+    const localChat = this.d.config.providers.local.model ?? style.model;
     for (const [model, kind] of [
       [style.model, "chat"],
       [style.visionModel, "vision"],
     ] as const) {
+      if (model === localChat && kind === "chat") continue;
       const have = local?.some((m) => m === model || m === `${model}:latest`);
       tools.push(
-        this.finish({
+        this.finish(usage, {
           id: `ollama:${model}`,
           name: `${model} (Ollama, this machine)`,
           kind,
@@ -215,16 +249,18 @@ export class ToolRegistry {
   }
 
   /** Config overrides (`tools.<id>`): cost class, daily cap, a note, or turning a tool off. */
-  private finish(t: ToolInfo): ToolInfo {
+  private finish(usage: Map<string, Usage>, t: ToolInfo): ToolInfo {
     const o = this.d.config.tools.overrides[t.id];
     if (o?.cost) t.cost = o.cost;
     if (o?.note) t.limits.note = o.note;
     if (o?.perDay) t.limits.perDay = o.perDay;
+    if (o?.spendPerDay) t.limits.spendPerDay = o.spendPerDay;
     if (o?.enabled === false) (t.state = "off"), (t.detail = "turned off in config (tools.overrides)");
-    if (t.state === "ready" && t.limits.perDay && t.usageToday.calls >= t.limits.perDay) {
+    const cap = this.capped(t.id, usage);
+    if (cap && (t.state === "ready" || t.state === "busy")) {
       t.state = "limit";
       t.until = nextUtcDay(this.now());
-      t.detail = `daily cap of ${t.limits.perDay} reached`;
+      t.detail = cap;
     }
     return t;
   }
@@ -250,6 +286,8 @@ export function strengthsOf(scores: Partial<Record<TaskKind, number>>): TaskKind
     .sort((a, b) => b[1] - a[1])
     .map(([k]) => k);
 }
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function nextUtcDay(now: number): number {
   const d = new Date(now);

@@ -3,8 +3,9 @@
  */
 
 /** Built-in provider ids. Each maps to one of your subscriptions. */
-export type ProviderId = "claude" | "codex" | "gemini" | "perplexity" | "groq";
-export const PROVIDER_IDS: ProviderId[] = ["claude", "codex", "gemini", "perplexity", "groq"];
+/** `local` is a model on this machine through Ollama (free, private; slow without a GPU). */
+export type ProviderId = "claude" | "codex" | "gemini" | "perplexity" | "groq" | "local";
+export const PROVIDER_IDS: ProviderId[] = ["claude", "codex", "gemini", "perplexity", "groq", "local"];
 
 /**
  * The kinds of work the brain knows how to route. Each provider has a 0..10

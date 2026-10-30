@@ -89,6 +89,8 @@ export class Tts {
   private resting = new Map<TtsProviderId, { until: number; error: string }>();
   private cache = new Map<string, Speech>();
   private groqNext = 0;
+  /** Asked before each service is tried (R3): a reason skips it (daily call or spend cap reached). Set by cli.ts from the tool registry. */
+  capped?: (id: TtsProviderId) => string | undefined;
 
   constructor(
     private opts: TtsOptions,
@@ -142,7 +144,9 @@ export class Tts {
     if (!order.length) throw new TtsError("no speech service is set up on the hub (OPENAI_API_KEY, GEMINI_API_KEY or Groq keys); the phone speaks instead", 409);
     const errors: string[] = [];
     // A resting service is skipped until its rest is over, so a dead key costs one slow line, not every line.
-    const ranked = order.filter((p) => !this.isResting(p));
+    const capped = order.map((p) => [p, this.capped?.(p)] as const).filter(([, why]) => why);
+    const ranked = order.filter((p) => !this.isResting(p) && !capped.some(([c]) => c === p));
+    if (!ranked.length && capped.length) throw new TtsError(`speech services at their cap today (${capped.map(([p, why]) => `${PROVIDER_LABEL[p]}: ${why}`).join("; ")}); the phone speaks instead`, 503);
     if (!ranked.length) throw new TtsError(`every speech service is resting after errors (${order.map((p) => `${PROVIDER_LABEL[p]}: ${this.resting.get(p)?.error}`).join("; ")}); the phone speaks instead`, 503);
     for (const provider of ranked) {
       // The asked voice belongs to the asked service; the others use their own default.

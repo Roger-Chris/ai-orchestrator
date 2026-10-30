@@ -92,6 +92,9 @@ export function buildSystem(config: Config) {
   // The tool registry (R1) and the model router (R2) choose which AI does the hub's own jobs.
   const tts = ttsFromConfig(config, undefined, (p, ok, ms) => store.recordUsage(`tts:${p}`, config.node.name, ok, ms));
   const tools = new ToolRegistry({ config, pool, capabilities: buildCapabilities(config.routing.overrides), usage: () => store.usage(1), tts });
+  // Daily call and spend caps (tools.overrides perDay / spendPerDay) are enforced for every run and every spoken line.
+  pool.capped = (id) => tools.capped(id);
+  tts.capped = (id) => tools.capped(`tts:${id}`);
   const models = new ModelRouter({ tools: () => tools.list(), pool, store, node: config.node.name, routes: config.tools.routes });
   const gmail = new GmailReader(store, pool, {
     clientFile: resolve(config.gmail.clientFile),

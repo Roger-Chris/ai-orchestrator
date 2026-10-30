@@ -4,6 +4,7 @@ import type { Provider } from "./base.js";
 import { ClaudeProvider } from "./claude.js";
 import { CodexProvider } from "./codex.js";
 import { GeminiProvider } from "./gemini.js";
+import { LocalProvider } from "./local.js";
 import { OpenAICompatProvider } from "./openai-compat.js";
 import { PerplexityProvider } from "./perplexity.js";
 
@@ -43,6 +44,8 @@ export class ProviderPool {
   private sems = new Map<ProviderId, Semaphore>();
   private cooldowns = new Map<ProviderId, { until: number; reason: string }>();
   private statusCache?: { at: number; value: ProviderStatus[] };
+  /** Asked before every run (R3): a reason means "not today" (its daily call or spend cap is reached). Set by cli.ts from the tool registry. */
+  capped?: (id: ProviderId) => string | undefined;
 
   constructor(
     private config: Config,
@@ -56,6 +59,7 @@ export class ProviderPool {
       overrides?.gemini ?? new GeminiProvider(p.gemini),
       overrides?.perplexity ?? new PerplexityProvider(p.perplexity),
       overrides?.groq ?? new OpenAICompatProvider("groq", p.groq, "Optional. Set GROQ_API_KEY (free at console.groq.com) for fast answers to quick questions and Gmail reading."),
+      overrides?.local ?? new LocalProvider(p.local.url ?? config.style.ollamaUrl, p.local.model ?? config.style.model),
     ];
     for (const prov of all) {
       if (!p[prov.id].enabled && !overrides?.[prov.id]) continue;
@@ -79,7 +83,7 @@ export class ProviderPool {
   /** Providers ready to take work right now on this device. */
   async available(): Promise<ProviderId[]> {
     const st = await this.status();
-    return st.filter((s) => s.installed && s.authenticated && !this.cooldownUntil(s.id)).map((s) => s.id);
+    return st.filter((s) => s.installed && s.authenticated && !this.cooldownUntil(s.id) && !this.capped?.(s.id)).map((s) => s.id);
   }
 
   cooldownUntil(id: ProviderId): number | undefined {
@@ -112,6 +116,8 @@ export class ProviderPool {
   async run(id: ProviderId, req: ProviderRequest): Promise<ProviderResult> {
     const prov = this.providers.get(id);
     if (!prov) return { ok: false, text: "", provider: id, durationMs: 0, error: `provider ${id} is disabled on this device` };
+    const cap = this.capped?.(id);
+    if (cap) return { ok: false, text: "", provider: id, durationMs: 0, error: `${id}: ${cap}` };
     const cfg = this.config.providers[id];
     const model = req.model ?? (req.deep ? cfg.deepModel : undefined);
     const release = await this.sems.get(id)!.acquire();

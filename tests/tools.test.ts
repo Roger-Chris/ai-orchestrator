@@ -38,7 +38,7 @@ function setup(raw: Record<string, unknown> = {}, ollama: string[] | null = ["qw
   const config = parseConfig({ node: { name: "hub" }, dataDir, server: { token: "secret-token" }, cluster: { enabled: false }, context: { graphify: "off" }, providers: { groq: { apiKeys: ["gk"], maxConcurrent: 1 } }, ...raw });
   const store = new Store(dataDir);
   cleanup.unshift(() => store.close());
-  const pool = new ProviderPool(config, store, { claude: provider("claude", true), codex: provider("codex", true), gemini: provider("gemini", false), perplexity: provider("perplexity", false), groq: provider("groq", true) });
+  const pool = new ProviderPool(config, store, { claude: provider("claude", true), codex: provider("codex", true), gemini: provider("gemini", false), perplexity: provider("perplexity", false), groq: provider("groq", true), local: provider("local", true) });
   const http = (async () => (ollama ? Response.json({ models: ollama.map((name) => ({ name })) }) : Promise.reject(new Error("ECONNREFUSED")))) as typeof fetch;
   const tts = new Tts({ provider: "auto", order: ["openai", "gemini", "groq"], maxChars: 600, openai: { baseUrl: "x", model: "m", voice: "onyx" }, gemini: { baseUrl: "x", model: "m", voice: "Charon" }, groq: { keys: ["gk"], baseUrl: "x", model: "m", voice: "troy" } });
   const registry = new ToolRegistry({ config, pool, capabilities: buildCapabilities(config.routing.overrides), usage: () => store.usage(1), tts, http, now: () => NOW });
@@ -52,7 +52,8 @@ describe("tool registry", () => {
     const { registry } = setup();
     const tools = await registry.list();
     const by = Object.fromEntries(tools.map((t) => [t.id, t]));
-    expect(Object.keys(by)).toEqual(["claude", "codex", "gemini", "perplexity", "groq", "whisper:groq", "tts:openai", "tts:gemini", "tts:groq", "ollama:qwen3:8b", "ollama:gemma3:4b"]);
+    // the local chat model is the `local` provider; Ollama's other models (vision) are listed by name
+    expect(Object.keys(by)).toEqual(["claude", "codex", "gemini", "perplexity", "groq", "local", "whisper:groq", "tts:openai", "tts:gemini", "tts:groq", "ollama:gemma3:4b"]);
     expect(by.claude).toMatchObject({ kind: "agent", cost: "subscription", agentic: true, state: "ready", limits: { maxConcurrent: 2 } });
     expect(by.claude.strengths.slice(0, 3)).toEqual(["system_design", "coding", "debugging"]);
     expect(by.groq).toMatchObject({ kind: "chat", cost: "free", agentic: false, state: "ready" });
@@ -61,7 +62,7 @@ describe("tool registry", () => {
     expect(by["whisper:groq"]).toMatchObject({ kind: "transcribe", cost: "free", state: "ready", detail: "whisper-large-v3-turbo" });
     expect(by["tts:openai"]).toMatchObject({ kind: "speech", cost: "paid", state: "not_set_up" });
     expect(by["tts:groq"]).toMatchObject({ state: "ready", detail: "voice troy" });
-    expect(by["ollama:qwen3:8b"]).toMatchObject({ kind: "chat", cost: "local", state: "ready" });
+    expect(by.local).toMatchObject({ kind: "chat", cost: "local", agentic: false, state: "ready", limits: { maxConcurrent: 1 } });
     expect(by["ollama:gemma3:4b"]).toMatchObject({ kind: "vision", state: "not_set_up", detail: "not pulled (ollama pull gemma3:4b)" });
   });
 
@@ -81,8 +82,8 @@ describe("tool registry", () => {
     expect(by.codex.state).toBe("cooling");
     expect(by.codex.until).toBeGreaterThan(Date.now());
     expect(by.groq).toMatchObject({ state: "busy", load: 1 });
-    expect(by.claude.usageToday).toEqual({ calls: 2, failed: 1, avgMs: 2000 });
-    expect(by["tts:groq"]).toMatchObject({ state: "off", usageToday: { calls: 1, failed: 0, avgMs: 400 } }); // no Tts given: off
+    expect(by.claude.usageToday).toEqual({ calls: 2, failed: 1, avgMs: 2000, spentUsd: 0 });
+    expect(by["tts:groq"]).toMatchObject({ state: "off", usageToday: { calls: 1, failed: 0, avgMs: 400, spentUsd: 0 } }); // no Tts given: off
     release();
     await running;
   });
@@ -95,7 +96,7 @@ describe("tool registry", () => {
     ];
     const s = setup();
     const r = new ToolRegistry({ config: s.config, pool: s.pool, capabilities: buildCapabilities(), usage: () => rows, now: () => NOW });
-    expect(r.usageToday().get("claude")).toEqual({ calls: 4, failed: 1, avgMs: 100 });
+    expect(r.usageToday().get("claude")).toEqual({ calls: 4, failed: 1, avgMs: 100, spentUsd: 0 });
   });
 
   it("applies config overrides: cost, daily cap, turned off", async () => {
@@ -110,7 +111,7 @@ describe("tool registry", () => {
 
   it("says when Ollama isn't running", async () => {
     const { registry } = setup({}, null);
-    const t = (await registry.list()).find((x) => x.id === "ollama:qwen3:8b")!;
+    const t = (await registry.list()).find((x) => x.id === "ollama:gemma3:4b")!;
     expect(t).toMatchObject({ state: "not_set_up", detail: "Ollama is not running here" });
   });
 

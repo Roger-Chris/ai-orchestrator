@@ -94,6 +94,18 @@ const ConfigSchema = z.object({
           maxConcurrent: z.number().int().min(1).default(4),
         })
         .prefault({}),
+      /**
+       * A model on this machine through Ollama's OpenAI-compatible API (Jarvis R3). Free and private;
+       * small and slow without a GPU, so the router uses it last. Empty url/model: `style.ollamaUrl` / `style.model`.
+       */
+      local: z
+        .object({
+          ...providerBase,
+          url: z.string().optional(),
+          model: z.string().optional(),
+          maxConcurrent: z.number().int().min(1).default(1),
+        })
+        .prefault({}),
     })
     .prefault({}),
   /** Per-kind score overrides, e.g. { pcb_design: { codex: 9 } }. Merged over the built-in matrix. */
@@ -326,6 +338,10 @@ const ConfigSchema = z.object({
           z.object({
             cost: z.enum(["local", "free", "subscription", "paid"]).optional(),
             perDay: z.number().int().min(1).optional(),
+            /** Spend cap in US dollars per UTC day (R3): reached -> the tool is skipped until tomorrow. */
+            spendPerDay: z.number().positive().optional(),
+            /** Estimated dollars per call, for services that don't report their cost (OpenAI voice, say). */
+            costPerCall: z.number().min(0).optional(),
             note: z.string().optional(),
             enabled: z.boolean().optional(),
           }),

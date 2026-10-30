@@ -506,7 +506,7 @@ export class Orchestrator {
     const target = (await this.cluster.candidates()).filter((x) => x.provider === "groq").sort((a, b) => Number(b.local) - Number(a.local) || a.load - b.load)[0];
     if (!target) return c;
     const res = await this.cluster.run(target.node, "groq", { prompt: classifyPrompt(task), permission: "read", timeoutMs: 8000 });
-    this.store.recordUsage("groq", target.node, res.ok, res.durationMs);
+    this.store.recordUsage("groq", target.node, res.ok, res.durationMs, res.usage?.costUsd);
     return res.ok ? refineClassification(c, res.text) : c;
   }
 
@@ -538,7 +538,7 @@ export class Orchestrator {
         timeoutMs: 5 * 60_000,
         signal: l.abort.signal,
       });
-      this.store.recordUsage(provider, target.node, res.ok, res.durationMs);
+      this.store.recordUsage(provider, target.node, res.ok, res.durationMs, res.usage?.costUsd);
       if (!res.ok) continue;
       try {
         return normalizePlan(extractJson(res.text), task, c, this.agents, this.config.brain.maxPlanSteps);
@@ -661,7 +661,7 @@ export class Orchestrator {
                 onDelta: (text) => this.emit(l, "step.delta", { text }, spec.id),
                 onProgress: (note) => this.emit(l, "step.progress", { note }, spec.id),
               });
-          this.store.recordUsage(cand.provider, cand.node, r.ok, r.durationMs);
+          this.store.recordUsage(cand.provider, cand.node, r.ok, r.durationMs, r.usage?.costUsd);
           rec.attempts.push({ provider: cand.provider, node: cand.node, ok: r.ok, error: r.error, durationMs: r.durationMs });
           if (r.ok) {
             res = r;
@@ -843,7 +843,7 @@ export class Orchestrator {
         signal: l.abort.signal,
         onDelta: (text) => this.emit(l, "step.delta", { text }, id),
       });
-      this.store.recordUsage(cand.provider, cand.node, res.ok, res.durationMs);
+      this.store.recordUsage(cand.provider, cand.node, res.ok, res.durationMs, res.usage?.costUsd);
       if (res.ok) {
         this.emit(l, "step.completed", { provider: res.provider, node: cand.node, durationMs: res.durationMs, output: res.text }, id);
         return res.text;

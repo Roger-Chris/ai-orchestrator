@@ -646,7 +646,7 @@ export function createApp(d: AppDeps) {
         onDelta: (text) => void write({ type: "delta", text }),
         onProgress: (note) => void write({ type: "progress", note }),
       });
-      d.store.recordUsage(body.provider, d.cluster.name, result.ok, result.durationMs);
+      d.store.recordUsage(body.provider, d.cluster.name, result.ok, result.durationMs, result.usage?.costUsd);
       await write({ type: "result", result });
     });
   });
@@ -702,7 +702,7 @@ export function createApp(d: AppDeps) {
     if (raw) {
       if (!raw.success) return c.json({ error: { message: `unknown provider in ${body.model}`, type: "invalid_request_error" } }, 400);
       const r = await d.pool.run(raw.data, { system, prompt, permission: "read", timeoutMs: 240_000 });
-      d.store.recordUsage(raw.data, d.cluster.name, r.ok, r.durationMs);
+      d.store.recordUsage(raw.data, d.cluster.name, r.ok, r.durationMs, r.usage?.costUsd);
       if (!r.ok) return c.json({ error: { message: r.error ?? "failed", type: r.rateLimited ? "rate_limit" : "provider_error" } }, r.rateLimited ? 429 : 502);
       return c.json({
         id: `chatcmpl-raw-${Date.now()}`,

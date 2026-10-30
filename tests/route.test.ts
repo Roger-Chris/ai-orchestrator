@@ -42,7 +42,7 @@ function setup(behave: Partial<Record<ProviderId, Behaviour>> = {}, raw: Record<
   const store = new Store(dataDir);
   cleanup.unshift(() => store.close());
   const calls: ProviderId[] = [];
-  const b = { claude: {}, codex: {}, gemini: { ready: false }, perplexity: { ready: false }, groq: {}, ...behave } as Record<ProviderId, Behaviour>;
+  const b = { claude: {}, codex: {}, gemini: { ready: false }, perplexity: { ready: false }, groq: {}, local: { ready: false }, ...behave } as Record<ProviderId, Behaviour>;
   const pool = new ProviderPool(config, store, Object.fromEntries((Object.keys(b) as ProviderId[]).map((id) => [id, provider(id, b[id], calls)])) as Record<ProviderId, Provider>);
   const http = (async () => Response.json({ models: [] })) as typeof fetch;
   const tools = new ToolRegistry({ config, pool, capabilities: buildCapabilities(config.routing.overrides), usage: () => store.usage(1), http });
@@ -62,7 +62,10 @@ describe("model router", () => {
     const r = await models.routeFor("whatsapp_draft", "small");
     expect(r.chain).toEqual(["claude", "codex", "groq"]);
     // Perplexity (paid, web search) is never a fallback for the hub's own jobs
-    expect(r.skipped).toEqual([{ id: "gemini", why: "not set up" }]);
+    expect(r.skipped).toEqual([
+      { id: "gemini", why: "not set up" },
+      { id: "local", why: "not set up" },
+    ]);
     expect((await models.routeFor("mail")).chain).toEqual(["groq", "claude", "codex"]);
     expect((await models.routeFor("call")).chain).toEqual(["claude", "codex", "groq"]);
     expect((await models.routeFor("brain")).chain).toEqual(["codex", "claude", "groq"]);

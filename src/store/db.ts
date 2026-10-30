@@ -49,6 +49,9 @@ export class Store implements CooldownStore, FeedbackSource {
       );
       CREATE INDEX IF NOT EXISTS tasks_day ON tasks(day);
     `);
+    // R3: what paid calls cost (USD), when the service says; older databases get the column here.
+    const usageCols = (this.db.prepare("PRAGMA table_info(usage)").all() as { name: string }[]).map((c) => c.name);
+    if (!usageCols.includes("cost_usd")) this.db.exec("ALTER TABLE usage ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0");
   }
 
   addTask(t: Omit<DayTask, "done">) {
@@ -259,15 +262,15 @@ export class Store implements CooldownStore, FeedbackSource {
   }
 
   /** `provider` is a ProviderId or another tool id from src/ai/tools.ts (tts:openai, whisper:groq, ollama:<model>). */
-  recordUsage(provider: ProviderId | (string & {}), node: string, ok: boolean, durationMs: number) {
+  recordUsage(provider: ProviderId | (string & {}), node: string, ok: boolean, durationMs: number, costUsd = 0) {
     const day = new Date().toISOString().slice(0, 10);
     this.db
       .prepare(
-        `INSERT INTO usage (day, provider, node, calls, ok, failed, duration_ms) VALUES (?, ?, ?, 1, ?, ?, ?)
+        `INSERT INTO usage (day, provider, node, calls, ok, failed, duration_ms, cost_usd) VALUES (?, ?, ?, 1, ?, ?, ?, ?)
          ON CONFLICT(day, provider, node) DO UPDATE SET calls = calls + 1, ok = ok + excluded.ok,
-           failed = failed + excluded.failed, duration_ms = duration_ms + excluded.duration_ms`,
+           failed = failed + excluded.failed, duration_ms = duration_ms + excluded.duration_ms, cost_usd = cost_usd + excluded.cost_usd`,
       )
-      .run(day, provider, node, ok ? 1 : 0, ok ? 0 : 1, Math.round(durationMs));
+      .run(day, provider, node, ok ? 1 : 0, ok ? 0 : 1, Math.round(durationMs), Number.isFinite(costUsd) && costUsd > 0 ? costUsd : 0);
   }
 
   usage(days = 7) {
