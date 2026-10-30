@@ -3,6 +3,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { type ComponentRef, useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Feedback } from "../components/Feedback";
 import { ErrorText } from "../components/ui";
 import { Api, type PendingApproval, type TalkReply } from "../lib/api";
 import { convo, type Turn } from "../lib/convo";
@@ -206,6 +207,7 @@ export default function Talk() {
           <View key={t.id} style={{ gap: 6 }}>
             <Text style={{ color: c.muted, fontSize: 15, fontStyle: "italic" }}>{t.you}</Text>
             {t.reply && <Text selectable style={{ color: c.text, fontSize: 17, lineHeight: 24 }}>{t.reply.answer}</Text>}
+            {t.reply && <Feedback episodeId={t.reply.episode_id} used={t.reply.lessons} />}
             <ErrorText text={t.error} />
           </View>
         ))}

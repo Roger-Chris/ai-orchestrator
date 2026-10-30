@@ -260,6 +260,12 @@ describe("the app's way to the brain", () => {
       expect((await hub.request(p, { method: m })).status).toBe(403);
     }
     expect(seen).toHaveLength(3);
+    // the learning harness: feedback and lessons pass; its export (for the evaluation) does not
+    expect((await hub.request("/api/brain/learn/episodes/7/feedback", { method: "POST", body: JSON.stringify({ good: false }) })).status).toBe(200);
+    expect((await hub.request("/api/brain/learn/lessons/2", { method: "PATCH", body: JSON.stringify({ status: "off" }) })).status).toBe(200);
+    expect((await hub.request("/api/brain/learn/run", { method: "POST" })).status).toBe(200);
+    expect((await hub.request("/api/brain/learn/export")).status).toBe(403);
+    expect(seen).toHaveLength(6);
     const off = new Hono();
     mountBrain(off, { config: parseConfig({}) });
     expect((await off.request("/api/brain/tasks")).status).toBe(404);

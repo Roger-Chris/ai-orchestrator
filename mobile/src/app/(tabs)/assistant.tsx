@@ -1,6 +1,7 @@
 import { router } from "expo-router";
 import { type ComponentRef, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Feedback } from "../../components/Feedback";
 import { ErrorText } from "../../components/ui";
 import { Api } from "../../lib/api";
 import { convo, type Turn } from "../../lib/convo";
@@ -129,6 +130,7 @@ function TurnView({ t }: { t: Turn }) {
       {t.reply && (
         <View style={{ gap: 6 }}>
           <Text selectable style={{ color: c.text, fontSize: 16, lineHeight: 23 }}>{t.reply.answer}</Text>
+          <Feedback episodeId={t.reply.episode_id} used={t.reply.lessons} />
           {t.reply.pending.length > 0 && (
             <Pressable onPress={() => router.navigate("/")}>
               <Text style={{ color: c.warn, fontSize: 14 }}>

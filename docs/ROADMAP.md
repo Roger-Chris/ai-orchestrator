@@ -53,6 +53,11 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 - [x] S2 The app builds its own APK: Android previews on the device with the Android SDK (`builds.androidNode` / `builds.androidHere`), apps found in subfolders (mobile/), a cross-platform `npm run build:apk`, Settings → Update this app (download + Android installer).
 - [x] U1 Home: approvals from builds and agents; spoken notices toggle. (Other screens land with their phases.)
 
+### Learning harness (owner asked 2026-10-30: "learn, adapt and grow from its context")
+- [x] L1 Brain: episodes, 👍/👎 and corrections, "from now on…" teaching, lessons in the prompt (AI_Assistant learn.py, docs/LEARNING.md).
+- [x] L2 Brain: nightly settle + reflection (lessons, regression cases from failures) + evaluation gate (trial lessons promoted or rolled back); safety never learnt.
+- [x] L3 Hub + app: /api/brain/learn/* allow-listed; Good / Not right under every answer (Assistant and Talk); Settings -> Learning.
+
 ## Log
 - 2026-10-30: roadmap written; V1 hub voice endpoint; V2-V3 mic in Assistant tab + hands-free Talk screen (needs a new APK: expo-speech-recognition is native).
 - 2026-10-29 (scheduled run): V4 hub `POST /api/tts` + `GET /api/tts/audio` (OpenAI gpt-4o-mini-tts, Gemini Interactions TTS, Groq Orpheus split at 200 chars; failing services rest; cache) and Settings → Voice (auto / hub / phone, service, voice, phone voice, test). Phone TTS stays the fallback. Assumed Gemini model `gemini-3.8-flash-lite-tts` from the current docs; change `tts.gemini.model` if it is renamed. JS-only app change: rebuild the APK.
@@ -78,3 +83,4 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 - Desktop GUI automation (`gui.task`): pick a computer-use agent you trust and set `actions.computerUse.command`/`args` (with `{goal}`); until then it says it is not set up.
 - After the APK rebuild, Settings → Phone: the first alarm may ask which clock app to use.
 - Outside agents: add one in Settings → Outside agents, then give the agent `<hub>/mcp` and its token as an HTTP MCP server. A cloud agent can reach `/mcp` only if you expose it (e.g. Tailscale Funnel); decide that yourself, and prefer "Safe only" plus a folder scope.
+- 2026-10-30: L1-L3 learning harness (brain learn.py, app Learning screen and answer feedback).

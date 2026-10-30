@@ -18,6 +18,13 @@ const ALLOWED: [string, RegExp][] = [
   ["GET", /^\/llm\/usage$/],
   ["GET", /^\/graph$/],
   ["GET", /^\/memory\/stats$/],
+  // the learning harness (AI_Assistant learn.py): feedback, lessons, runs
+  ["GET", /^\/learn\/(status|lessons|episodes|cases)$/],
+  ["POST", /^\/learn\/episodes\/\d+\/feedback$/],
+  ["POST", /^\/learn\/lessons$/],
+  ["PATCH", /^\/learn\/lessons\/\d+$/],
+  ["POST", /^\/learn\/cases\/\d+\/off$/],
+  ["POST", /^\/learn\/(reflect|run)$/],
 ];
 
 export function brainPathAllowed(method: string, path: string): boolean {

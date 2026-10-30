@@ -118,6 +118,44 @@ export interface AssistantReply {
   answer: string;
   steps: { tool: string; args: Record<string, unknown>; result: string }[];
   pending: { device: string; action: string; status: string }[];
+  /** The learning harness's record of this answer: 👍 / 👎 go to it. */
+  episode_id?: number;
+  /** What the assistant had learnt and used for this answer. */
+  lessons?: { id: number; text: string }[];
+}
+
+export type LessonStatus = "proposed" | "trial" | "active" | "off";
+export interface Lesson {
+  id: number;
+  kind: "preference" | "fact" | "skill" | "rule" | "voice";
+  text: string;
+  when: string;
+  status: LessonStatus;
+  confidence: number;
+  uses: number;
+  wins: number;
+  losses: number;
+  note: string;
+}
+export interface LearnRun {
+  id: number;
+  at: string;
+  kind: "reflect" | "evaluate";
+  ok: boolean;
+  passed: number;
+  total: number;
+  summary: Record<string, unknown>;
+}
+export interface LearnStatus {
+  enabled: boolean;
+  lessons: Record<LessonStatus, number>;
+  episodes: number;
+  good: number;
+  bad: number;
+  waiting: number;
+  cases: number;
+  last_eval?: { at: string; passed: number; total: number } | null;
+  runs: LearnRun[];
 }
 
 /** The newest APK of this app the hub built (Settings → Update this app). */
@@ -157,6 +195,14 @@ export const Api = {
     if (!res.ok) throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`);
     return data as TalkReply;
   },
+  // ---- the learning harness (the brain's learn.py)
+  feedback: (episodeId: number, good: boolean, note = "") =>
+    api<{ id: number; outcome: string }>(`/api/brain/learn/episodes/${episodeId}/feedback`, { body: { good, note } }),
+  learnStatus: () => api<LearnStatus>("/api/brain/learn/status"),
+  lessons: () => api<Lesson[]>("/api/brain/learn/lessons"),
+  addLesson: (text: string, kind: Lesson["kind"] = "preference", when = "") => api<Lesson>("/api/brain/learn/lessons", { body: { text, kind, when } }),
+  setLesson: (id: number, status: "active" | "off" | "trial") => api<Lesson>(`/api/brain/learn/lessons/${id}`, { method: "PATCH", body: { status } }),
+  learnNow: () => api<Record<string, unknown>>("/api/brain/learn/run", { body: {}, timeoutMs: 3_600_000 }),
   brainTasks: (status?: BrainTask["status"]) => api<BrainTask[]>(`/api/brain/tasks?${q({ status, limit: 200 })}`),
   /** keep (confirm), drop (reject) or done; keep also reopens a finished one. */
   taskAction: (id: number, action: "confirm" | "reject" | "done") => api<BrainTask>(`/api/brain/tasks/${id}/${action}`, { body: {} }),

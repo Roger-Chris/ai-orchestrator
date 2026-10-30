@@ -109,6 +109,7 @@ export default function Settings() {
           <Button title="WhatsApp chats" onPress={() => router.push("/wa-chats")} />
         </Row>
         <Row>
+          <Button title="Learning" onPress={() => router.push("/learning" as never)} />
           <Button title="AI hub" onPress={() => router.push("/ai-hub" as never)} />
           <Button title="Builds" onPress={() => router.push("/builds" as never)} />
           <Button title="Phone" onPress={() => router.push("/phone" as never)} />

@@ -193,3 +193,7 @@ Hard-won details:
 
 - Plain, specific comments; small modules; no new dependencies without a reason.
 - Never commit `.env`, `fcm-service-account.json`, `gmail-client.json` or `data/`.
+
+## Learning (the brain's learning harness)
+
+- The brain's replies carry `episode_id` and `lessons`; the app's `components/Feedback.tsx` (Good / Not right + a note) posts `/api/brain/learn/episodes/:id/feedback`. Settings -> Learning (`mobile/src/app/learning.tsx`) lists lessons by status, adds your own, and runs the nightly pass now. Only the `/learn/*` paths in `src/server/brain.ts` pass; `/learn/export` stays brain-side. Details: AI_Assistant docs/LEARNING.md.
