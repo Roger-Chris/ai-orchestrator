@@ -35,10 +35,13 @@ $runner = Join-Path $Code "deploy\windows\keep-running.ps1"
 function Install-Task($name, $label, [string[]]$command) {
   $argLine = "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$runner`" -Code `"$Code`" -Root `"$Root`" -Name $label -Command $($command -join ',')"
   $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argLine -WorkingDirectory $Root
-  $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+  # The full account name (MACHINE\user): a bare name is refused, e.g. when the PC has the user's name.
+  $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $trigger = New-ScheduledTaskTrigger -AtLogOn -User $me
+  $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
   $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
     -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
-  Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Settings $settings -Description "AI Orchestrator: orc $($command -join ' ') (deploy\windows\install.ps1)" -Force | Out-Null
+  Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description "AI Orchestrator: orc $($command -join ' ') (deploy\windows\install.ps1)" -Force | Out-Null
   Start-ScheduledTask -TaskName $name
   Write-Host "${name}: starts at logon, running now; log in $Root\data\logs\$label.log"
 }
