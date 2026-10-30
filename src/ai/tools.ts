@@ -24,6 +24,7 @@ const PROVIDER_FACTS: Record<ProviderId, { name: string; cost: CostClass; note: 
   perplexity: { name: "Perplexity", cost: "paid", note: "API key: billed per request; for live web research." },
   groq: { name: "Groq", cost: "free", note: "Free tier: per-minute and per-day request limits per model; keys rotate on 429." },
   local: { name: "Local model (Ollama)", cost: "local", note: "Runs on this machine: free and private; small, and slow without a GPU." },
+  manus: { name: "Manus", cost: "paid", note: "API key: a cloud agent with its own browser; each task uses Manus credits and takes minutes." },
 };
 
 const TTS_FACTS: Record<TtsProviderId, { name: string; cost: CostClass; note: string }> = {

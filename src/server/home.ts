@@ -20,7 +20,7 @@ function chatNamer(store: Store, book?: StyleBook) {
 }
 import type { Attention, Decision, Home, HomeBuild, Insights, ProviderId, Running } from "../types.js";
 
-export const PROVIDER_NAME: Record<ProviderId, string> = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity", groq: "Groq", local: "Local model" };
+export const PROVIDER_NAME: Record<ProviderId, string> = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity", groq: "Groq", local: "Local model", manus: "Manus" };
 
 /** Local date as YYYY-MM-DD (the hub's time zone, which is yours). */
 export const localDay = (t = new Date()) => `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;

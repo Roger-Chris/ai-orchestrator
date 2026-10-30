@@ -123,6 +123,9 @@ describe("running actions on a device", () => {
     expect(res).toMatchObject({ status: "done", result: { ok: true, output: "the answer" } });
     expect(calls[0]).toMatchObject({ id: "gemini", req: { permission: "read" } });
     expect(await r.act({ action: "ai.run", args: { tool: "claude", task: "fix the bug", write: true } })).toMatchObject({ status: "needs_approval" });
+    // Manus spends paid credits: even a read-only task waits for the owner's tap
+    expect(await r.act({ action: "ai.run", args: { tool: "manus", task: "compare flights to Delhi" } })).toMatchObject({ status: "needs_approval" });
+    expect(calls).toHaveLength(1);
   });
 });
 

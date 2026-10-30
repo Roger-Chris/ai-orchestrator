@@ -1,5 +1,5 @@
 import type { ProviderId, TaskKind } from "../types.js";
-import { AGENTIC, type CapabilityMatrix } from "./capabilities.js";
+import { AGENTIC, type CapabilityMatrix, ONLY_WHEN_ASKED } from "./capabilities.js";
 
 /** A provider on a specific device that could run a step. */
 export interface Candidate {
@@ -50,6 +50,7 @@ export class Router {
     for (const c of candidates) {
       if (req.pin && c.provider !== req.pin) continue;
       if (req.exclude?.includes(c.provider) && !req.pin) continue;
+      if (ONLY_WHEN_ASKED.includes(c.provider) && req.pin !== c.provider) continue;
       if (req.nodes?.length && !req.nodes.includes(c.node)) continue;
       if (req.branchWork && (!c.branchWork || !AGENTIC[c.provider])) continue;
       if (!req.branchWork && req.needsWorkspace && (!c.local || !AGENTIC[c.provider])) continue;

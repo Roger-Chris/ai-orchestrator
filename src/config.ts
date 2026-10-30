@@ -77,6 +77,22 @@ const ConfigSchema = z.object({
         })
         .prefault({}),
       /**
+       * Manus (manus.ai): a cloud agent with its own browser and computer, through its API (MANUS_API_KEY).
+       * model = its agent profile: lite, standard, max… Slow and billed in Manus credits: used when asked for.
+       */
+      manus: z
+        .object({
+          ...providerBase,
+          apiKey: z.string().optional(),
+          baseUrl: z.string().default("https://api.manus.ai"),
+          model: z.string().default("standard"),
+          deepModel: z.string().default("max"),
+          /** Seconds between checks on a running task. */
+          pollSeconds: z.number().min(1).default(5),
+          maxConcurrent: z.number().int().min(1).default(2),
+        })
+        .prefault({}),
+      /**
        * Groq: a fast OpenAI-compatible API with a free tier (console.groq.com). Takes quick
        * questions and reads Gmail. Any other OpenAI-compatible service works the same way.
        */
@@ -421,6 +437,7 @@ export function parseConfig(raw: unknown): Config {
   if (!cfg.server.token) cfg.server.token = process.env.ORC_TOKEN || undefined;
   // Without a key Perplexity stays listed but reports itself as not logged in.
   if (!cfg.providers.perplexity.apiKey) cfg.providers.perplexity.apiKey = process.env.PERPLEXITY_API_KEY || undefined;
+  if (!cfg.providers.manus.apiKey) cfg.providers.manus.apiKey = process.env.MANUS_API_KEY || undefined;
   if (!cfg.profile.name) cfg.profile.name = process.env.OWNER_NAME || undefined;
   if (!cfg.assistant.token) cfg.assistant.token = process.env.BRAIN_TOKEN || undefined;
   if (!cfg.sharedMemory.hub) cfg.sharedMemory.hub = process.env.MEMORY_HUB || undefined;

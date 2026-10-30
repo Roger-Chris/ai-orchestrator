@@ -53,7 +53,7 @@ describe("tool registry", () => {
     const tools = await registry.list();
     const by = Object.fromEntries(tools.map((t) => [t.id, t]));
     // the local chat model is the `local` provider; Ollama's other models (vision) are listed by name
-    expect(Object.keys(by)).toEqual(["claude", "codex", "gemini", "perplexity", "groq", "local", "whisper:groq", "tts:openai", "tts:gemini", "tts:groq", "ollama:gemma3:4b"]);
+    expect(Object.keys(by)).toEqual(["claude", "codex", "gemini", "perplexity", "groq", "local", "manus", "whisper:groq", "tts:openai", "tts:gemini", "tts:groq", "ollama:gemma3:4b"]);
     expect(by.claude).toMatchObject({ kind: "agent", cost: "subscription", agentic: true, state: "ready", limits: { maxConcurrent: 2 } });
     expect(by.claude.strengths.slice(0, 3)).toEqual(["system_design", "coding", "debugging"]);
     expect(by.groq).toMatchObject({ kind: "chat", cost: "free", agentic: false, state: "ready" });
@@ -127,7 +127,7 @@ describe("tool registry", () => {
     const orchestrator = new Orchestrator(s.config, store, cluster, router, loadAgents(["agents"]), {});
     const app = createApp({ config: s.config, store, pool: s.pool, cluster, router, orchestrator, publicDir: ".", tools: s.registry });
     const r = await (await app.request("/api/tools?fresh=1", { headers: { Authorization: "Bearer secret-token" } })).json();
-    expect(r.tools.length).toBe(11);
+    expect(r.tools.length).toBe(12);
     expect(JSON.stringify(r)).not.toContain("gk"); // keys never leave the hub
     const none = createApp({ config: s.config, store, pool: s.pool, cluster, router, orchestrator, publicDir: "." });
     expect((await none.request("/api/tools", { headers: { Authorization: "Bearer secret-token" } })).status).toBe(404);

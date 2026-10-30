@@ -12,6 +12,7 @@
  */
 
 import type { ProviderPool } from "../providers/registry.js";
+import { ONLY_WHEN_ASKED } from "../brain/capabilities.js";
 import type { Store } from "../store/db.js";
 import { COST_ORDER, JOB_KINDS, type JobKind, type JobSize, PROVIDER_IDS, type ProviderId, type ProviderRequest, type Route, type TaskKind, type ToolInfo } from "../types.js";
 
@@ -119,6 +120,8 @@ export class ModelRouter {
       });
       reason = `${kind}: best capability score first${size === "small" ? ", cheaper first when close" : ""}`;
     }
+    // Manus and the like: only when asked for (override) or your pick for the job, never as a fallback
+    order = order.filter((id) => !ONLY_WHEN_ASKED.includes(id));
     const picked = !override && isJob(kind) ? this.d.preferred?.(kind) : undefined;
     if (override) {
       order = [override, ...order.filter((id) => id !== override)];

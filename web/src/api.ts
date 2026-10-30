@@ -124,6 +124,6 @@ export const Api = {
   pushTest: () => api<{ sent: number }>("/api/push/test", { body: {} }),
 };
 
-export const LABEL: Record<string, string> = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity", groq: "Groq", local: "Local model" };
+export const LABEL: Record<string, string> = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity", groq: "Groq", local: "Local model", manus: "Manus" };
 
 export const FINISHED = ["done", "failed", "cancelled"];

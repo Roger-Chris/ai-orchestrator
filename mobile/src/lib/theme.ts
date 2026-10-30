@@ -20,6 +20,7 @@ const light = {
   perplexity: "#0e7490",
   groq: "#be185d",
   local: "#4d7c0f",
+  manus: "#57534e",
 };
 
 const dark: typeof light = {
@@ -42,6 +43,7 @@ const dark: typeof light = {
   perplexity: "#67e8f9",
   groq: "#f9a8d4",
   local: "#bef264",
+  manus: "#d6d3d1",
 };
 
 export type Colors = typeof light;
@@ -50,6 +52,6 @@ export function useColors(): Colors {
   return useColorScheme() === "dark" ? dark : light;
 }
 
-export const LABEL: Record<string, string> = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity", groq: "Groq", local: "Local model" };
+export const LABEL: Record<string, string> = { claude: "Claude", codex: "ChatGPT", gemini: "Gemini", perplexity: "Perplexity", groq: "Groq", local: "Local model", manus: "Manus" };
 
 export const providerColor = (c: Colors, p?: string) => (p && p in LABEL ? (c[p as keyof Colors] as string) : c.muted);
