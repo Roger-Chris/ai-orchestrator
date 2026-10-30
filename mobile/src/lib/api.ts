@@ -72,8 +72,8 @@ export function failover(): Promise<boolean> {
   return switching;
 }
 
-/** Every minute: back to your hub when it answers again, or away from one that stopped answering. */
-async function checkHubs() {
+/** Every minute: back to your hub when it answers again, or away from one that stopped answering. Exported for tests. */
+export async function checkHubs() {
   if (!current || hubs.length < 2) return;
   if (current.url !== hubs[0] && (await answers(hubs[0]))) useHub(hubs[0]);
   else if (!(await answers(current.url))) await failover();
@@ -167,6 +167,9 @@ export async function api<T = unknown>(path: string, init: { method?: string; bo
     // The hub did not answer at all (not an error it sent): try the same request on a backup hub once.
     if (!retried && hubs.length > 1 && (await failover())) return api<T>(path, init, true);
     if ((e as Error).name === "AbortError") throw new Error(`The hub at ${current.url} did not answer. Is Tailscale on and the hub running?`);
+    // React Native says only "Network request failed" / "fetch failed": usually Tailscale on this phone
+    // is off or stuck on "Starting…" (HyperOS stops it in the background).
+    if (e instanceof TypeError) throw new Error(`Can't reach the hub at ${current.url}. Open Tailscale on this phone and check it is connected.`);
     throw e;
   }
   if (res.status === 401) {

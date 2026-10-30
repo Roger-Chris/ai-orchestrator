@@ -44,7 +44,7 @@ export default function People() {
         <Pressable key={p.chatId} onPress={() => setOpen(open === p.chatId ? undefined : p.chatId)} style={{ paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border }}>
           <Text style={{ color: c.text, fontSize: 16 }} numberOfLines={1}>{p.name}</Text>
           <Text style={{ color: c.muted, fontSize: 13 }} numberOfLines={1}>
-            {[p.relationship, p.addressAs.length ? `you call them ${p.addressAs.join(", ")}` : "", `${p.mine + p.theirs} messages`].filter(Boolean).join(" · ")}
+            {[p.relationship, p.addressAs.length ? `you call them ${p.addressAs.join(", ")}` : "", `${p.mine} sent`].filter(Boolean).join(" · ")}
           </Text>
           {open === p.chatId && (
             <View style={{ gap: 2, marginTop: 6 }}>
@@ -53,7 +53,7 @@ export default function People() {
               {line("Tone", [p.tone, p.formality ? FORMALITY[p.formality] : ""].filter(Boolean).join(", "))}
               {line("Topics", p.topics.join(", "))}
               {line("Notes", p.notes)}
-              {line("Messages", `${p.mine} from you, ${p.theirs} from them; last ${new Date(p.lastTs * 1000).toLocaleDateString()}`)}
+              {line("Studied", `${p.mine} of your messages, ${p.theirs} of theirs; newest ${new Date(p.lastTs * 1000).toLocaleDateString()}`)}
               {!p.relationship && <Muted small>Not studied yet: drafts borrow from people like them until orc style learn runs.</Muted>}
             </View>
           )}

@@ -332,6 +332,8 @@ describe("terms of address", () => {
     expect(out[0]).toMatchObject({ chatId: A, relationship: card().relationship, addressAs: card().addressAs, mine: 40, theirs: 30 });
     expect(out[1]).toMatchObject({ relationship: "", addressAs: [] }); // never studied: no card yet
     expect(JSON.stringify(out)).not.toContain("secret");
+    const twice = { ...book, contacts: [{ ...book.contacts[2], card: { ...card(), addressAs: ["mam", "Mam", "mam"] } }] };
+    expect(people(twice)[0].addressAs).toEqual(["mam"]);
   });
 });
 

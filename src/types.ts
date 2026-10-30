@@ -282,7 +282,7 @@ export interface PersonSummary {
   formality?: number;
   topics: string[];
   notes: string;
-  /** Messages you sent them and they sent you, in what was studied. */
+  /** Messages you sent them and they sent you, among those studied (up to a few hundred per chat). */
   mine: number;
   theirs: number;
   lastTs: number;

@@ -6,6 +6,9 @@ import type { StyleBook } from "./learn.js";
  * what you call them, tone…) and how much you talk, busiest first. No message text or reply
  * examples leave the hub this way.
  */
+/** "mam, Mam, mam" → "mam": the cards repeat terms in different cases. */
+const unique = (xs: string[] = []) => xs.filter((x, i) => x.trim() && xs.findIndex((y) => y.trim().toLowerCase() === x.trim().toLowerCase()) === i);
+
 export function people(book: StyleBook): PersonSummary[] {
   return book.contacts
     .filter((c) => !c.isGroup)
@@ -13,8 +16,8 @@ export function people(book: StyleBook): PersonSummary[] {
       chatId: c.chatId,
       name: c.name,
       relationship: c.card?.relationship ?? "",
-      addressAs: c.card?.addressAs ?? [],
-      theyCallMe: c.card?.theyCallMe ?? [],
+      addressAs: unique(c.card?.addressAs),
+      theyCallMe: unique(c.card?.theyCallMe),
       language: c.card?.language ?? "",
       tone: c.card?.tone ?? "",
       formality: c.card?.formality,
