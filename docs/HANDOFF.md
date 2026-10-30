@@ -1,6 +1,6 @@
 # Jarvis handoff (30 Oct 2026)
 
-Where the work stands, so another session can pick it up. Both repos: branch `jarvis/next` only, never `main`.
+Where the work stands, so another session can pick it up. ai-orchestrator now works on `main` only (`jarvis/next` was merged into it on 30 Oct 2026; the owner wants no separate working branches). AI_Assistant is still on `jarvis/next`.
 
 | Repo | Laptop worktree | Head |
 |---|---|---|
