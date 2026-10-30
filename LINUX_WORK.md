@@ -7,6 +7,13 @@ What the session on the Linux hub (`roger-all-series`, 100.104.185.17) is doing,
 - Pulled `jarvis/next` up to `3603cef` (Hermes Agent, handoff notes).
 - The changes below are committed and pushed to `main`, and the Linux hub was restarted on them.
 
+## Confirmed from Linux (31 Oct 2026)
+
+- The laptop shows in `/api/nodes` as `roger`, online, with claude, codex, gemini, groq and local ready. The hub lists `local` as "runs on roger".
+- A real prompt through the laptop's `/node/exec` was answered by `qwen3:8b` in 24 s (the first call, so it may include loading the model). A hub job has not yet gone end to end through the router onto the laptop.
+- Linux's `builds.androidNode` is now `roger`. Android builds still need `builds.androidHere: true` in the laptop's config, which the owner edits.
+- Still to try: a reboot of the laptop, to see both tasks come back at logon.
+
 ## The goal
 
 The owner's AI tools and agents keep working while they travel. Neither machine is "the" worker: each uses the other when it is available, from any network. Tailscale is the secure channel (`/node/*` also needs `ORC_TOKEN`). SSH is not part of the design.
