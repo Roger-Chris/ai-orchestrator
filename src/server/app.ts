@@ -27,6 +27,8 @@ import { buildAiHub, setPreferred } from "./ai-hub.js";
 import { mountBuilds } from "./builds.js";
 import { mountFiles } from "./files.js";
 import { mountPhone } from "./phone.js";
+import { mountOutside } from "./outside.js";
+import type { OutsideAgents } from "../outside/agents.js";
 import type { PhoneDesk } from "../phone/desk.js";
 import type { FileClient } from "../files/client.js";
 import type { FileIndex } from "../files/index.js";
@@ -72,6 +74,8 @@ export interface AppDeps {
   files?: FileClient;
   /** Things to do on the phone, waiting for the owner's tap (D3). */
   phone?: PhoneDesk;
+  /** Outside agents with their own tokens and scopes, over MCP at /mcp (phase 4). */
+  outside?: OutsideAgents;
   /** This device's copy of the shared memory pool; absent when sharedMemory.enabled is false. */
   replica?: MemoryReplica;
   /** How /node/memory/* reaches the brain; tests pass a fake. */
@@ -216,6 +220,12 @@ export function createApp(d: AppDeps) {
   mountBuilds(app, d);
   mountFiles(app, d);
   mountPhone(app, d);
+  mountOutside(app, {
+    outside: d.outside,
+    replica: d.replica,
+    actions: d.actions,
+    devices: () => [{ name: d.cluster.name, online: true, platform: process.platform }, ...d.cluster.list().map((p) => ({ name: p.name, online: p.online, platform: p.platform }))],
+  });
 
   // ---- providers & devices
   app.get("/api/providers", async (c) => c.json(await d.pool.status(c.req.query("refresh") === "1")));

@@ -567,3 +567,36 @@ export interface PhoneAction {
   createdAt: number;
   closedAt?: number;
 }
+
+// ---- Outside agents (Jarvis phase 4: src/outside; the app's Agents screen)
+
+export interface OutsideAgentScopes {
+  /** Device names it may act on; ["*"] for all, [] for none (memory only). */
+  devices: string[];
+  /** Folders (absolute path prefixes) its file and AI actions must stay in; [] means the devices' own assistant folders. */
+  folders: string[];
+  /** The riskiest call it may make: safe only, or ask (waits for the owner's Approve). Never is never allowed. */
+  risk: "safe" | "ask";
+  /** May add to the shared memory (otherwise read only). */
+  memoryWrite: boolean;
+}
+
+export interface OutsideAgent {
+  id: string;
+  name: string;
+  scopes: OutsideAgentScopes;
+  createdAt: number;
+  revokedAt?: number;
+  lastUsed?: number;
+  calls: number;
+}
+
+export interface OutsideAuditEntry {
+  agentId: string;
+  at: number;
+  tool: string;
+  summary: string;
+  /** ok: answered; pending: waiting for the owner's Approve; refused: outside its scopes, paused or failed. */
+  outcome: "ok" | "pending" | "refused" | "error";
+  detail?: string;
+}

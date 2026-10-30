@@ -46,6 +46,7 @@ import { ModelRouter } from "./ai/route.js";
 import { BuildDesk } from "./builds/desk.js";
 import { FileClient } from "./files/client.js";
 import { PhoneDesk } from "./phone/desk.js";
+import { OutsideAgents } from "./outside/agents.js";
 import { FileIndex } from "./files/index.js";
 import { PreviewMaker } from "./builds/preview.js";
 import { previewer } from "./server/builds.js";
@@ -174,7 +175,7 @@ export function buildSystem(config: Config) {
     node: config.node.name,
   });
   preview = previewer(builds, new PreviewMaker({ dataDir: resolve(config.dataDir), remote: config.branches.remote, timeoutMs: config.builds.previewTimeoutMinutes * 60_000 }));
-  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts, tools, models, builds, preview, fileIndex, files, phone: new PhoneDesk(store, config, (p) => void notifier.notify(p)) };
+  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts, tools, models, builds, preview, fileIndex, files, phone: new PhoneDesk(store, config, (p) => void notifier.notify(p)), outside: new OutsideAgents(store, replica) };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */

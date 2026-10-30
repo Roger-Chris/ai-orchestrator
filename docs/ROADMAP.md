@@ -46,8 +46,8 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 - [x] D4 Mac mini node. App Devices screen.
 
 ### Phase 4: outside paid agents
-- [ ] A1 Per-agent tokens, scopes (devices, folders, risk ceiling), MCP over HTTP.
-- [ ] A2 Audit log in shared memory, kill switch, app Agents screen.
+- [x] A1 Per-agent tokens, scopes (devices, folders, risk ceiling), MCP over HTTP.
+- [x] A2 Audit log in shared memory, kill switch, app Agents screen.
 
 ### Phase 6: app
 - [ ] U1 Home: approvals from builds and agents; spoken notices toggle. (Other screens land with their phases.)
@@ -62,6 +62,7 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 - 2026-10-30 (scheduled run): R4 `GET /api/ai-hub` (tools, each job's chain now, today, caps, 7 days) + `PUT /api/ai-hub/prefer` (owner's first pick per job, `prefs` table, router honours it) and the app's Settings → AI hub screen. Typechecked, not seen on a phone (needs the APK).
 - 2026-10-30 (owner asked for phases 2-4 now): B1-B4 builds: `src/builds` (BuildDesk over branch runs with tests and a second model's review, `builds` table), previews on the hub (`/p/<key>/` web, `/p/<key>/app.apk`), merge on the owner's tap, every build in shared memory (`project:<app>`, `work:build-<id>`) and "continue the X app" (here or from memory), brain tool `build`, app Settings → Builds. Deploy is not built (no target named); a preview is the check before Merge.
 - 2026-10-30 (owner asked for phases 2-4 now): D1-D4 device control: desktop actions (`apps.focus`, `apps.close` ask, `screen.shot` ask, `gui.task` ask through a configured computer-use agent), the file index of every device on the hub (+ summary in shared memory), cross-device search and `files.send` (ask, never replaces), phone actions on the app's Phone screen (alarm, reminder, open app, file; calls/texts only opened, never dialled or sent), Devices tab with OS, files, Screenshot, Re-index; `deploy/mac/install.sh` for the Mac mini. D3's accessibility service and general notification access are NOT built (native code that has to be built and tested on the phone); gui.task needs a computer-use agent configured. Not tried on real desktops from the cloud.
+- 2026-10-30 (owner asked for phases 2-4 now): A1-A2 outside agents: per-agent tokens (hashed, shown once), scopes (devices, folders, risk ceiling safe/ask, memory write), MCP over HTTP at `/mcp` (memory tools, devices, act within scopes; safe-only agents never create approvals), audit log in the hub and one shared-memory record per agent per day, kill switch and revoke, app Settings → Outside agents. Phases 2, 3 and 4 are done; Phase 6 (U1) is left.
 
 ## Owner to-do
 - Rebuild and install the APK (`npm run build:apk` in mobile/ on the laptop, or the GitHub Actions build): V4 Settings → Voice, V5 "Hey Jarvis" and R4 Settings → AI hub are in the app (JS only, no new native packages since V2-V3's build).
@@ -73,3 +74,4 @@ https://claude.ai/artifact/Bj5HX1Wj7PhCpQD67X5T2T
 - Mac mini: clone ai-orchestrator, then `HUB=http://100.104.185.17:4317 deploy/mac/install.sh`; copy `ORC_TOKEN` into its .env; allow Screen Recording (and Accessibility for apps.close) for node in System Settings; set `actions.roots`.
 - Desktop GUI automation (`gui.task`): pick a computer-use agent you trust and set `actions.computerUse.command`/`args` (with `{goal}`); until then it says it is not set up.
 - After the APK rebuild, Settings → Phone: the first alarm may ask which clock app to use.
+- Outside agents: add one in Settings → Outside agents, then give the agent `<hub>/mcp` and its token as an HTTP MCP server. A cloud agent can reach `/mcp` only if you expose it (e.g. Tailscale Funnel); decide that yourself, and prefer "Safe only" plus a folder scope.

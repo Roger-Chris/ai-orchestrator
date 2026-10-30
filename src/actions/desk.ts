@@ -242,10 +242,12 @@ export class ActionHub {
     return !node || node === this.runner.node ? this.runner.act(req) : this.peer(node, req);
   }
 
-  async act(node: string | undefined, req: ActRequest): Promise<ActResponse | { status: "pending"; node: string; action: string; approval: Approval }> {
+  /** `noApprovals`: a call that would need the owner's Approve is refused instead of asked (outside agents limited to safe calls). */
+  async act(node: string | undefined, req: ActRequest, opts: { noApprovals?: boolean } = {}): Promise<ActResponse | { status: "pending"; node: string; action: string; approval: Approval }> {
     const target = node || this.runner.node;
     const res = await this.send(target, { action: req.action, args: req.args, reason: req.reason });
     if (res.status !== "needs_approval") return res;
+    if (opts.noApprovals) return { status: "refused", node: target, action: req.action, error: "this needs the owner's approval, which this caller may not ask for" };
     const approval = this.desk.request({ node: target, action: req.action, args: req.args ?? {}, summary: res.summary, reason: req.reason });
     return { status: "pending", node: target, action: req.action, approval };
   }

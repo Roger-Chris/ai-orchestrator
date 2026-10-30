@@ -1,8 +1,8 @@
 import * as SecureStore from "expo-secure-store";
 import { WaReply } from "./wareply";
-import type { AiHub, Build, BrainAlert, PhoneAction, Home, Insights, JobKind, ProviderId, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
+import type { AiHub, Build, BrainAlert, OutsideAgent, OutsideAgentScopes, OutsideAuditEntry, PhoneAction, Home, Insights, JobKind, ProviderId, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
 
-export type { AiHub, Build, BuildBranch, PhoneAction, JobKind, ProviderId, ToolInfo, ToolState } from "../../../src/types";
+export type { AiHub, Build, BuildBranch, OutsideAgent, OutsideAgentScopes, OutsideAuditEntry, PhoneAction, JobKind, ProviderId, ToolInfo, ToolState } from "../../../src/types";
 export type { AlertAction, Attention, BrainAlert, DayTask, Decision, Home, Insights, PendingApproval, QuietChat, ReplyDraft, RunEvent, RunOptions, RunRecord, Running, StepRecord, Thread } from "../../../src/types";
 
 /** Where the hub is and how to get in. Kept in Android's encrypted storage. */
@@ -207,6 +207,14 @@ export const Api = {
   /** Runs an action on a device; risky ones come back `pending` and wait for Approve on Home. */
   act: (node: string, action: string, args: Record<string, unknown> = {}, reason?: string) =>
     api<{ status: "done" | "pending" | "refused"; result?: { ok: boolean; output: string }; error?: string }>("/api/act", { body: { node, action, args, reason }, timeoutMs: 120_000 }),
+  // ---- outside agents (paid agents with their own tokens, over MCP at /mcp)
+  outsideAgents: () => api<{ agents: OutsideAgent[]; paused: boolean }>("/api/outside-agents"),
+  /** The token comes back once; it is never shown again. */
+  addOutsideAgent: (name: string, scopes: OutsideAgentScopes) => api<{ agent: OutsideAgent; token: string }>("/api/outside-agents", { body: { name, scopes } }),
+  revokeOutsideAgent: (id: string) => api<OutsideAgent>(`/api/outside-agents/${id}/revoke`, { body: {} }),
+  /** The kill switch for every outside agent at once. */
+  pauseOutsideAgents: (paused: boolean) => api<{ paused: boolean }>("/api/outside-agents/paused", { method: "PUT", body: { paused } }),
+  outsideAudit: (agent?: string) => api<OutsideAuditEntry[]>(`/api/outside-agents/audit?${q({ agent, limit: 60 })}`),
   // ---- the phone's to-do from the assistant (alarms, reminders, apps, files; calls and texts drafted)
   phoneActions: () => api<PhoneAction[]>("/api/phone/actions"),
   phoneDone: (id: string) => api(`/api/phone/actions/${id}/done`, { body: {} }),
