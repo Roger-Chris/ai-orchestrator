@@ -312,7 +312,7 @@ export const ACTIONS: ActionDef[] = [
   def({
     name: "shell.run",
     describe:
-      "Run a command (PowerShell on Windows, bash elsewhere) in a folder inside the allowed folders. Safe-listed read-only commands run at once; anything else asks the owner.",
+      "Run a command (PowerShell on Windows, bash elsewhere) in a folder inside the allowed folders: put the folder in `cwd`, not in the command. Safe-listed read-only commands (git status, git log…) run at once only when the command starts with them; anything else asks the owner.",
     args: z.object({ command: z.string().min(1).max(2000), cwd: z.string().optional(), timeoutSeconds: z.number().int().min(1).max(1800).optional() }),
     risk: (a, ctx) => shellRisk(a.command, ctx.config),
     summary: (a) => `Run: ${a.command}${a.cwd ? `  (in ${a.cwd})` : ""}`,

@@ -15,6 +15,7 @@ import type { Provider } from "../src/providers/base.js";
 import { ProviderPool } from "../src/providers/registry.js";
 import { AssistantTasks, type BrainTask } from "../src/integrations/assistant.js";
 import { GmailReader, parseTasks } from "../src/integrations/gmail.js";
+import { CodexProvider } from "../src/providers/codex.js";
 import { OpenAICompatProvider } from "../src/providers/openai-compat.js";
 import { createApp } from "../src/server/app.js";
 import { localDay } from "../src/server/home.js";
@@ -196,17 +197,23 @@ describe("conversations", () => {
 
 describe("raw model calls for the brain", () => {
   it("raw:codex is one plain call to your ChatGPT session: no run, no notification", async () => {
-    const s = system({ codex: (req) => ({ text: `{"say":"hi"} (${req.system})` }) });
+    const s = system({ codex: (req) => ({ text: `{"say":"hi"} (${req.system}${req.plain ? ", plain" : ""})` }) });
     const app = createApp({ ...s, publicDir: "web/dist" });
     const auth = { Authorization: "Bearer secret-token", "Content-Type": "application/json" };
     const body = (model: string) => JSON.stringify({ model, messages: [{ role: "system", content: "json only" }, { role: "user", content: "hello" }] });
     const r = await (await app.request("/v1/chat/completions", { method: "POST", headers: auth, body: body("raw:codex") })).json();
-    expect(r.choices[0].message.content).toBe('{"say":"hi"} (json only)');
+    expect(r.choices[0].message.content).toBe('{"say":"hi"} (json only, plain)');
     expect(s.prompts).toEqual(["hello"]);
     expect(s.store.listRuns().length).toBe(0);
     expect(s.attention).toEqual([]);
     expect((await app.request("/v1/chat/completions", { method: "POST", headers: auth, body: body("raw:nope") })).status).toBe(400);
     expect((await app.request("/v1/chat/completions", { method: "POST", headers: auth, body: body("raw:claude") })).status).toBe(502); // not set up here
+  });
+
+  it("a plain call starts Codex without your config, MCP servers or a saved session", () => {
+    const codex = new CodexProvider(parseConfig({}).providers.codex);
+    expect(codex.buildArgs({ prompt: "x", plain: true })).toEqual(expect.arrayContaining(["--ignore-user-config", "--ephemeral"]));
+    expect(codex.buildArgs({ prompt: "x" })).not.toContain("--ignore-user-config"); // runs and builds keep your setup
   });
 });
 

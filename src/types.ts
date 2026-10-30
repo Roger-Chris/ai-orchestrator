@@ -42,6 +42,8 @@ export interface ProviderRequest {
   /** Working directory the agent operates in (agentic CLIs only). */
   cwd?: string;
   permission?: Permission;
+  /** One plain text answer (the brain's raw: calls): no user config, MCP servers or saved session (Codex). */
+  plain?: boolean;
   timeoutMs?: number;
   signal?: AbortSignal;
   /** Called with incremental text as the provider produces it. */

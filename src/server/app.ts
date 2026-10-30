@@ -721,7 +721,7 @@ export function createApp(d: AppDeps) {
     // through the others when it fails or is cooling (job "brain", sized by the prompt).
     if (body.model === "raw:auto" && d.models) {
       try {
-        const r = await d.models.run("brain", { system, prompt, timeoutMs: 240_000 }, { size: sizeOf(`${system ?? ""}${prompt}`) });
+        const r = await d.models.run("brain", { system, prompt, plain: true, timeoutMs: 240_000 }, { size: sizeOf(`${system ?? ""}${prompt}`) });
         return c.json({
           id: `chatcmpl-raw-${Date.now()}`,
           object: "chat.completion",
@@ -738,7 +738,7 @@ export function createApp(d: AppDeps) {
     const raw = body.model.startsWith("raw:") ? Provider.safeParse(body.model.slice(4)) : undefined;
     if (raw) {
       if (!raw.success) return c.json({ error: { message: `unknown provider in ${body.model}`, type: "invalid_request_error" } }, 400);
-      const r = await d.pool.run(raw.data, { system, prompt, permission: "read", timeoutMs: 240_000 });
+      const r = await d.pool.run(raw.data, { system, prompt, permission: "read", plain: true, timeoutMs: 240_000 });
       d.store.recordUsage(raw.data, d.cluster.name, r.ok, r.durationMs, r.usage?.costUsd);
       if (!r.ok) return c.json({ error: { message: r.error ?? "failed", type: r.rateLimited ? "rate_limit" : "provider_error" } }, r.rateLimited ? 429 : 502);
       return c.json({

@@ -56,6 +56,9 @@ export class CodexProvider implements Provider {
 
   buildArgs(req: ProviderRequest): string[] {
     const args = ["exec", "--json", "--skip-git-repo-check", ...sandboxArgs(req.permission ?? "read")];
+    // Without this Codex used the owner's MCP servers (the orchestrator's own) and shell for the brain's
+    // JSON steps, then answered "that tool needs approval / isn't available" instead of the next step.
+    if (req.plain) args.push("--ignore-user-config", "--ephemeral");
     const model = req.model ?? this.cfg.model;
     if (model) args.push("-m", model);
     if (req.cwd) args.push("-C", req.cwd);
