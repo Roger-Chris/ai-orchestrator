@@ -23,7 +23,7 @@ The permanent hub is a **Linux machine** (full Ubuntu desktop with a screen, 8 G
 
 Secrets that are not in git, on purpose:
 - `gmail-client.json`: Google OAuth client for the Gmail reader (README: Gmail); the sign-in itself is in `data/gmail-token.json`.
-- `.env`: `ORC_TOKEN` (every device and the phone app use the same one), optional `PERPLEXITY_API_KEY`, `GROQ_API_KEYS` and `BRAIN_TOKEN` (the AI_Assistant brain's token, on the hub that runs next to it).
+- `.env`: `ORC_TOKEN` (every device and the phone app use the same one), optional `PERPLEXITY_API_KEY`, `GROQ_API_KEYS`, `MANUS_API_KEYS` (comma-separated; rotates at task creation past a limit, no credits or a rejected key, and a task stays on the key that made it) and `BRAIN_TOKEN` (the AI_Assistant brain's token, on the hub that runs next to it).
 - `fcm-service-account.json`: Firebase private key (project `orchestrator-b6a5d`) so the hub can send phone notifications. On a new machine, generate a new one: Firebase console → Project settings → Service accounts → Generate new private key, saved in the repo root under that name. Delete old keys there.
 - `data/`: run history, memory, push subscriptions. Copy it to keep history; otherwise it starts empty and the phone app must tap Settings → Notifications → Turn on again.
 

@@ -84,6 +84,8 @@ const ConfigSchema = z.object({
         .object({
           ...providerBase,
           apiKey: z.string().optional(),
+          /** Several keys to rotate through (MANUS_API_KEYS, comma-separated): a limit, no credits or a rejected key moves on to the next. */
+          apiKeys: z.array(z.string()).default([]),
           baseUrl: z.string().default("https://api.manus.ai"),
           model: z.string().default("standard"),
           deepModel: z.string().default("max"),
@@ -492,6 +494,7 @@ export function parseConfig(raw: unknown): Config {
   // Without a key Perplexity stays listed but reports itself as not logged in.
   if (!cfg.providers.perplexity.apiKey) cfg.providers.perplexity.apiKey = process.env.PERPLEXITY_API_KEY || undefined;
   if (!cfg.providers.manus.apiKey) cfg.providers.manus.apiKey = process.env.MANUS_API_KEY || undefined;
+  if (!cfg.providers.manus.apiKeys.length) cfg.providers.manus.apiKeys = (process.env.MANUS_API_KEYS ?? "").split(",").map((k) => k.trim()).filter(Boolean);
   if (!cfg.providers.hermes.apiKey) cfg.providers.hermes.apiKey = process.env.HERMES_API_KEY || undefined;
   if (!cfg.profile.name) cfg.profile.name = process.env.OWNER_NAME || undefined;
   if (!cfg.assistant.token) cfg.assistant.token = process.env.BRAIN_TOKEN || undefined;

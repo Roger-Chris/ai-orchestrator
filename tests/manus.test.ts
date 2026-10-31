@@ -50,4 +50,49 @@ describe("Manus", () => {
     const failing = (async () => Response.json({ ok: false, error: { code: "insufficient_credits", message: "Not enough credits" } }, { status: 402 })) as unknown as typeof fetch;
     expect((await new ManusProvider(cfg(), failing).run({ prompt: "x" })).error).toBe("Manus 402: Not enough credits");
   });
+
+  /** Each key answers task.create with its own status; 200 starts a task that stops at the first poll. */
+  function keyed(statuses: Record<string, number>) {
+    const used: { key: string; path: string }[] = [];
+    const http = (async (url: string, init?: RequestInit) => {
+      const key = (init!.headers as Record<string, string>)["x-manus-api-key"];
+      used.push({ key, path: url.includes("task.create") ? "create" : "poll" });
+      if (url.includes("task.listMessages")) return Response.json({ ok: true, messages: [said("e2", "done", "result"), status("e1", "stopped")] });
+      const code = statuses[key] ?? 200;
+      if (code !== 200) return Response.json({ ok: false, error: { message: "nope" } }, { status: code });
+      return Response.json({ ok: true, task_id: `T-${key}` });
+    }) as typeof fetch;
+    return { http, used };
+  }
+
+  it("moves past a key with no credits or a rejection, and follows the task on the key that made it", async () => {
+    const { http, used } = keyed({ a: 402, b: 401 });
+    const p = new ManusProvider(cfg({ apiKey: undefined, apiKeys: ["a", "b", "c"] }), http, async () => {});
+    expect((await p.detect()).detail).toBe("3 keys in rotation");
+    expect((await p.run({ prompt: "x" })).ok).toBe(true);
+    expect(used).toEqual([{ key: "a", path: "create" }, { key: "b", path: "create" }, { key: "c", path: "create" }, { key: "c", path: "poll" }]);
+    used.length = 0;
+    expect((await p.run({ prompt: "y" })).ok).toBe(true);
+    expect(used.every((u) => u.key === "c")).toBe(true); // a and b are resting
+  });
+
+  it("shares tasks between good keys, and tells the pool when every key is resting", async () => {
+    const good = keyed({});
+    const shared = new ManusProvider(cfg({ apiKey: undefined, apiKeys: ["a", "b"] }), good.http, async () => {});
+    await shared.run({ prompt: "1" });
+    await shared.run({ prompt: "2" });
+    expect(good.used.filter((u) => u.path === "create").map((u) => u.key)).toEqual(["a", "b"]);
+
+    const out = new ManusProvider(cfg({ apiKey: undefined, apiKeys: ["a", "b"] }), keyed({ a: 402, b: 429 }).http, async () => {});
+    const r = await out.run({ prompt: "x" });
+    expect(r).toMatchObject({ ok: false, rateLimited: true });
+    expect(r.retryAt).toBeGreaterThan(Date.now());
+  });
+
+  it("doesn't burn through keys on a problem with the request", async () => {
+    const { http, used } = keyed({ a: 400 });
+    const r = await new ManusProvider(cfg({ apiKey: undefined, apiKeys: ["a", "b"] }), http, async () => {}).run({ prompt: "x" });
+    expect(r.error).toBe("Manus 400: nope");
+    expect(used).toEqual([{ key: "a", path: "create" }]);
+  });
 });

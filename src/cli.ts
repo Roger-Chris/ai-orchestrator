@@ -208,7 +208,7 @@ export function buildSystem(config: Config) {
       const node = config.builds.androidNode;
       return heavy && node && (node === config.node.name || cluster.isOnline(node)) ? node : undefined;
     },
-    direct: config.providers.manus.free && config.providers.manus.apiKey ? (prompt) => pool.run("manus", { prompt, permission: "read" }) : undefined,
+    direct: config.providers.manus.free && (config.providers.manus.apiKey || config.providers.manus.apiKeys.length) ? (prompt) => pool.run("manus", { prompt, permission: "read" }) : undefined,
   });
   // Recorded conversations: Whisper runs on the laptop; while it is off, recordings wait.
   const whisper = { here: config.convos.whisperHere, dataDir: resolve(config.dataDir), run: (file: string) => whisperFile(file, config.style, ROOT) };
