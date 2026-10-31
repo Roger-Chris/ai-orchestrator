@@ -37,21 +37,25 @@ export const GUARD_SCRIPT = `(() => {
   const secret = ${SECRET_FIELD};
   const label = (el) => [el.innerText, el.value, el.getAttribute && el.getAttribute("aria-label"), el.getAttribute && el.getAttribute("title"), el.getAttribute && el.getAttribute("href")].filter(Boolean).join(" ").slice(0, 300);
   const stop = (e) => { e.preventDefault(); e.stopImmediatePropagation(); };
-  document.addEventListener("click", (e) => {
-    const el = e.target && e.target.closest && e.target.closest("button,a,input,[role=button],[onclick]");
+  // On window: in a Firefox subframe, the document seen at this point is replaced when the page loads.
+  const inner = (e) => e.composedPath()[0];
+  window.addEventListener("click", (e) => {
+    const el = e.composedPath().find((n) => n.matches && n.matches("button,a,input,[role=button],[onclick]"));
     if (el && order.test(label(el))) { stop(e); console.warn("jarvis guard: refused " + label(el)); }
   }, true);
-  document.addEventListener("submit", (e) => {
+  window.addEventListener("submit", (e) => {
     if (e.submitter && order.test(label(e.submitter))) stop(e);
     if (e.target.querySelector && e.target.querySelector("input[type=password]")) stop(e);
   }, true);
   const isSecret = (el) => el && el.tagName === "INPUT" && (el.type === "password" || secret.test([el.name, el.id, el.autocomplete, el.placeholder, el.getAttribute("aria-label")].join(" ")));
-  document.addEventListener("beforeinput", (e) => { if (isSecret(e.target)) stop(e); }, true);
-  document.addEventListener("keydown", (e) => { if (isSecret(e.target)) stop(e); }, true);
+  window.addEventListener("beforeinput", (e) => { if (isSecret(inner(e))) stop(e); }, true);
+  window.addEventListener("keydown", (e) => { if (isSecret(inner(e))) stop(e); }, true);
+  // Playwright's fill in Firefox sets the value with no key or beforeinput event to refuse.
+  window.addEventListener("input", (e) => { const el = inner(e); if (isSecret(el)) { el.value = ""; stop(e); } }, true);
 })();`;
 
-const TOOLS = ["browser_navigate", "browser_navigate_back", "browser_snapshot", "browser_click", "browser_type", "browser_press_key", "browser_select_option", "browser_hover", "browser_wait_for", "browser_tabs", "browser_handle_dialog", "browser_close"].map((t) => `mcp__browser__${t}`);
-const NEVER = ["browser_evaluate", "browser_run_code", "browser_file_upload", "browser_fill_form", "browser_install", "browser_drag"].map((t) => `mcp__browser__${t}`);
+const TOOLS = ["browser_navigate", "browser_navigate_back", "browser_snapshot", "browser_find", "browser_click", "browser_type", "browser_press_key", "browser_select_option", "browser_hover", "browser_wait_for", "browser_tabs", "browser_handle_dialog", "browser_close"].map((t) => `mcp__browser__${t}`);
+const NEVER = ["browser_evaluate", "browser_run_code", "browser_run_code_unsafe", "browser_file_upload", "browser_fill_form", "browser_install", "browser_drag", "browser_drop"].map((t) => `mcp__browser__${t}`);
 
 export interface CartItem {
   name: string;
@@ -67,11 +71,19 @@ export interface StoreCheck {
   note?: string;
 }
 
+/** Another seller seen on a DuckDuckGo results page: only read there, never opened by the agent. */
+export interface Alternative {
+  name: string;
+  url: string;
+  price?: string;
+}
+
 /** Which store it ended up at, which were looked at, and the account name the store shows, if any. */
 interface Where {
   store?: StoreId;
   checked?: StoreCheck[];
   account?: string;
+  alternatives?: Alternative[];
 }
 
 export type CartOutcome = Where &
@@ -93,6 +105,7 @@ export function cartPrompt(where: StoreId | StoreId[], request: string, compareO
     ? [
         `Using the browser tools only: find what is asked for below. Search every one of these stores for it, using a short search, one store after another, spending little time on each:\n${list}`,
         "Then choose ONE store: the right item first, in stock, then the lowest price. Add it to the cart on that store only, open that store's cart, read it, and stop. Never add it at a second store.",
+        `Last, for other sellers: open https://html.duckduckgo.com/html/?q=<the item>+buy+online+india once. This one results page is the only exception to staying on the stores' sites. Only read it and open no result. List up to 3 sellers that are not in the list above in "alternatives" (name, the result's address, the price if shown). They never get a cart and don't change which store you choose. If it asks for a robot check, leave "alternatives" empty and say so in the note.`,
         ...(compareOnly.length ? [`Compare only, never add to their carts: ${compareOnly.join(", ")}. If the best choice is one of these, add nothing at any store and report status "link" with that store, the item and its price, and "url" set to the product page's address.`] : []),
       ]
     : [`Using the browser tools only, on ${s.name} (${s.home}): find what is asked for below and add it to the cart. Then open the cart (${s.cart}), read it, and stop.`];
@@ -108,8 +121,8 @@ export function cartPrompt(where: StoreId | StoreId[], request: string, compareO
     "- Choose the plainest good match by rating and price, and add only what was asked, in the quantity asked (one if none was said). If several things would fit equally, pick one and say so in the note. If a cart already holds other things, leave them alone and list them too.",
     "",
     "Your last message must be only this JSON, with the items and the total exactly as the cart page shows them:",
-    '{"status":"ready|needs_you|not_found|blocked|link","store":"<the store id whose cart this is>","account":"<the name the store shows you are signed in as, or empty>","checked":[{"store":"<store id>","found":true,"price":"₹499","note":"out of stock, or empty"}],"items":[{"name":"...","qty":1,"price":"₹499"}],"total":"₹499","url":"","note":"one short line, or empty"}',
-    '"blocked" means the site refused the browser (robot check, access denied). "ready" only when you read the item\'s name and the total on the cart page. List every store in "checked"; if one store needs you or blocks you, note it there and carry on with the others. Read each store\'s results before judging it: "found": false only when you read them and the item is not there. If you did not read them, say "not checked" in its note. Look past sponsored results. Fill "account" from the name in the store\'s header, on the store whose cart you used.',
+    '{"status":"ready|needs_you|not_found|blocked|link","store":"<the store id whose cart this is>","account":"<the name the store shows you are signed in as, or empty>","checked":[{"store":"<store id>","found":true,"price":"₹499","note":"out of stock, or empty"}],"items":[{"name":"...","qty":1,"price":"₹499"}],"total":"₹499","url":"","alternatives":[{"name":"...","url":"https://...","price":"₹499"}],"note":"one short line, or empty"}',
+    '"blocked" means the site refused the browser (robot check, access denied). "ready" only when you read the item\'s name and the total on the cart page. List every store in "checked"; if one store needs you or blocks you, note it there and carry on with the others. Read each store\'s results before judging it: "found": false only when you read them and the item is not there. If you did not read them, say "not checked" in its note. Pages can be too big to read whole, so read results with browser_find and a narrow regex for the item (a word from its exact name, like /10k.*ohm/i), and browser_snapshot with a small "depth" or a target; if a result is still too big, narrow it further. A store you cannot read is noted as "not checked", and then you carry on: never stop before trying every store. Look past sponsored results. Fill "account" from the name in the store\'s header, on the store whose cart you used.',
   ].join("\n");
 }
 
@@ -133,7 +146,11 @@ export function parseCart(text: string): CartOutcome | undefined {
   const checked: StoreCheck[] = (Array.isArray(raw?.checked) ? raw.checked : [])
     .filter((c: any) => KNOWN(c?.store))
     .map((c: any) => ({ store: c.store, found: !!c.found, price: typeof c.price === "string" && c.price ? c.price.slice(0, 30) : undefined, note: typeof c.note === "string" && c.note ? c.note.slice(0, 160) : undefined }));
-  const where: Where = { store: KNOWN(raw?.store) ? raw.store : undefined, checked: checked.length ? checked : undefined, account: typeof raw?.account === "string" && raw.account.trim() ? raw.account.trim().slice(0, 80) : undefined };
+  const alternatives: Alternative[] = (Array.isArray(raw?.alternatives) ? raw.alternatives : [])
+    .filter((a: any) => typeof a?.name === "string" && a.name.trim() && typeof a.url === "string" && /^https:\/\/[^\s]+$/.test(a.url))
+    .slice(0, 3)
+    .map((a: any) => ({ name: a.name.trim().slice(0, 80), url: a.url.slice(0, 500), price: typeof a.price === "string" && a.price ? a.price.slice(0, 30) : undefined }));
+  const where: Where = { alternatives: alternatives.length ? alternatives : undefined, store: KNOWN(raw?.store) ? raw.store : undefined, checked: checked.length ? checked : undefined, account: typeof raw?.account === "string" && raw.account.trim() ? raw.account.trim().slice(0, 80) : undefined };
   if (raw?.status === "ready") return items.length && total ? { ...where, status: "ready", items, total, note: note || undefined } : undefined;
   if (raw?.status === "needs_you") return { ...where, status: "needs_you", items, total, note: note || "The store needs you." };
   if (raw?.status === "not_found" || raw?.status === "blocked") return { ...where, status: raw.status, items, note: note || raw.status };
@@ -243,7 +260,8 @@ export async function runCartAgent(store: StoreId | StoreId[], request: string, 
     }),
   );
   const r = await exec({
-    env: o.headless ? undefined : await desktopEnv(exec),
+    // Over the default limit a page goes to a file, and this agent has no tool to read files: Amazon's results did.
+    env: { MAX_MCP_OUTPUT_TOKENS: "80000", ...(o.headless ? {} : await desktopEnv(exec)) },
     command: o.command,
     // Its own folder and no settings of this machine: only the browser, none of the owner's tools or hooks.
     args: ["-p", cartPrompt(store, request, o.compareOnly), "--model", o.model, "--output-format", "text", "--strict-mcp-config", "--mcp-config", config, "--setting-sources", "project", "--tools", "", "--allowedTools", TOOLS.join(","), "--disallowedTools", NEVER.join(",")],

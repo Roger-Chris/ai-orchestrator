@@ -452,6 +452,7 @@ export const Api = {
   mailDiscard: (id: string) => api<MailDraft>(`/api/mail/${id}/discard`, { body: {} }),
   // ---- carts Jarvis filled: you order in the store
   shopRuns: () => api<ShopRun[]>("/api/shop"),
+  shopRun: (id: string) => api<ShopRun>(`/api/shop/${id}`),
   shopCheckout: (id: string, total: string) => api<ShopRun>(`/api/shop/${id}/checkout`, { body: { total } }),
   shopOrdered: (id: string) => api<ShopRun>(`/api/shop/${id}/ordered`, { body: {} }),
   shopDismiss: (id: string) => api<ShopRun>(`/api/shop/${id}/dismiss`, { body: {} }),

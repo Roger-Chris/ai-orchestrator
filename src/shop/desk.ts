@@ -111,7 +111,7 @@ export class ShopDesk {
     let next: ShopRun;
     if (res.status === "done" && res.result.ok && res.result.data) {
       const c = res.result.data as CartOutcome;
-      next = { ...run, status: c.status, items: c.items, total: "total" in c ? c.total : undefined, note: "note" in c ? c.note : undefined, checked: c.checked, account: c.account };
+      next = { ...run, status: c.status, items: c.items, total: "total" in c ? c.total : undefined, note: "note" in c ? c.note : undefined, checked: c.checked, account: c.account, alternatives: c.alternatives };
       // A ready cart must say whose it is, or Go to checkout would open the wrong store.
       if (among && c.status === "ready" && !(c.store && among.includes(c.store))) next = { ...next, status: "failed", note: "The agent filled a cart but did not say which store. Look in your carts." };
       else if (c.status === "link" && !(c.store && this.d.compareOnly?.includes(c.store))) next = { ...next, status: "failed", note: "The agent stopped at a link for a store that should have got a cart." };

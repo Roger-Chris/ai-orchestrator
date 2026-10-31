@@ -69,6 +69,9 @@ export default function Shop() {
           {r.checked?.map((k) => (
             <Muted key={k.store} small>{k.store}: {k.found ? `has it${k.price ? ` at ${k.price}` : ""}` : "not found"}{k.note ? ` (${k.note})` : ""}</Muted>
           ))}
+          {r.alternatives?.map((a) => (
+            <Text key={a.url} style={{ color: c.accent }} onPress={() => void Linking.openURL(a.url)}>Also at {a.name}{a.price ? `: ${a.price}` : ""} →</Text>
+          ))}
           <Row>
             {(r.status === "ready" || r.status === "checkout") && <Button kind="primary" small title="Go to checkout" busy={busy === r.id} onPress={() => checkout(r)} />}
             {r.status === "checkout" && <Button small title="I ordered it" onPress={() => void run(r, () => Api.shopOrdered(r.id))} />}

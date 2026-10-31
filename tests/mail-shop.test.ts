@@ -112,6 +112,11 @@ describe("the cart agent's answer and walls", () => {
     for (const bad of ["https://robu.in.evil.com/p", "http://robu.in/p", "javascript:alert(1)", "https://evilrobu.in/p", undefined]) expect(storeLink("robu", bad), String(bad)).toBeUndefined();
   });
 
+  it("other sellers from the web search need a name and an https address", () => {
+    const c = parseCart('{"status":"not_found","items":[],"alternatives":[{"name":"Shop","url":"https://shop.example/r","price":"₹5"},{"name":"Bad","url":"javascript:alert(1)"},{"url":"https://x.example"}]}');
+    expect(c?.alternatives).toEqual([{ name: "Shop", url: "https://shop.example/r", price: "₹5" }]);
+  });
+
   it("order and pay controls match, adding to a cart does not", () => {
     for (const t of ["Buy Now", "Place your order", "Place Order", "Proceed to Buy", "Proceed to Pay", "Click to Pay", "Pay now", "Checkout", "Check out", "/checkout/start"]) expect(ORDER_WORDS.test(t), t).toBe(true);
     for (const t of ["Add to Cart", "Go to Cart", "Search", "Add", "Pen, set of 10", "Payback points"]) expect(ORDER_WORDS.test(t), t).toBe(false);

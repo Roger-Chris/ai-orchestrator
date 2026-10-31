@@ -710,6 +710,8 @@ export interface ShopRun {
   checked?: { store: string; found: boolean; price?: string; note?: string }[];
   /** The name that store shows as signed in. */
   account?: string;
+  /** Other sellers from a DuckDuckGo results page, for the owner to open. */
+  alternatives?: { name: string; url: string; price?: string }[];
   /** The store's own pages, opened on the phone. */
   cartUrl: string;
   searchUrl: string;

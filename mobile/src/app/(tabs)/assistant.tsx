@@ -3,7 +3,7 @@ import { type ComponentRef, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { Feedback } from "../../components/Feedback";
 import { ErrorText } from "../../components/ui";
-import { Api } from "../../lib/api";
+import { Api, type ShopRun } from "../../lib/api";
 import { convo, type Turn } from "../../lib/convo";
 import { canListen, speak, stopSpeaking, useListen } from "../../lib/listen";
 import { openFreshApps } from "../../lib/phone";
@@ -120,6 +120,34 @@ export default function Assistant() {
   );
 }
 
+/** The brain's reply is written when shopping starts, so the result is fetched here until it ends. */
+function ShopLine({ id }: { id: string }) {
+  const c = useColors();
+  const [run, setRun] = useState<ShopRun>();
+  const working = !run || run.status === "working";
+  useEffect(() => {
+    if (!working) return;
+    const load = () => void Api.shopRun(id).then(setRun).catch(() => undefined);
+    load();
+    const timer = setInterval(load, 8000);
+    return () => clearInterval(timer);
+  }, [id, working]);
+  const line = working
+    ? "Shopping: still working…"
+    : run.status === "ready" || run.status === "checkout" || run.status === "ordered"
+      ? `Completed: ${run.storeName} cart, ${run.total ?? "total on the cart"} →`
+      : run.status === "link"
+        ? `Completed: best at ${run.storeName}, open the link →`
+        : run.status === "dismissed"
+          ? "Shopping: dismissed"
+          : `Shopping stopped (${run.status.replace("_", " ")}): ${run.storeName} →`;
+  return (
+    <Pressable onPress={() => router.push(`/shop?id=${id}` as never)}>
+      <Text style={{ color: c.accent, fontSize: 14 }}>{line}</Text>
+    </Pressable>
+  );
+}
+
 function TurnView({ t }: { t: Turn }) {
   const c = useColors();
   const [open, setOpen] = useState(false);
@@ -132,6 +160,7 @@ function TurnView({ t }: { t: Turn }) {
       {t.reply && (
         <View style={{ gap: 6 }}>
           <Text selectable style={{ color: c.text, fontSize: 16, lineHeight: 23 }}>{t.reply.answer}</Text>
+          {t.reply.steps.map((s) => s.tool === "shop" && s.result.match(/\(run (s[0-9a-f]+)\)/)?.[1]).filter((id): id is string => !!id).map((id) => <ShopLine key={id} id={id} />)}
           <Feedback episodeId={t.reply.episode_id} used={t.reply.lessons} />
           {t.reply.pending.length > 0 && (
             <Pressable onPress={() => router.navigate("/")}>
