@@ -268,7 +268,7 @@ export class ReplyDrafter {
     let error = "";
     for (const provider of order) {
       const r = await this.pool.run(provider, { system, prompt, permission: "read", timeoutMs: 120_000 });
-      this.store.recordUsage(provider, this.opts.node, r.ok, r.durationMs, r.usage?.costUsd);
+      this.store.recordUsage(provider, this.opts.node, r.ok, r.durationMs, r.usage);
       if (r.ok) return { provider, text: r.text };
       error = `${provider}: ${r.error ?? "failed"}`;
     }

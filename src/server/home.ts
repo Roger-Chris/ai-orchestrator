@@ -53,7 +53,7 @@ export async function buildHome(d: {
     const run = d.orchestrator.get(a.id);
     if (!run) continue;
     if (run.status === "awaiting_approval") {
-      decisions.push({ kind: "design", runId: run.id, threadId: run.threadId, from: "Design review", text: short(run.task), since: run.createdAt });
+      decisions.push({ kind: "design", runId: run.id, threadId: run.threadId, buildId: run.options.buildId, from: "Design review", text: short(run.task), since: run.createdAt });
     }
     for (const s of run.steps) {
       if (s.status === "waiting" && s.question) {
@@ -132,6 +132,7 @@ export function homeBuilds(desk?: BuildDesk, now = Date.now()): HomeBuild[] {
     .list(30)
     .filter((b) => (b.status === "running" || b.status === "ready" || (b.status === "failed" && now - b.updatedAt < 86_400_000)) && now - b.updatedAt < 7 * 86_400_000)
     .slice(0, 5)
+    .map((b) => desk.view(b))
     .map((b) => ({
       id: b.id,
       name: b.name,
@@ -140,6 +141,7 @@ export function homeBuilds(desk?: BuildDesk, now = Date.now()): HomeBuild[] {
       web: b.preview?.status === "ready" ? b.preview.web : undefined,
       apk: b.preview?.status === "ready" ? b.preview.apk : undefined,
       notes: b.notes?.length ?? 0,
+      now: b.status !== "running" || !b.live ? undefined : b.live.phase === "design_ready" ? "Design waiting for you" : b.live.provider ? `${PROVIDER_NAME[b.live.provider]} · ${b.live.title}` : b.live.phase === "planning" ? "Planning" : undefined,
       at: b.updatedAt,
     }));
 }

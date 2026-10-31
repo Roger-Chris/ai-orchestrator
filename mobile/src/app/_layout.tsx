@@ -67,6 +67,7 @@ export default function RootLayout() {
         <Stack.Screen name="work-add" options={{ title: "Add a person" }} />
         <Stack.Screen name="work/[id]" options={{ title: "Work" }} />
         <Stack.Screen name="ai-hub" options={{ title: "AI hub" }} />
+        <Stack.Screen name="limits" options={{ title: "Tokens and limits" }} />
         <Stack.Screen name="learning" options={{ title: "Learning" }} />
         <Stack.Screen name="builds" options={{ title: "Builds" }} />
         <Stack.Screen name="phone" options={{ title: "Phone" }} />

@@ -1,4 +1,4 @@
-import type { ProviderId, ProviderRequest, ProviderResult, ProviderStatus } from "../types.js";
+import type { LimitWindow, ProviderId, ProviderRequest, ProviderResult, ProviderStatus } from "../types.js";
 import { type Provider, failure, parseRetryAt } from "./base.js";
 
 /** What any OpenAI-compatible chat API needs: where it is, the key(s) and the models. */
@@ -146,9 +146,29 @@ export class OpenAICompatProvider implements Provider {
       provider: this.id,
       model,
       durationMs: Date.now() - started,
-      usage: { inputTokens: usage?.prompt_tokens, outputTokens: usage?.completion_tokens, costUsd: usage?.cost?.total_cost },
+      usage: { inputTokens: usage?.prompt_tokens, outputTokens: usage?.completion_tokens, costUsd: usage?.cost?.total_cost, limits: headerLimits(res.headers) },
       error: text ? undefined : "empty response",
     };
     return text ? this.finish(result, extras) : result;
   }
+}
+
+/** "2m59.5s", "7.66s", "1h2m": how long until a limit resets, in a service's rate-limit headers. */
+function resetMs(s: string | null): number | undefined {
+  if (!s) return undefined;
+  const unit: Record<string, number> = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 };
+  const parts = [...s.matchAll(/([\d.]+)(ms|h|m|s)/g)];
+  return parts.length ? parts.reduce((t, [, n, u]) => t + Number(n) * unit[u], 0) : undefined;
+}
+
+/** The x-ratelimit-* headers (Groq), for the key that answered. */
+export function headerLimits(h: Headers, now = Date.now()): LimitWindow[] | undefined {
+  const windows = (["tokens", "requests"] as const).flatMap((label) => {
+    const limit = Number(h.get(`x-ratelimit-limit-${label}`));
+    const left = Number(h.get(`x-ratelimit-remaining-${label}`));
+    if (!limit || !Number.isFinite(left) || h.get(`x-ratelimit-remaining-${label}`) === null) return [];
+    const reset = resetMs(h.get(`x-ratelimit-reset-${label}`));
+    return [{ label, usedPercent: Math.round((1 - left / limit) * 100), resetsAt: reset === undefined ? undefined : now + reset }];
+  });
+  return windows.length ? windows : undefined;
 }

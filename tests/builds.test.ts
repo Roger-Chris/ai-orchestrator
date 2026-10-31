@@ -78,7 +78,7 @@ describe("builds (phase 2)", () => {
     const b = s.desk.start({ name: "Expense Tracker", spec: "Track my expenses with a web page", repo: s.repo });
     expect(b).toMatchObject({ name: "Expense Tracker", status: "running", agent: "claude", reviewer: "codex", runId: "r1" });
     expect(b.previewKey).toMatch(/^[0-9a-f]{32}$/);
-    expect(s.runs[0].options).toEqual({ branches: true, permission: "edit", cwd: s.repo, nodes: undefined, mode: "plan" });
+    expect(s.runs[0].options).toEqual({ branches: true, permission: "edit", cwd: s.repo, nodes: undefined, mode: "plan", buildId: b.id });
     expect(s.runs[0].task).toContain('BUILD THE APP "Expense Tracker"');
     expect(s.runs[0].task).toContain("review step with codex");
     expect(s.runs[0].task).toContain("Write tests");

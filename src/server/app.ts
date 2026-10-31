@@ -26,7 +26,7 @@ import { type AskReply, sayFor, type TalkReply } from "../voice/talk.js";
 import { TTS_PROVIDERS, type Tts, TtsError } from "../voice/tts.js";
 import type { ToolRegistry } from "../ai/tools.js";
 import { JOB_KINDS, type JobKind, type ModelRouter, RouteError, sizeOf } from "../ai/route.js";
-import { buildAiHub, setPreferred } from "./ai-hub.js";
+import { buildAiHub, buildModelLimits, setPreferred } from "./ai-hub.js";
 import { mountApkNode, mountBuilds } from "./builds.js";
 import { mountFiles } from "./files.js";
 import type { ConvoDesk } from "../convos/desk.js";
@@ -295,6 +295,10 @@ export function createApp(d: AppDeps) {
   app.get("/api/ai-hub", async (c) => {
     if (!d.tools || !d.models) return c.json({ error: "the AI hub is not set up on this hub" }, 404);
     return c.json(await buildAiHub({ tools: d.tools, models: d.models, store: d.store }, c.req.query("fresh") === "1"));
+  });
+  app.get("/api/ai-hub/limits", async (c) => {
+    if (!d.tools) return c.json({ error: "the AI hub is not set up on this hub" }, 404);
+    return c.json(await buildModelLimits({ tools: d.tools, store: d.store }, c.req.query("fresh") === "1"));
   });
   app.put("/api/ai-hub/prefer", async (c) => c.json(await setPreferred(c, d.store)));
   app.get("/api/usage", (c) => c.json(d.store.usage(Number(c.req.query("days") ?? 7))));
@@ -805,7 +809,7 @@ export function createApp(d: AppDeps) {
     if (raw) {
       if (!raw.success) return c.json({ error: { message: `unknown provider in ${body.model}`, type: "invalid_request_error" } }, 400);
       const r = await d.pool.run(raw.data, { system, prompt, permission: "read", plain: true, timeoutMs: 240_000 });
-      d.store.recordUsage(raw.data, d.cluster.name, r.ok, r.durationMs, r.usage?.costUsd);
+      d.store.recordUsage(raw.data, d.cluster.name, r.ok, r.durationMs, r.usage);
       if (!r.ok) return c.json({ error: { message: r.error ?? "failed", type: r.rateLimited ? "rate_limit" : "provider_error" } }, r.rateLimited ? 429 : 502);
       return c.json({
         id: `chatcmpl-raw-${Date.now()}`,

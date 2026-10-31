@@ -1,8 +1,8 @@
-import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { Linking, Pressable, RefreshControl, ScrollView, Switch, Text, View } from "react-native";
 import { Button, Card, Chip, ErrorText, Field, Muted, Row } from "../components/ui";
-import { Api, type Build } from "../lib/api";
+import { Api, type Build, type PendingApproval } from "../lib/api";
 import { type Colors, LABEL, useColors } from "../lib/theme";
 
 /**
@@ -13,6 +13,10 @@ import { type Colors, LABEL, useColors } from "../lib/theme";
 
 const STATUS: Record<Build["status"], string> = { running: "building", ready: "ready to check", failed: "failed", merged: "merged", cancelled: "cancelled", done: "done" };
 const statusColor = (c: Colors, s: Build["status"]) => ({ running: c.accent, ready: c.warn, failed: c.err, merged: c.ok, cancelled: c.muted, done: c.ok })[s];
+const PHASE = { planning: "Planning the work", designing: "Writing the design", design_ready: "Waiting for you to confirm the design", building: "Building", finished: "Finished" };
+const APPROVAL = { design: "Confirm the design", merge: "Merge into the main branch" };
+const APPROVAL_STATE = { waiting: "waiting for you", later: "later", done: "done", none: "not needed" };
+const tokens = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 
 export default function Builds() {
   const c = useColors();
@@ -23,12 +27,15 @@ export default function Builds() {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string>();
   const [confirm, setConfirm] = useState<string>();
-  const [form, setForm] = useState<{ name: string; spec: string; repo: string; agent: "claude" | "codex"; cont: boolean }>();
+  const [form, setForm] = useState<{ name: string; spec: string; repo: string; agent: "claude" | "codex"; cont: boolean; design: boolean }>();
+  const [deviceAsks, setDeviceAsks] = useState<PendingApproval[]>([]);
+  const [changes, setChanges] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       setBuilds(await Api.builds());
+      setDeviceAsks((await Api.home()).approvals ?? []);
       setError("");
     } catch (e) {
       setError((e as Error).message);
@@ -61,18 +68,40 @@ export default function Builds() {
   const start = () =>
     form &&
     act("start", async () => {
-      const b = await Api.startBuild({ name: form.name.trim(), spec: form.spec.trim(), repo: form.repo.trim() || undefined, agent: form.agent, continue: form.cont });
+      const b = await Api.startBuild({ name: form.name.trim(), spec: form.spec.trim(), repo: form.repo.trim() || undefined, agent: form.agent, continue: form.cont, confirmDesign: form.design });
       setForm(undefined);
       setOpen(b.id);
     });
 
+  const active = builds?.filter((b) => b.status === "running") ?? [];
   const h2 = { color: c.text, fontSize: 17, fontWeight: "700" as const };
   return (
     <ScrollView contentContainerStyle={{ padding: 16, gap: 14 }} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} colors={[c.accent]} />}>
       <ErrorText text={error} />
+      {builds && (
+        <Row>
+          <Text style={{ ...h2, flex: 1 }}>{active.length ? `${active.length} building now` : "Nothing building now"}</Text>
+          <Button small title="Tokens and limits" onPress={() => router.push("/limits" as never)} />
+        </Row>
+      )}
+      {deviceAsks.length > 0 && (
+        <Card attention>
+          <Text style={h2}>Device actions to approve</Text>
+          <Muted small>Asked for on your devices, not by a build. They are also on Home under Approve?</Muted>
+          {deviceAsks.map((a) => (
+            <View key={a.id} style={{ gap: 6 }}>
+              <Text style={{ color: c.text }}>{`${a.node}: ${a.summary}`}</Text>
+              <Row>
+                <Button kind="primary" small title="Approve" busy={busy === `a${a.id}`} onPress={() => void act(`a${a.id}`, () => Api.decideApproval(a.id, true))} />
+                <Button small title="Deny" busy={busy === `d${a.id}`} onPress={() => void act(`d${a.id}`, () => Api.decideApproval(a.id, false))} />
+              </Row>
+            </View>
+          ))}
+        </Card>
+      )}
       {!form ? (
         <Row>
-          <Button kind="primary" title="New build" onPress={() => setForm({ name: "", spec: "", repo: "", agent: "claude", cont: false })} />
+          <Button kind="primary" title="New build" onPress={() => setForm({ name: "", spec: "", repo: "", agent: "claude", cont: false, design: true })} />
           <Muted small>Or ask the assistant: "build me…", "continue the … app".</Muted>
         </Row>
       ) : (
@@ -84,7 +113,11 @@ export default function Builds() {
             <Switch value={form.cont} onValueChange={(cont) => setForm({ ...form, cont })} trackColor={{ true: c.accent, false: c.border }} />
             <Text style={{ color: c.text }}>Continue the last build of this app</Text>
           </Row>
-          {!form.cont && <Field label="Folder on the hub (a git clone with a remote)" value={form.repo} onChangeText={(repo) => setForm({ ...form, repo })} autoCapitalize="none" placeholder="/home/roger/Desktop/expenses" />}
+          <Row>
+            <Switch value={form.design} onValueChange={(design) => setForm({ ...form, design })} trackColor={{ true: c.accent, false: c.border }} />
+            <Text style={{ color: c.text }}>Show me the design before building</Text>
+          </Row>
+          {!form.cont && <Field label="Folder on the hub (empty: a new private repo)" value={form.repo} onChangeText={(repo) => setForm({ ...form, repo })} autoCapitalize="none" placeholder="/home/roger/Desktop/expenses" />}
           <Row>
             <Muted small>Codes with</Muted>
             {(["claude", "codex"] as const).map((a) => (
@@ -95,7 +128,7 @@ export default function Builds() {
             <Muted small>the other one reviews</Muted>
           </Row>
           <Row>
-            <Button kind="primary" title="Start" busy={busy === "start"} disabled={!form.name.trim() || !form.spec.trim() || (!form.cont && !form.repo.trim())} onPress={() => void start()} />
+            <Button kind="primary" title="Start" busy={busy === "start"} disabled={!form.name.trim() || !form.spec.trim()} onPress={() => void start()} />
             <Button title="Cancel" onPress={() => setForm(undefined)} />
           </Row>
         </Card>
@@ -109,11 +142,40 @@ export default function Builds() {
               <Chip text={STATUS[b.status]} color={statusColor(c, b.status)} />
             </Row>
             <Muted small>{`${new Date(b.createdAt).toLocaleString()} · ${LABEL[b.agent] ?? b.agent} codes, ${LABEL[b.reviewer] ?? b.reviewer} reviews${b.continuedFrom ? " · continues an earlier build" : ""}`}</Muted>
+            {b.status === "running" && b.live && (
+              <Text style={{ color: c.accent, fontSize: 14 }}>
+                {[PHASE[b.live.phase], b.live.provider && `${LABEL[b.live.provider] ?? b.live.provider}${b.live.model ? ` (${b.live.model})` : ""}${b.live.node ? ` on ${b.live.node}` : ""}`, b.live.title, b.live.stepsTotal ? `${b.live.stepsDone} of ${b.live.stepsTotal} steps` : ""].filter(Boolean).join(" · ")}
+              </Text>
+            )}
+            {!!b.live && <Muted small>{`Tokens: ${tokens(b.live.tokens.in)} in, ${tokens(b.live.tokens.out)} out`}</Muted>}
           </Pressable>
+          {b.live?.design && (
+            <View style={{ gap: 8, borderTopWidth: 1, borderTopColor: c.border, paddingTop: 8 }}>
+              <Text style={h2}>{`Confirm the design${b.live.design.round > 1 ? ` (version ${b.live.design.round})` : ""}`}</Text>
+              <Muted small>No code is written until you confirm.</Muted>
+              <Text selectable style={{ color: c.text, fontSize: 14 }}>{b.live.design.doc}</Text>
+              {b.live.design.reviews.map((r, i) => (
+                <Muted key={i} small>{`${r.provider ? (LABEL[r.provider] ?? r.provider) : "Reviewer"} says:\n${r.output.slice(0, 1500)}`}</Muted>
+              ))}
+              <Field label="Changes you want, or a note for the builder" value={changes[b.id] ?? ""} onChangeText={(t) => setChanges({ ...changes, [b.id]: t })} multiline style={{ minHeight: 70 }} />
+              <Row>
+                <Button kind="primary" small title="Looks good, build it" busy={busy === `y${b.id}`} onPress={() => void act(`y${b.id}`, () => Api.approve(b.runId, changes[b.id] ?? ""))} />
+                <Button small title="Change the design" disabled={!changes[b.id]?.trim()} busy={busy === `n${b.id}`} onPress={() => void act(`n${b.id}`, () => Api.revise(b.runId, changes[b.id]))} />
+              </Row>
+            </View>
+          )}
           {open === b.id && (
             <View style={{ gap: 8 }}>
               <Text style={{ color: c.text }}>{b.spec}</Text>
               <Muted small>{b.repo}</Muted>
+              {b.live?.approvals.map((a) => (
+                <Text key={a.name} style={{ color: a.state === "waiting" ? c.warn : c.muted, fontSize: 13 }}>{`Approval: ${APPROVAL[a.name]}: ${APPROVAL_STATE[a.state]}`}</Text>
+              ))}
+              {b.live?.steps.map((s) => (
+                <Text key={s.id} style={{ color: s.status === "running" ? c.accent : s.status === "failed" ? c.err : c.muted, fontSize: 13 }}>
+                  {`${s.status}: ${s.title}${s.provider ? ` · ${LABEL[s.provider] ?? s.provider}${s.model ? ` (${s.model})` : ""}` : ""}${s.tokens ? ` · ${tokens(s.tokens.in + s.tokens.out)} tokens` : ""}`}
+                </Text>
+              ))}
               {b.branches.map((br) => (
                 <Text key={br.name} style={{ color: c.text, fontSize: 13 }}>
                   {`${br.name} · ${br.files} file(s) · tests ${br.tests}${br.merged ? " · merged" : ""}`}

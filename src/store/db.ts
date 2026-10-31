@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { CooldownStore } from "../providers/registry.js";
 import type { FeedbackSource } from "../brain/router.js";
-import type { DayTask, ProviderId, RunEvent, RunRecord, TaskKind, Thread } from "../types.js";
+import type { DayTask, ProviderId, ProviderResult, RunEvent, RunRecord, TaskKind, Thread } from "../types.js";
 
 /** SQLite persistence: run history, event log, ratings, cooldowns and usage. */
 export class Store implements CooldownStore, FeedbackSource {
@@ -54,6 +54,7 @@ export class Store implements CooldownStore, FeedbackSource {
     // R3: what paid calls cost (USD), when the service says; older databases get the column here.
     const usageCols = (this.db.prepare("PRAGMA table_info(usage)").all() as { name: string }[]).map((c) => c.name);
     if (!usageCols.includes("cost_usd")) this.db.exec("ALTER TABLE usage ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0");
+    if (!usageCols.includes("tokens_in")) this.db.exec("ALTER TABLE usage ADD COLUMN tokens_in INTEGER NOT NULL DEFAULT 0; ALTER TABLE usage ADD COLUMN tokens_out INTEGER NOT NULL DEFAULT 0");
   }
 
   addTask(t: Omit<DayTask, "done">) {
@@ -264,15 +265,20 @@ export class Store implements CooldownStore, FeedbackSource {
   }
 
   /** `provider` is a ProviderId or another tool id from src/ai/tools.ts (tts:openai, whisper:groq, ollama:<model>). */
-  recordUsage(provider: ProviderId | (string & {}), node: string, ok: boolean, durationMs: number, costUsd = 0) {
+  recordUsage(provider: ProviderId | (string & {}), node: string, ok: boolean, durationMs: number, spend: number | ProviderResult["usage"] = 0) {
     const day = new Date().toISOString().slice(0, 10);
+    const u = typeof spend === "number" ? { costUsd: spend } : (spend ?? {});
+    const costUsd = u.costUsd ?? 0;
+    const count = (n?: number) => (Number.isFinite(n) && n! > 0 ? Math.round(n!) : 0);
+    if (u.limits?.length) this.setPref(`limits.${provider}`, { at: Date.now(), windows: u.limits });
     this.db
       .prepare(
-        `INSERT INTO usage (day, provider, node, calls, ok, failed, duration_ms, cost_usd) VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+        `INSERT INTO usage (day, provider, node, calls, ok, failed, duration_ms, cost_usd, tokens_in, tokens_out) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(day, provider, node) DO UPDATE SET calls = calls + 1, ok = ok + excluded.ok,
-           failed = failed + excluded.failed, duration_ms = duration_ms + excluded.duration_ms, cost_usd = cost_usd + excluded.cost_usd`,
+           failed = failed + excluded.failed, duration_ms = duration_ms + excluded.duration_ms, cost_usd = cost_usd + excluded.cost_usd,
+           tokens_in = tokens_in + excluded.tokens_in, tokens_out = tokens_out + excluded.tokens_out`,
       )
-      .run(day, provider, node, ok ? 1 : 0, ok ? 0 : 1, Math.round(durationMs), Number.isFinite(costUsd) && costUsd > 0 ? costUsd : 0);
+      .run(day, provider, node, ok ? 1 : 0, ok ? 0 : 1, Math.round(durationMs), Number.isFinite(costUsd) && costUsd > 0 ? costUsd : 0, count(u.inputTokens), count(u.outputTokens));
   }
 
   /** Small settings the owner changes from the app (e.g. `route.mail` -> "groq"); JSON values. */

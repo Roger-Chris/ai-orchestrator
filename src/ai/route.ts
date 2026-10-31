@@ -164,7 +164,7 @@ export class ModelRouter {
     for (const id of route.chain) {
       const on = (await this.d.cluster?.borrowFor(id))?.node;
       const r = on ? await this.d.cluster!.run(on, id, { permission: "read", ...req }) : await this.d.pool.run(id, { permission: "read", ...req });
-      this.d.store?.recordUsage(id, on ?? this.d.node, r.ok, r.durationMs, r.usage?.costUsd);
+      this.d.store?.recordUsage(id, on ?? this.d.node, r.ok, r.durationMs, r.usage);
       if (r.ok) return { provider: id, text: r.text, route, failed };
       limited &&= !!r.rateLimited;
       failed.push({ id, error: r.error ?? "failed" });

@@ -83,7 +83,7 @@ export class Notifier {
 }
 
 export function payloadFor(run: RunRecord, step: StepRecord | undefined, type: RunEventType): PushPayload | undefined {
-  const url = run.threadId ? `/#/t/${run.threadId}?run=${run.id}` : `/#/r/${run.id}`;
+  const url = run.options.buildId ? `/builds?id=${run.options.buildId}` : run.threadId ? `/#/t/${run.threadId}?run=${run.id}` : `/#/r/${run.id}`;
   const task = run.task.length > 80 ? `${run.task.slice(0, 79)}…` : run.task;
   const base = { url, tag: `${run.id}:${step?.id ?? type}` };
   switch (type) {

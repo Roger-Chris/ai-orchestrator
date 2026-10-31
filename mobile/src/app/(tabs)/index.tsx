@@ -140,7 +140,7 @@ function BuildRow({ b, first }: { b: HomeBuild; first: boolean }) {
     b.status === "running" ? "Building…" : b.status === "failed" ? "Build failed" : b.preview === "ready" ? "Ready to try" : b.preview === "building" ? "Making the preview…" : b.preview === "failed" ? "Preview failed" : "Ready to review";
   return (
     <Row first={first} onPress={() => router.push(`/builds?id=${b.id}` as never)}>
-      <Text style={{ color: b.status === "failed" || b.preview === "failed" ? c.err : c.muted, fontSize: 13 }}>{`${state} · ${ago(b.at)}${b.notes ? ` · ${b.notes} step${b.notes === 1 ? "" : "s"} did not run` : ""}`}</Text>
+      <Text style={{ color: b.status === "failed" || b.preview === "failed" ? c.err : c.muted, fontSize: 13 }}>{`${b.now ?? state} · ${ago(b.at)}${b.notes ? ` · ${b.notes} step${b.notes === 1 ? "" : "s"} did not run` : ""}`}</Text>
       <Text style={{ color: c.text, fontSize: 16, marginTop: 3 }}>{b.name}</Text>
       <View style={{ flexDirection: "row", gap: 20, marginTop: 10 }}>
         {!!b.web && <TextLink title="Open preview" onPress={() => void Linking.openURL(`${base}${b.web}`)} />}
@@ -229,7 +229,7 @@ function DecisionRow({ d, first, onDone }: { d: Decision; first: boolean; onDone
       ) : (
         <View style={{ flexDirection: "row", gap: 20, marginTop: 10, alignItems: "center" }}>
           {d.kind === "checkpoint" && d.stepId && <TextLink title="Continue" onPress={() => void act(() => Api.review(d.runId, d.stepId!, { action: "continue" }))} />}
-          {d.threadId && <TextLink title={d.kind === "design" ? "Read and approve" : "Open"} color={d.kind === "design" ? c.accent : c.muted} onPress={() => open(d.threadId)} />}
+          {d.buildId ? <TextLink title="Read and confirm" onPress={() => router.push(`/builds?id=${d.buildId}` as never)} /> : d.threadId && <TextLink title={d.kind === "design" ? "Read and approve" : "Open"} color={d.kind === "design" ? c.accent : c.muted} onPress={() => open(d.threadId)} />}
           {busy && <ActivityIndicator color={c.accent} />}
         </View>
       )}

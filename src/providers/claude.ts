@@ -1,5 +1,5 @@
 import type { ProviderConfig } from "../config.js";
-import type { Permission, ProviderRequest, ProviderResult, ProviderStatus } from "../types.js";
+import type { LimitWindow, Permission, ProviderRequest, ProviderResult, ProviderStatus } from "../types.js";
 import { type Provider, failure, outcomeError, probeVersion, resolveCommand, runProcess, tryParseJson } from "./base.js";
 
 /** Trims ~10k tokens of plugin/skill/MCP context from every call. Override with extraArgs. */
@@ -50,6 +50,7 @@ export class ClaudeProvider implements Provider {
 
     let text = "";
     let final: any;
+    let limits: LimitWindow[] | undefined;
     const outcome = await runProcess({
       command: this.command,
       args: this.buildArgs(req),
@@ -69,6 +70,8 @@ export class ClaudeProvider implements Provider {
               req.onProgress?.(`${block.name} ${summarizeInput(block.input)}`);
             }
           }
+        } else if (ev.type === "rate_limit_event") {
+          limits = claudeLimits(ev.rate_limit_info) ?? limits;
         } else if (ev.type === "result") {
           final = ev;
         }
@@ -87,12 +90,21 @@ export class ClaudeProvider implements Provider {
           inputTokens: final.usage?.input_tokens,
           outputTokens: final.usage?.output_tokens,
           costUsd: final.total_cost_usd,
+          limits,
         },
       };
     }
     const msg = final?.result || final?.error || outcomeError(outcome);
-    return failure(this.id, started, String(msg), model);
+    return { ...failure(this.id, started, String(msg), model), usage: limits && { limits } };
   }
+}
+
+/** The plan's own windows from Claude Code's `rate_limit_event`: {five_hour: {utilization: 0.02, resetsAt: <seconds>}, …}. */
+export function claudeLimits(info: any): LimitWindow[] | undefined {
+  const windows = Object.entries((info?.unifiedWindows ?? {}) as Record<string, { utilization?: number; resetsAt?: number }>).filter(([, w]) => typeof w?.utilization === "number");
+  if (!windows.length) return undefined;
+  const names: Record<string, string> = { five_hour: "5 hours", seven_day: "7 days" };
+  return windows.map(([k, w]) => ({ label: names[k] ?? k.replace(/_/g, " "), usedPercent: Math.round(w.utilization! * 100), resetsAt: w.resetsAt ? w.resetsAt * 1000 : undefined }));
 }
 
 /** Claude Code also uses small helper models; the answer comes from the one that wrote the most. */

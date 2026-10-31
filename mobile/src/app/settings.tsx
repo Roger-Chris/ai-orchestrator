@@ -122,6 +122,7 @@ export default function Settings() {
         <Row>
           <Button title="Learning" onPress={() => router.push("/learning" as never)} />
           <Button title="AI hub" onPress={() => router.push("/ai-hub" as never)} />
+          <Button title="Tokens and limits" onPress={() => router.push("/limits" as never)} />
           <Button title="Builds" onPress={() => router.push("/builds" as never)} />
           <Button title="Phone" onPress={() => router.push("/phone" as never)} />
           <Button title="Mail" onPress={() => router.push("/mail" as never)} />

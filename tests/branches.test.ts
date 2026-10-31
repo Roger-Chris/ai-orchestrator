@@ -8,6 +8,8 @@ import { loadAgents } from "../src/agents/loader.js";
 import { buildCapabilities } from "../src/brain/capabilities.js";
 import { Orchestrator } from "../src/brain/orchestrator.js";
 import { Router } from "../src/brain/router.js";
+import { BuildDesk } from "../src/builds/desk.js";
+import { buildHome } from "../src/server/home.js";
 import { detectTestCommand, git, runBranchJob } from "../src/cluster/branchwork.js";
 import { Cluster } from "../src/cluster/cluster.js";
 import { parseConfig } from "../src/config.js";
@@ -218,6 +220,87 @@ describe("branch work across devices", { timeout: 60_000 }, () => {
     for (const s of run.steps) expect(await hub.orchestrator.mergeBranch(run.id, s.id)).toEqual({ ok: true });
     expect(existsSync(join(repo.hub, "api.txt")) && existsSync(join(repo.hub, "ui.txt"))).toBe(true);
   });
+
+  it("a new app waits for the design, writes no code until it is confirmed, and counts its tokens", async () => {
+    const repo = await makeRepo();
+    const PLAN = { goal: "g", synthesize: false, steps: [{ id: "site", title: "Build the site", agent: "coder", prompt: "STEP: write site.txt", dependsOn: [] }] };
+    let coded = 0;
+    const usage = { inputTokens: 100, outputTokens: 10, limits: [{ label: "5 hours", usedPercent: 12 }] };
+    const hub = system("laptop", {
+      claude: (req) => {
+        if (req.prompt.includes("planning brain")) return { text: JSON.stringify(PLAN), usage };
+        if (req.prompt.includes("ELEPHANT")) return { text: req.prompt.includes("REVISION") ? "# FOOD SHOP v2" : "# FOOD SHOP v1", model: "opus", usage };
+        if (req.prompt.includes("GOLDFISH")) return { text: "VERDICT: APPROVE", usage };
+        coded++;
+        writeFileSync(join(req.cwd!, "site.txt"), "site\n");
+        return { text: "built", usage };
+      },
+    });
+    const desk = new BuildDesk({ store: hub.store, runner: hub.orchestrator, node: "laptop" });
+    const b = await desk.make({ name: "Food shop", spec: "A website for a food shop", repo: repo.hub });
+    expect(b.confirmDesign).toBe(true);
+    expect(desk.view(b).live?.approvals.map((a) => [a.name, a.state])).toEqual([["design", "later"], ["merge", "later"]]);
+
+    const ready = (round: number) =>
+      new Promise<void>((done) => {
+        const check = () => {
+          const run = hub.orchestrator.get(b.runId)!;
+          if (run.status === "awaiting_approval" && run.design?.round === round) done();
+          else setTimeout(check, 10);
+        };
+        check();
+      });
+
+    await ready(1);
+    let seen = desk.view(desk.get(b.id)!).live!;
+    expect(seen.phase).toBe("design_ready");
+    expect(seen.design?.doc).toBe("# FOOD SHOP v1");
+    expect(seen.design?.reviews[0].output).toContain("APPROVE");
+    expect(seen.approvals[0]).toEqual({ name: "design", state: "waiting" });
+    expect(seen.steps.find((s) => s.id === "design-1")).toMatchObject({ provider: "claude", model: "opus", tokens: { in: 100, out: 10 } });
+    expect(coded).toBe(0);
+    expect((await buildHome({ store: hub.store, orchestrator: hub.orchestrator, pool: hub.pool, cluster: hub.cluster, builds: desk })).decisions[0]).toMatchObject({ kind: "design", buildId: b.id });
+
+    hub.orchestrator.decide(b.runId, { action: "revise", feedback: "more green" });
+    await ready(2);
+    seen = desk.view(desk.get(b.id)!).live!;
+    expect(seen.design?.doc).toBe("# FOOD SHOP v2");
+    expect(coded).toBe(0);
+
+    hub.orchestrator.decide(b.runId, { action: "approve" });
+    const run = await hub.orchestrator.wait(b.runId)!;
+    expect(run.error).toBeUndefined();
+    expect(coded).toBe(1);
+    await new Promise((r) => setTimeout(r, 5));
+
+    const done = desk.view(desk.get(b.id)!);
+    expect(done.status).toBe("ready");
+    expect(done.live?.phase).toBe("finished");
+    expect(done.live?.approvals).toEqual([{ name: "design", state: "done" }, { name: "merge", state: "waiting" }]);
+    // Two drafts, two reviews, the planner and the coding.
+    expect(done.live?.tokens).toEqual({ in: 600, out: 60 });
+    expect(hub.store.getPref<{ windows: unknown[] }>("limits.claude")?.windows).toEqual(usage.limits);
+  }, 30_000);
+
+  it("a switched-off design starts straight away, and a restart ends a waiting build", async () => {
+    const repo = await makeRepo();
+    const hub = system("laptop", {
+      claude: (req) => {
+        if (req.prompt.includes("planning brain")) return { text: JSON.stringify({ goal: "g", synthesize: false, steps: [{ id: "s", title: "t", agent: "coder", prompt: "p", dependsOn: [] }] }) };
+        return { text: "ok" };
+      },
+    });
+    const desk = new BuildDesk({ store: hub.store, runner: hub.orchestrator, node: "laptop" });
+    const off = await desk.make({ name: "No design", spec: "x", repo: repo.hub, confirmDesign: false });
+    expect(hub.orchestrator.get(off.runId)!.options.mode).toBe("plan");
+    expect(desk.view(off).live?.approvals.map((a) => a.name)).toEqual(["merge"]);
+    await hub.orchestrator.wait(off.runId);
+
+    const gone = { ...off, id: "bgone", runId: "rgone", status: "running" as const };
+    hub.store.db.prepare("INSERT INTO builds (id, app, record, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(gone.id, "gone", JSON.stringify(gone), 1, 1);
+    hub.store.saveRun({ id: "rgone", task: "t", options: {}, status: "failed", error: "interrupted (server restarted)", steps: [], createdAt: 1 });
+    expect(desk.view(desk.get("bgone")!)).toMatchObject({ status: "failed", error: "interrupted (server restarted)" });
+  }, 30_000);
 
   it("pushes your unpublished commit as a base branch so devices can fetch it", async () => {
     const repo = await makeRepo();

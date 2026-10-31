@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import type { PushPayload } from "../server/push.js";
 import { namedUid, slug, type MemoryReplica } from "../shared/replica.js";
 import type { Store } from "../store/db.js";
-import type { Build, BuildBranch, ProviderId, ProviderResult, RunOptions, RunRecord } from "../types.js";
+import type { Build, BuildApproval, BuildBranch, BuildLive, ProviderId, ProviderResult, RunOptions, RunRecord } from "../types.js";
 import { insideProjects } from "./repo.js";
 
 /**
@@ -42,6 +42,8 @@ export interface BuildInput {
   continue?: boolean;
   /** An app, a deck or a video. Worked out from the words when left out. */
   kind?: BuildKind;
+  /** Stop for the owner to confirm a design before any code is written. `make` turns it on for new apps. */
+  confirmDesign?: boolean;
   /** Who is asking, when it is not the owner ("brain"): such a caller may only use projects the agents created. */
   by?: string;
 }
@@ -135,7 +137,7 @@ export class BuildDesk {
    */
   async make(input: BuildInput, noCloud = false): Promise<Build> {
     const kind = input.kind ?? guessKind(`${input.name} ${input.spec}`);
-    let next: BuildInput = { ...input, kind };
+    let next: BuildInput = { ...input, kind, confirmDesign: input.confirmDesign ?? (kind === "app" && !input.continue) };
     if (!next.repo && !next.continue) {
       if (kind !== "app" && this.d.direct && !next.agent && !noCloud) return this.direct(next);
       if (!this.d.createRepo) throw new BuildError("which folder is the app in? (repo: a git clone with a remote)");
@@ -219,8 +221,8 @@ export class BuildDesk {
 
     const id = `b${randomBytes(4).toString("hex")}`;
     const kind = input.kind ?? prev?.kind ?? "app";
-    const task = buildTask({ name, spec: input.spec, agent, reviewer, prev, kind, guidelines: this.d.guidelines?.() });
-    const run = this.d.runner.submit(task, { branches: true, permission: "edit", cwd: folder, nodes: node ? [node] : undefined, mode: "plan" });
+    const task = buildTask({ name, spec: input.spec, agent, reviewer, prev, kind, guidelines: this.d.guidelines?.(), confirmDesign: input.confirmDesign });
+    const run = this.d.runner.submit(task, { branches: true, permission: "edit", cwd: folder, nodes: node ? [node] : undefined, mode: input.confirmDesign ? "design" : "plan", buildId: id });
     const b: Build = {
       id,
       name,
@@ -235,6 +237,7 @@ export class BuildDesk {
       runId: run.id,
       branches: [],
       continuedFrom: prev?.id,
+      confirmDesign: input.confirmDesign,
       previewKey: randomBytes(16).toString("hex"),
       createdAt: this.now(),
       updatedAt: this.now(),
@@ -242,6 +245,18 @@ export class BuildDesk {
     this.save(b);
     void this.d.runner.wait(run.id)?.then((r) => this.finish(b.id, r), (e) => this.fail(b.id, (e as Error).message));
     return b;
+  }
+
+  /**
+   * A build as the app shows it, with what it is doing now. A run that ended with nothing waiting
+   * for it (the hub restarted, say during a long wait for your design) finishes the build here.
+   */
+  view(b: Build): Build {
+    if (b.runId.startsWith("direct-")) return b;
+    const run = this.d.runner.get(b.runId);
+    if (!run) return b;
+    if (b.status === "running" && ["done", "failed", "cancelled"].includes(run.status) && !this.d.runner.wait(run.id)) b = this.finish(b.id, run) ?? b;
+    return { ...b, live: buildLive(b, run) };
   }
 
   /** A finished run: collect its branches, tell the owner, write it to the shared memory. */
@@ -371,8 +386,37 @@ export class BuildDesk {
   }
 }
 
+/** What the build's run is doing and which of your approvals it has had or will need. */
+export function buildLive(b: Build, run: RunRecord): BuildLive {
+  const finished = ["done", "failed", "cancelled"].includes(run.status);
+  const now = run.steps.find((s) => s.status === "running");
+  const pastDesign = !b.confirmDesign || run.steps.some((s) => s.id.startsWith("impl-")) || !!run.design?.savedTo || (run.status === "planning" && !!run.design);
+  const phase: BuildLive["phase"] = finished ? "finished" : run.status === "awaiting_approval" ? "design_ready" : !pastDesign ? "designing" : run.status === "queued" || run.status === "planning" ? "planning" : "building";
+  const approvals: BuildApproval[] = [];
+  if (b.confirmDesign) approvals.push({ name: "design", state: phase === "design_ready" ? "waiting" : pastDesign ? "done" : finished ? "none" : "later" });
+  approvals.push({ name: "merge", state: b.status === "ready" ? "waiting" : b.status === "merged" ? "done" : b.status === "running" ? "later" : "none" });
+  const draft = phase === "design_ready" ? run.steps.find((s) => s.id === run.design?.draftStepId) : undefined;
+  return {
+    phase,
+    provider: now?.provider,
+    model: now?.model,
+    node: now?.node,
+    title: now?.title,
+    stepsDone: run.steps.filter((s) => s.status === "done" || s.status === "skipped").length,
+    stepsTotal: run.steps.length,
+    steps: run.steps.map(({ id, title, status, provider, model, node, tokens }) => ({ id, title, status, provider, model, node, tokens })),
+    tokens: run.tokens ?? { in: 0, out: 0 },
+    approvals,
+    design: draft && {
+      round: run.design!.round,
+      doc: draft.output ?? "",
+      reviews: run.steps.filter((s) => run.design!.reviewStepIds.includes(s.id) && s.output).map((s) => ({ provider: s.provider, output: s.output! })),
+    },
+  };
+}
+
 /** The run's task: the spec plus how a build is done (branches, tests, a second model's review). */
-export function buildTask(p: { name: string; spec: string; agent: ProviderId; reviewer: ProviderId; prev?: Pick<Build, "spec" | "branches"> & { id?: string }; kind?: BuildKind; guidelines?: string }): string {
+export function buildTask(p: { name: string; spec: string; agent: ProviderId; reviewer: ProviderId; prev?: Pick<Build, "spec" | "branches"> & { id?: string }; kind?: BuildKind; guidelines?: string; confirmDesign?: boolean }): string {
   const kind = p.kind ?? "app";
   const what = kind === "slides" ? "PRESENTATION" : kind === "video" ? "VIDEO" : "APP";
   const lines = [`BUILD THE ${what} "${p.name}".`, "", "WHAT TO BUILD:", p.spec.trim(), ""];
@@ -385,6 +429,7 @@ export function buildTask(p: { name: string; spec: string; agent: ProviderId; re
       "",
     );
   }
+  if (p.confirmDesign) lines.push("THE OWNER CONFIRMS THE DESIGN ON A PHONE BEFORE ANY CODE IS WRITTEN. In the design, say in plain words first: the pages or screens, what is on each, the look (colours, fonts, layout) and the features, then the technical detail.", "");
   lines.push(
     "HOW:",
     `- Do the coding with ${p.agent} on its own branch; keep the app runnable after each step.`,

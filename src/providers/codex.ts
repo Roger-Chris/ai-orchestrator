@@ -1,8 +1,8 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ProviderConfig } from "../config.js";
-import type { Permission, ProviderRequest, ProviderResult, ProviderStatus } from "../types.js";
+import type { LimitWindow, Permission, ProviderRequest, ProviderResult, ProviderStatus } from "../types.js";
 import { type Provider, failure, outcomeError, probeVersion, resolveCommand, runProcess, tryParseJson, withSystem } from "./base.js";
 
 function sandboxArgs(p: Permission): string[] {
@@ -111,12 +111,46 @@ export class CodexProvider implements Provider {
         provider: this.id,
         model,
         durationMs: Date.now() - started,
-        usage: { inputTokens: usage?.input_tokens, outputTokens: usage?.output_tokens },
+        // Codex counts cached input inside input_tokens; Claude does not, and the totals should mean the same.
+        usage: { inputTokens: usage?.input_tokens === undefined ? undefined : usage.input_tokens - (usage.cached_input_tokens ?? 0), outputTokens: usage?.output_tokens, limits: codexLimits(started) },
       };
     }
     return failure(this.id, started, extractApiMessage(fatal) ?? outcomeError(outcome), model);
   }
 }
+
+/**
+ * `codex exec --json` does not report the plan's limits, but the session file it writes does
+ * (`token_count` events with `rate_limits`). The newest file, if it was written during this run.
+ */
+export function codexLimits(since: number, home = process.env.CODEX_HOME ?? join(homedir(), ".codex")): LimitWindow[] | undefined {
+  try {
+    let dir = join(home, "sessions");
+    for (let i = 0; i < 3; i++) dir = join(dir, readdirSync(dir).sort().at(-1)!); // sessions/<year>/<month>/<day>
+    const file = readdirSync(dir)
+      .filter((f) => f.endsWith(".jsonl"))
+      .map((f) => join(dir, f))
+      .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+    const { size, mtimeMs } = statSync(file);
+    if (mtimeMs < since) return undefined;
+    const length = Math.min(size, 256 * 1024);
+    const buf = Buffer.alloc(length);
+    const fd = openSync(file, "r");
+    readSync(fd, buf, 0, length, size - length);
+    closeSync(fd);
+    for (const line of buf.toString("utf8").split("\n").reverse()) {
+      if (!line.includes('"rate_limits"')) continue;
+      const rl = tryParseJson(line)?.payload?.rate_limits;
+      const windows = [rl?.primary, rl?.secondary].filter((w) => typeof w?.used_percent === "number");
+      if (windows.length) return windows.map((w) => ({ label: windowLabel(w.window_minutes), usedPercent: Math.round(w.used_percent), resetsAt: w.resets_at ? w.resets_at * 1000 : undefined }));
+    }
+  } catch {
+    /* no session files here: the limits are simply unknown */
+  }
+  return undefined;
+}
+
+const windowLabel = (minutes?: number) => (!minutes ? "limit" : minutes >= 1440 ? `${Math.round(minutes / 1440)} days` : `${Math.round(minutes / 60)} hours`);
 
 /** Codex wraps API errors as JSON inside the message string; surface the readable part. */
 function extractApiMessage(s?: string): string | undefined {

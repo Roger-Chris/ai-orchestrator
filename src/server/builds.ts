@@ -30,6 +30,7 @@ const StartBody = z.object({
   reviewer: Agent.optional(),
   continue: z.boolean().optional(),
   kind: z.enum(["app", "slides", "video"]).optional(),
+  confirmDesign: z.boolean().optional(),
   /** Who is asking ("brain"); the owner's own apps leave it out. */
   by: z.string().max(80).optional(),
 });
@@ -86,11 +87,11 @@ export function mountBuilds(app: Hono, d: { builds?: BuildDesk; preview?: (b: Bu
   const off = (c: any) => c.json({ error: "builds are not set up on this hub" }, 404);
   const fail = (c: any, e: unknown) => (e instanceof BuildError ? c.json({ error: e.message }, e.status) : Promise.reject(e));
 
-  app.get("/api/builds", (c) => (d.builds ? c.json(d.builds.list(Number(c.req.query("limit") ?? 30)).map(pub)) : off(c)));
+  app.get("/api/builds", (c) => (d.builds ? c.json(d.builds.list(Number(c.req.query("limit") ?? 30)).map((b) => pub(d.builds!.view(b)))) : off(c)));
   app.get("/api/builds/:id", (c) => {
     if (!d.builds) return off(c);
     const b = d.builds.get(c.req.param("id"));
-    return b ? c.json(pub(b)) : c.json({ error: "no such build" }, 404);
+    return b ? c.json(pub(d.builds.view(b))) : c.json({ error: "no such build" }, 404);
   });
   app.post("/api/builds", async (c) => {
     if (!d.builds) return off(c);
@@ -98,7 +99,8 @@ export function mountBuilds(app: Hono, d: { builds?: BuildDesk; preview?: (b: Bu
     if (!parsed.success) return c.json({ error: "invalid build", issues: parsed.error.issues }, 400);
     const body = parsed.data;
     try {
-      return c.json(pub(await d.builds.make({ ...body, agent: body.agent as ProviderId | undefined, reviewer: body.reviewer as ProviderId | undefined })));
+      const started = await d.builds.make({ ...body, agent: body.agent as ProviderId | undefined, reviewer: body.reviewer as ProviderId | undefined });
+      return c.json(pub(d.builds.view(started)));
     } catch (e) {
       return fail(c, e);
     }

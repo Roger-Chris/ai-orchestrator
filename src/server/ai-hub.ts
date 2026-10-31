@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { ModelRouter } from "../ai/route.js";
 import type { ToolRegistry } from "../ai/tools.js";
 import type { Store } from "../store/db.js";
-import { type AiHub, JOB_KINDS, type JobKind, PROVIDER_IDS, type ProviderId } from "../types.js";
+import { type AiHub, JOB_KINDS, type JobKind, type LimitWindow, type ModelLimits, PROVIDER_IDS, type ProviderId, type Tokens } from "../types.js";
 
 /**
  * The AI hub (Jarvis phase 1, R4): one answer for the app's AI hub screen. Every tool with its live
@@ -34,6 +34,8 @@ interface UsageRow {
   calls: number;
   failed: number;
   cost_usd?: number;
+  tokens_in?: number;
+  tokens_out?: number;
 }
 
 export async function buildAiHub(d: { tools: ToolRegistry; models: ModelRouter; store: Store }, fresh = false): Promise<AiHub> {
@@ -57,6 +59,44 @@ export async function buildAiHub(d: { tools: ToolRegistry; models: ModelRouter; 
   }
   const week = [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day));
   return { tools, jobs, today, caps, week };
+}
+
+/**
+ * Tokens used and what is left, per model. "Left" is only ever what a service itself reported
+ * (Claude and Codex's plan windows, Groq's headers); a window whose reset has passed counts as empty.
+ */
+export async function buildModelLimits(d: { tools: ToolRegistry; store: Store }, fresh = false, now = Date.now()): Promise<ModelLimits> {
+  const tools = (await d.tools.list(fresh)).filter((t) => t.kind === "agent" || t.kind === "chat");
+  const today = new Date(now).toISOString().slice(0, 10);
+  const rows = d.store.usage(7) as unknown as UsageRow[];
+  const sum = (list: UsageRow[]) => ({ in: list.reduce((n, r) => n + (r.tokens_in ?? 0), 0), out: list.reduce((n, r) => n + (r.tokens_out ?? 0), 0), calls: list.reduce((n, r) => n + r.calls, 0) });
+  const plain = ({ in: i, out }: Tokens): Tokens => ({ in: i, out });
+  const days = new Map<string, UsageRow[]>();
+  for (const r of rows) days.set(r.day, [...(days.get(r.day) ?? []), r]);
+  return {
+    models: tools.map((t) => {
+      const mine = rows.filter((r) => r.provider === t.id);
+      const seen = d.store.getPref<{ at: number; windows: LimitWindow[] }>(`limits.${t.id}`);
+      return {
+        id: t.id,
+        name: t.name,
+        state: t.state,
+        until: t.until,
+        detail: t.detail,
+        cost: t.cost,
+        today: sum(mine.filter((r) => r.day === today)),
+        week: sum(mine),
+        windows: (seen?.windows ?? []).map((w) => (w.resetsAt && w.resetsAt < now ? { ...w, usedPercent: 0, resetsAt: undefined } : w)),
+        windowsAt: seen?.at,
+        perDay: t.limits.perDay,
+        spendPerDay: t.limits.spendPerDay,
+        spentUsd: t.usageToday.spentUsd,
+      };
+    }),
+    today: plain(sum(days.get(today) ?? [])),
+    week: plain(sum(rows)),
+    days: [...days.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([day, list]) => ({ day, ...plain(sum(list)) })),
+  };
 }
 
 const PreferBody = z.object({ job: z.enum(JOB_KINDS), provider: z.union([z.literal("auto"), z.enum(PROVIDER_IDS as [ProviderId, ...ProviderId[]])]) });

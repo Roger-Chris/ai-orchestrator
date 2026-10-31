@@ -58,13 +58,29 @@ export interface ProviderResult {
   provider: ProviderId;
   model?: string;
   durationMs: number;
-  usage?: { inputTokens?: number; outputTokens?: number; costUsd?: number };
+  /** inputTokens leaves out what the service served from its cache. `limits`: what the service says is left, when it says. */
+  usage?: { inputTokens?: number; outputTokens?: number; costUsd?: number; limits?: LimitWindow[] };
   citations?: string[];
   error?: string;
   /** True when the failure looks like a subscription usage / rate limit. */
   rateLimited?: boolean;
   /** When the provider says the limit resets, if it told us (epoch ms). */
   retryAt?: number;
+}
+
+/** One of a service's own limits, as it reported it. */
+export interface LimitWindow {
+  /** "5 hours", "7 days", "tokens"… */
+  label: string;
+  /** 0..100 */
+  usedPercent: number;
+  /** Epoch ms. */
+  resetsAt?: number;
+}
+
+export interface Tokens {
+  in: number;
+  out: number;
 }
 
 export interface ProviderStatus {
@@ -126,6 +142,8 @@ export interface RunOptions {
   checkpoints?: boolean;
   /** Conversation this run belongs to; earlier turns are given to the agents as context. */
   threadId?: string;
+  /** The build this run belongs to: its notices open the Builds screen. */
+  buildId?: string;
 }
 
 /** What you decide at a checkpoint. */
@@ -161,6 +179,8 @@ export interface Decision {
   runId: string;
   threadId?: string;
   stepId?: string;
+  /** A design for a build: confirmed on the Builds screen. */
+  buildId?: string;
   /** Who is asking: the agent or step title. */
   from: string;
   /** The question, or what is waiting for review. */
@@ -245,6 +265,8 @@ export interface HomeBuild {
   /** Steps that did not run (no second model for the review, say). */
   notes: number;
   at: number;
+  /** While running: which AI is doing what, e.g. "Claude · Write the pages"; absent from an older hub. */
+  now?: string;
 }
 
 /** One action waiting for the owner (src/actions). */
@@ -425,6 +447,9 @@ export interface StepRecord {
   kind: TaskKind;
   agent?: string;
   provider?: ProviderId;
+  model?: string;
+  /** Across its attempts, counted as each attempt ends. */
+  tokens?: Tokens;
   node?: string;
   /** waiting: asked you a question; review: paused at a checkpoint for you. */
   status: "pending" | "running" | "waiting" | "review" | "done" | "failed" | "skipped";
@@ -454,6 +479,8 @@ export interface RunRecord {
   result?: string;
   error?: string;
   design?: DesignState;
+  /** Every model call of the run, the planner included. */
+  tokens?: Tokens;
   createdAt: number;
   finishedAt?: number;
 }
@@ -549,6 +576,34 @@ export interface AiHub {
   week: { day: string; calls: number; failed: number; spentUsd: number }[];
 }
 
+/** GET /api/ai-hub/limits: tokens used and what is left, per model. */
+export interface ModelLimits {
+  models: ModelLimit[];
+  today: Tokens;
+  week: Tokens;
+  /** Last 7 days, oldest first. */
+  days: ({ day: string } & Tokens)[];
+}
+
+export interface ModelLimit {
+  id: string;
+  name: string;
+  state: ToolState;
+  until?: number;
+  detail?: string;
+  cost: CostClass;
+  today: Tokens & { calls: number };
+  week: Tokens & { calls: number };
+  /** What the service last said about its limits; empty when it does not say. */
+  windows: LimitWindow[];
+  /** When it said so (epoch ms). */
+  windowsAt?: number;
+  /** Caps you set in the hub's config. */
+  perDay?: number;
+  spendPerDay?: number;
+  spentUsd: number;
+}
+
 // ---- Builds (Jarvis phase 2: src/builds; the app's Builds screen)
 
 export interface BuildBranch {
@@ -561,6 +616,29 @@ export interface BuildBranch {
   tests: string;
   files: number;
   merged?: boolean;
+}
+
+/** One thing a build needs the owner for. later: not reached yet; none: it will not be asked. */
+export interface BuildApproval {
+  name: "design" | "merge";
+  state: "waiting" | "later" | "done" | "none";
+}
+
+/** What a build is doing right now. */
+export interface BuildLive {
+  phase: "planning" | "designing" | "design_ready" | "building" | "finished";
+  /** The AI at work now, and on what. */
+  provider?: ProviderId;
+  model?: string;
+  node?: string;
+  title?: string;
+  stepsDone: number;
+  stepsTotal: number;
+  steps: Pick<StepRecord, "id" | "title" | "status" | "provider" | "model" | "node" | "tokens">[];
+  tokens: Tokens;
+  approvals: BuildApproval[];
+  /** While phase is design_ready: the document to confirm and what other models said about it. */
+  design?: { round: number; doc: string; reviews: { provider?: ProviderId; output: string }[] };
 }
 
 export interface Build {
@@ -587,6 +665,10 @@ export interface Build {
   /** Steps of the run that failed or were skipped (a review with no second model free, say). */
   notes?: string[];
   continuedFrom?: string;
+  /** The run waits for the owner to confirm a design before any code is written. */
+  confirmDesign?: boolean;
+  /** Worked out from the run when the app asks; not stored. */
+  live?: BuildLive;
   /** Unguessable key in the preview links (/p/<key>/...), so the phone's browser can open them without the token. */
   previewKey: string;
   preview?: { status: "building" | "ready" | "failed"; web?: string; apk?: string; webRoot?: string; apkFile?: string; files?: { name: string; url: string }[]; filesRoot?: string; audit?: string; error?: string; log?: string; at: number };

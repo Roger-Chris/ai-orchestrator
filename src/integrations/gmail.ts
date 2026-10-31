@@ -234,7 +234,7 @@ export class GmailReader {
         r = { ok: true, text: o.text, provider: o.provider };
       } else {
         const res = await this.pool.run(provider!, { prompt: taskPrompt(batch), permission: "read", timeoutMs: 240_000 });
-        this.store.recordUsage(provider!, this.opts.node, res.ok, res.durationMs, res.usage?.costUsd);
+        this.store.recordUsage(provider!, this.opts.node, res.ok, res.durationMs, res.usage);
         r = res;
       }
       const tasks = r.ok ? parseTasks(r.text, batch, today) : undefined;
