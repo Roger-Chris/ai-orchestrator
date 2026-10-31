@@ -279,6 +279,7 @@ export function buildSystem(config: Config) {
     node: config.shopping.node || undefined,
     logNode: config.node.name,
     linkOnly: config.shopping.linkOnly,
+    compareOnly: config.shopping.compareOnly,
     findIn: config.shopping.findIn,
   });
   return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, mail, mailSender, shop, assistant, drafter, calls, tts, tools, models, builds, preview, convos, whisper, fileIndex, files, phone: new PhoneDesk(store, config, (p) => void notifier.notify(p)), outside: new OutsideAgents(store, replica), work };

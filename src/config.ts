@@ -324,6 +324,8 @@ const ConfigSchema = z.object({
       findIn: z.array(z.string()).default(["robu", "robocraze", "quartz", "amazon", "flipkart"]),
       /** Stores that only get a search link on the phone, never the agent. */
       linkOnly: z.array(z.string()).default([]),
+      /** Searched by "find X" but never carted, for stores the owner isn't signed in to: if best, the owner gets a link. */
+      compareOnly: z.array(z.string()).default([]),
     })
     .prefault({}),
   /** Your WhatsApp as a read-only linked device (`orc whatsapp link`). Nothing is ever sent. */

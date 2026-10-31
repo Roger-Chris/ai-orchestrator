@@ -80,10 +80,12 @@ export type CartOutcome = Where &
     /** The store wants a sign-in, an address or a captcha: the owner's part. */
     | { status: "needs_you"; items: CartItem[]; total?: string; note: string }
     | { status: "not_found" | "blocked"; items: CartItem[]; note: string }
+    /** The best is at a compare-only store: nothing was added anywhere, the owner opens this page. */
+    | { status: "link"; items: CartItem[]; url?: string; note: string }
   );
 
 /** One store, or several: then it searches them all and adds to the cart at the best one only. */
-export function cartPrompt(where: StoreId | StoreId[], request: string): string {
+export function cartPrompt(where: StoreId | StoreId[], request: string, compareOnly: StoreId[] = []): string {
   const stores = Array.isArray(where) ? where : [where];
   const s = STORES[stores[0]];
   const list = stores.map((id) => `- ${id}: ${STORES[id].name}, search at ${STORES[id].search}<words>, cart at ${STORES[id].cart}`).join("\n");
@@ -91,6 +93,7 @@ export function cartPrompt(where: StoreId | StoreId[], request: string): string 
     ? [
         `Using the browser tools only: find what is asked for below. Search every one of these stores for it, using a short search, one store after another, spending little time on each:\n${list}`,
         "Then choose ONE store: the right item first, in stock, then the lowest price. Add it to the cart on that store only, open that store's cart, read it, and stop. Never add it at a second store.",
+        ...(compareOnly.length ? [`Compare only, never add to their carts: ${compareOnly.join(", ")}. If the best choice is one of these, add nothing at any store and report status "link" with that store, the item and its price, and "url" set to the product page's address.`] : []),
       ]
     : [`Using the browser tools only, on ${s.name} (${s.home}): find what is asked for below and add it to the cart. Then open the cart (${s.cart}), read it, and stop.`];
   return [
@@ -105,7 +108,7 @@ export function cartPrompt(where: StoreId | StoreId[], request: string): string 
     "- Choose the plainest good match by rating and price, and add only what was asked, in the quantity asked (one if none was said). If several things would fit equally, pick one and say so in the note. If a cart already holds other things, leave them alone and list them too.",
     "",
     "Your last message must be only this JSON, with the items and the total exactly as the cart page shows them:",
-    '{"status":"ready|needs_you|not_found|blocked","store":"<the store id whose cart this is>","account":"<the name the store shows you are signed in as, or empty>","checked":[{"store":"<store id>","found":true,"price":"₹499","note":"out of stock, or empty"}],"items":[{"name":"...","qty":1,"price":"₹499"}],"total":"₹499","note":"one short line, or empty"}',
+    '{"status":"ready|needs_you|not_found|blocked|link","store":"<the store id whose cart this is>","account":"<the name the store shows you are signed in as, or empty>","checked":[{"store":"<store id>","found":true,"price":"₹499","note":"out of stock, or empty"}],"items":[{"name":"...","qty":1,"price":"₹499"}],"total":"₹499","url":"","note":"one short line, or empty"}',
     '"blocked" means the site refused the browser (robot check, access denied). "ready" only when you read the item\'s name and the total on the cart page. List every store in "checked"; if one store needs you or blocks you, note it there and carry on with the others. Read each store\'s results before judging it: "found": false only when you read them and the item is not there. If you did not read them, say "not checked" in its note. Look past sponsored results. Fill "account" from the name in the store\'s header, on the store whose cart you used.',
   ].join("\n");
 }
@@ -134,7 +137,19 @@ export function parseCart(text: string): CartOutcome | undefined {
   if (raw?.status === "ready") return items.length && total ? { ...where, status: "ready", items, total, note: note || undefined } : undefined;
   if (raw?.status === "needs_you") return { ...where, status: "needs_you", items, total, note: note || "The store needs you." };
   if (raw?.status === "not_found" || raw?.status === "blocked") return { ...where, status: raw.status, items, note: note || raw.status };
+  if (raw?.status === "link") return { ...where, status: "link", items, url: typeof raw.url === "string" ? raw.url.trim().slice(0, 500) : undefined, note: note || "Cheapest here: open it yourself." };
   return undefined;
+}
+
+/** A link from the agent opens on the phone only if it is https on that store's own site. */
+export function storeLink(store: StoreId, url?: string): string | undefined {
+  try {
+    const u = new URL(url ?? "");
+    const home = new URL(STORES[store].home).hostname.replace(/^www\./, "");
+    return u.protocol === "https:" && (u.hostname === home || u.hostname.endsWith(`.${home}`)) ? u.href : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export type ShopBrowser = "firefox" | "chrome";
@@ -146,6 +161,7 @@ export interface CartAgentOptions {
   model: string;
   headless: boolean;
   timeoutMinutes: number;
+  compareOnly?: StoreId[];
   signal?: AbortSignal;
   exec?: typeof runProcess;
 }
@@ -230,7 +246,7 @@ export async function runCartAgent(store: StoreId | StoreId[], request: string, 
     env: o.headless ? undefined : await desktopEnv(exec),
     command: o.command,
     // Its own folder and no settings of this machine: only the browser, none of the owner's tools or hooks.
-    args: ["-p", cartPrompt(store, request), "--model", o.model, "--output-format", "text", "--strict-mcp-config", "--mcp-config", config, "--setting-sources", "project", "--tools", "", "--allowedTools", TOOLS.join(","), "--disallowedTools", NEVER.join(",")],
+    args: ["-p", cartPrompt(store, request, o.compareOnly), "--model", o.model, "--output-format", "text", "--strict-mcp-config", "--mcp-config", config, "--setting-sources", "project", "--tools", "", "--allowedTools", TOOLS.join(","), "--disallowedTools", NEVER.join(",")],
     cwd: dir,
     timeoutMs: o.timeoutMinutes * 60_000,
     signal: o.signal,

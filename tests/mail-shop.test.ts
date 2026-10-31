@@ -6,7 +6,7 @@ import { ActionLog } from "../src/actions/log.js";
 import { rawMessage } from "../src/integrations/gmail.js";
 import { MailDesk, parseMail } from "../src/mail/desk.js";
 import { scopeProblem } from "../src/outside/mcp.js";
-import { desktopVars, GUARD_SCRIPT, ORDER_WORDS, parseCart, SECRET_FIELD } from "../src/shop/agent.js";
+import { cartPrompt, desktopVars, GUARD_SCRIPT, ORDER_WORDS, parseCart, SECRET_FIELD, storeLink } from "../src/shop/agent.js";
 import { ShopDesk } from "../src/shop/desk.js";
 import { Store } from "../src/store/db.js";
 
@@ -102,6 +102,14 @@ describe("the cart agent's answer and walls", () => {
     expect(parseCart('{"status":"ordered","items":[]}')).toBeUndefined();
     expect(parseCart("no json")).toBeUndefined();
     expect(parseCart('{"status":"needs_you","items":[],"note":"sign in"}')).toMatchObject({ status: "needs_you", note: "sign in" });
+  });
+
+  it("a compare-only store is searched, not carted, and its link must be on its own site", () => {
+    expect(cartPrompt(["robu", "amazon"], "resistor", ["robu"])).toMatch(/never add to their carts: robu/);
+    expect(cartPrompt(["amazon"], "resistor")).not.toMatch(/Compare only/);
+    expect(parseCart('{"status":"link","store":"robu","items":[{"name":"10k","price":"₹1"}],"url":"https://robu.in/p/1","note":""}')).toMatchObject({ status: "link", store: "robu", url: "https://robu.in/p/1" });
+    expect(storeLink("robu", "https://robu.in/p/1")).toBe("https://robu.in/p/1");
+    for (const bad of ["https://robu.in.evil.com/p", "http://robu.in/p", "javascript:alert(1)", "https://evilrobu.in/p", undefined]) expect(storeLink("robu", bad), String(bad)).toBeUndefined();
   });
 
   it("order and pay controls match, adding to a cart does not", () => {

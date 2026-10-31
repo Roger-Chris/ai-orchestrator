@@ -5,7 +5,7 @@ import type { PushPayload } from "../server/push.js";
 import type { Store } from "../store/db.js";
 import type { ShopRun } from "../types.js";
 import type { CartOutcome, StoreId } from "./agent.js";
-import { STORE_IDS, STORES } from "./agent.js";
+import { STORE_IDS, storeLink, STORES } from "./agent.js";
 
 /**
  * Shopping, on the hub. Asking starts the browser agent on the device set for it; the phone is told
@@ -23,6 +23,8 @@ export interface ShopDeskDeps {
   logNode: string;
   /** Stores that only get a link (config shopping.linkOnly). */
   linkOnly: string[];
+  /** Searched but never carted (config shopping.compareOnly). */
+  compareOnly?: string[];
   /** Stores searched when none is named (config shopping.findIn). */
   findIn?: string[];
   now?: () => number;
@@ -64,7 +66,7 @@ export class ShopDesk {
     const request = i.request.trim();
     if (request.length < 2) throw new Error("what should I look for?");
     const s = STORES[store];
-    const link = this.d.linkOnly.includes(store);
+    const link = this.d.linkOnly.includes(store) || !!this.d.compareOnly?.includes(store);
     const run = this.save({
       id: `s${randomBytes(4).toString("hex")}`,
       store,
@@ -104,7 +106,7 @@ export class ShopDesk {
 
   private async work(run: ShopRun, among?: StoreId[]): Promise<ShopRun> {
     const res = await this.d
-      .act(this.d.node, { action: "shop.cart", args: { store: among ?? run.store, request: run.request } }, run.by ?? "owner")
+      .act(this.d.node, { action: "shop.cart", args: { store: among ?? run.store, request: run.request, ...(among ? { compareOnly: among.filter((s) => this.d.compareOnly?.includes(s)) } : {}) } }, run.by ?? "owner")
       .catch((e): ActResponse => ({ status: "refused", node: this.d.node ?? "", action: "shop.cart", error: (e as Error).message }));
     let next: ShopRun;
     if (res.status === "done" && res.result.ok && res.result.data) {
@@ -112,6 +114,9 @@ export class ShopDesk {
       next = { ...run, status: c.status, items: c.items, total: "total" in c ? c.total : undefined, note: "note" in c ? c.note : undefined, checked: c.checked, account: c.account };
       // A ready cart must say whose it is, or Go to checkout would open the wrong store.
       if (among && c.status === "ready" && !(c.store && among.includes(c.store))) next = { ...next, status: "failed", note: "The agent filled a cart but did not say which store. Look in your carts." };
+      else if (c.status === "link" && !(c.store && this.d.compareOnly?.includes(c.store))) next = { ...next, status: "failed", note: "The agent stopped at a link for a store that should have got a cart." };
+      else if (c.status === "ready" && c.store && this.d.compareOnly?.includes(c.store)) next = { ...next, status: "link", store: c.store, storeName: STORES[c.store].name, cartUrl: STORES[c.store].cart, searchUrl: `${STORES[c.store].search}${encodeURIComponent(run.request)}`, note: "Cheapest here, but the agent added it to a guest cart it shouldn't have used. Open it yourself." };
+      else if (c.status === "link" && c.store) next = { ...next, store: c.store, storeName: STORES[c.store].name, cartUrl: STORES[c.store].cart, searchUrl: storeLink(c.store, c.url) ?? `${STORES[c.store].search}${encodeURIComponent(run.request)}` };
       else if (c.store && STORES[c.store]) next = { ...next, store: c.store, storeName: STORES[c.store].name, cartUrl: STORES[c.store].cart, searchUrl: `${STORES[c.store].search}${encodeURIComponent(run.request)}` };
     } else {
       const why = res.status === "done" ? res.result.output : res.status === "refused" ? res.error : "the device asked for approval, which a cart should not need";
@@ -120,7 +125,7 @@ export class ShopDesk {
     next = this.save(next);
     const s = next.status;
     this.d.notify?.({
-      title: s === "ready" ? `${next.storeName} cart: ${next.total}` : `${next.storeName}: ${s === "needs_you" ? "needs you" : "cart not filled"}`,
+      title: s === "ready" ? `${next.storeName} cart: ${next.total}` : s === "link" ? `Best at ${next.storeName}${next.items[0]?.price ? `: ${next.items[0].price}` : ""}, open the link` : `${next.storeName}: ${s === "needs_you" ? "needs you" : "cart not filled"}`,
       body: s === "ready" ? next.items.map((i) => `${i.qty} x ${i.name}`).join(", ").slice(0, 200) : next.note ?? "",
       url: `/shop?id=${next.id}`,
       tag: `shop-${next.id}`,
