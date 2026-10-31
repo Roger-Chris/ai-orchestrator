@@ -55,6 +55,19 @@ export default function Tasks() {
     }
   };
 
+  // Past their date by more than a week: one tap clears them all (Done, or dropped if never confirmed).
+  const stale = tasks?.filter((t) => !!t.due_at && Date.now() - new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(t.due_at) ? t.due_at : `${t.due_at}Z`).getTime() > 7 * 86_400_000) ?? [];
+  const clearOld = async () => {
+    const ids = new Set(stale.map((t) => t.id));
+    setTasks((all) => all?.filter((x) => !ids.has(x.id)));
+    try {
+      for (const t of stale) await Api.taskAction(t.id, t.status === "pending_confirmation" ? "reject" : "done");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+    void load();
+  };
+
   const toConfirm = tasks?.filter((t) => t.status === "pending_confirmation") ?? [];
   const open = tasks?.filter((t) => t.status === "open") ?? [];
   return (
@@ -72,6 +85,8 @@ export default function Tasks() {
         />
         <Button small title="Add" disabled={!title.trim()} onPress={() => void add()} />
       </Row>
+
+      {stale.length > 0 && <Button small title={`Clear ${stale.length} old task${stale.length === 1 ? "" : "s"}`} onPress={() => void clearOld()} />}
 
       {toConfirm.length > 0 && <Text style={{ color: c.muted, fontSize: 13, marginTop: 20 }}>{`Found in your messages · keep or drop (${toConfirm.length})`}</Text>}
       {toConfirm.map((t) => (
