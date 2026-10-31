@@ -2,6 +2,17 @@
 
 What the session on the Linux hub (`roger-all-series`, 100.104.185.17) is doing, for the sessions on the Windows laptop (`roger`, 100.79.112.101). Branch: `main` (the owner merged `jarvis/next` and wants no separate working branches). See also `docs/HANDOFF.md`.
 
+## Laptop: run this after pulling (31 Oct 2026)
+
+From PowerShell, in the `Orchestrator` folder:
+
+```powershell
+git pull --ff-only
+powershell -ExecutionPolicy Bypass -File deploy\windows\update-laptop.ps1
+```
+
+It sets `sharedMemory.hub` to the Linux hub (keeping a backup of the config), stops and disables the old `Orchestrator WhatsApp link` task, restarts `Orchestrator node`, sends the style book and people graph, and prints the network adapters for Wake-on-LAN. It deletes nothing and doesn't reboot. Afterwards, reboot once to test that the node comes back at logon, and paste the adapter lines into the Linux session so `cluster.wake` can use the real address. Phone approvals for laptop commands were being refused because the hub setting was missing; this code also asks online peers when it is empty.
+
 ## State on Linux
 
 - Pulled `jarvis/next` up to `3603cef` (Hermes Agent, handoff notes).

@@ -18,18 +18,21 @@ export function buildActions(
   const desk = new ApprovalDesk(d.store.db, config, (title, body, id) => {
     void d.notifier?.notify({ title, body, url: "/", tag: `approval:${id}` }).catch(() => undefined);
   });
-  // An approval is checked where it was made: here, or on the Linux hub (sharedMemory.hub).
+  // An approval is checked where it was made: here, on the Linux hub (sharedMemory.hub), or with no hub set, on the online peers.
   const check: ApprovalCheck = async (id, action, hash, node) => {
     if (desk.get(id)) return desk.claim(id, action, hash, node);
     const hub = config.sharedMemory.hub?.replace(/\/$/, "");
-    if (!hub) return false;
-    const res = await fetchFn(`${hub}/node/approvals/${encodeURIComponent(id)}/claim`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ action, hash, node }),
-      signal: AbortSignal.timeout(15_000),
-    });
-    return res.ok && ((await res.json()) as { valid: boolean }).valid === true;
+    const holders = hub ? [hub] : (d.cluster?.list() ?? []).filter((p) => p.online).map((p) => p.url.replace(/\/$/, ""));
+    for (const at of holders) {
+      const res = await fetchFn(`${at}/node/approvals/${encodeURIComponent(id)}/claim`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ action, hash, node }),
+        signal: AbortSignal.timeout(15_000),
+      }).catch(() => undefined);
+      if (res?.ok && ((await res.json()) as { valid: boolean }).valid === true) return true;
+    }
+    return false;
   };
   const runner = new ActionRunner(config, { pool: d.pool, replica: d.replica, check, extra: d.extra });
   const peer = async (node: string, req: ActRequest): Promise<ActResponse> => {

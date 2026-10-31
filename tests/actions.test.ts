@@ -220,3 +220,31 @@ describe("approvals", () => {
     expect(argsHash("a", { x: 1 })).not.toBe(argsHash("a", { x: 2 }));
   });
 });
+
+describe("an approval made on another device", () => {
+  async function ask(valid: boolean, hub?: string) {
+    const root = tmp();
+    const urls: string[] = [];
+    const store = new Store(join(tmp(), "t.db"));
+    const config = parseConfig({ node: { name: "laptop" }, actions: { roots: [root] }, ...(hub ? { sharedMemory: { hub } } : {}) });
+    const cluster = { list: () => [{ name: "off", url: "http://off:1", online: false }, { name: "hub", url: "http://hub:1/", online: true }] } as any;
+    const fetchFn = (async (u: string) => {
+      urls.push(u);
+      return Response.json({ valid });
+    }) as typeof fetch;
+    const hubActions = buildActions(config, { store, cluster, fetchFn });
+    const r = await hubActions.runner.act({ action: "files.write", args: { path: "a.md", content: "x" }, approval: "abc" } as any);
+    return { r, urls };
+  }
+
+  it("is claimed from an online peer when no hub is set", async () => {
+    const { r, urls } = await ask(true);
+    expect(r.status).toBe("done");
+    expect(urls).toEqual(["http://hub:1/node/approvals/abc/claim"]);
+  });
+
+  it("is refused when no peer holds it, and a set hub is the only one asked", async () => {
+    expect((await ask(false)).r.status).toBe("refused");
+    expect((await ask(true, "http://set:1")).urls).toEqual(["http://set:1/node/approvals/abc/claim"]);
+  });
+});
