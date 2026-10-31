@@ -16,7 +16,7 @@ export const SHOP_ACTIONS: ActionDef[] = [
     summary: (a) => `Add to the ${Array.isArray(a.store) ? "best store's" : a.store} cart: ${a.request}`,
     run: async (a, ctx) => {
       const s = ctx.config.shopping;
-      const cart = await runCartAgent(a.store, a.request, { dataDir: resolve(ctx.config.dataDir), command: s.command, model: s.model, headless: s.headless, timeoutMinutes: s.timeoutMinutes, signal: ctx.signal });
+      const cart = await runCartAgent(a.store, a.request, { dataDir: resolve(ctx.config.dataDir), browser: s.browser, command: s.command, model: s.model, headless: s.headless, timeoutMinutes: s.timeoutMinutes, signal: ctx.signal });
       return { ok: true, output: `${cart.status}: ${cart.items.map((i) => `${i.qty} x ${i.name}`).join(", ") || "nothing in the cart"}${"total" in cart && cart.total ? `, total ${cart.total}` : ""}${"note" in cart && cart.note ? ` (${cart.note})` : ""}`, data: cart };
     },
   }),

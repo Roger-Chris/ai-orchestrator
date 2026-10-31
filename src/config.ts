@@ -316,6 +316,8 @@ const ConfigSchema = z.object({
       node: z.string().default(""),
       command: z.string().default("claude"),
       model: z.string().default("sonnet"),
+      /** Opens for one request and closes after it. Firefox is Playwright's own build, not an installed one. */
+      browser: z.enum(["firefox", "chrome"]).default("firefox"),
       headless: z.boolean().default(false),
       timeoutMinutes: z.number().min(1).max(30).default(20),
       /** Stores searched when the owner names none. */

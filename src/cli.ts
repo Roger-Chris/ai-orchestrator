@@ -16,7 +16,7 @@ import { workspaceMap } from "./context/graphify.js";
 import { AssistantTasks } from "./integrations/assistant.js";
 import { GmailReader, SEND_SCOPES } from "./integrations/gmail.js";
 import { MailDesk } from "./mail/desk.js";
-import { desktopEnv, profileDir, STORE_IDS, STORES, type StoreId } from "./shop/agent.js";
+import { browserServer, desktopEnv, pickBrowser, profileDir, STORE_IDS, STORES, type StoreId } from "./shop/agent.js";
 import { ShopDesk } from "./shop/desk.js";
 import { Memory } from "./memory/memory.js";
 import { openReplica } from "./shared/setup.js";
@@ -454,7 +454,15 @@ async function cmdShop(config: Config, sub = "", store = "") {
     return;
   }
   const chrome = process.platform === "win32" ? `${process.env.ProgramFiles}\\Google\\Chrome\\Application\\chrome.exe` : process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "google-chrome";
-  spawn(chrome, [`--user-data-dir=${profileDir(resolve(config.dataDir))}`, STORES[store as StoreId].home], { detached: true, stdio: "ignore", env: { ...process.env, ...(await desktopEnv()) } }).unref();
+  const dir = resolve(config.dataDir, "shop");
+  mkdirSync(dir, { recursive: true });
+  await browserServer(dir);
+  // The same browser and profile the agent uses, or the sign-in would be somewhere it can't see.
+  const { browser, exe } = await pickBrowser(dir, config.shopping.browser);
+  const profile = profileDir(resolve(config.dataDir), browser);
+  mkdirSync(profile, { recursive: true });
+  const args = browser === "firefox" ? ["-profile", profile, STORES[store as StoreId].home] : [`--user-data-dir=${profile}`, STORES[store as StoreId].home];
+  spawn(exe ?? chrome, args, { detached: true, stdio: "ignore", env: { ...process.env, ...(await desktopEnv()) } }).unref();
   console.log(`Sign in to ${STORES[store as StoreId].name} in the window that opened, then close it. Jarvis never sees your password; it only reuses the sign-in.`);
 }
 

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join, resolve } from "node:path";
 import { runProcess } from "../providers/base.js";
 
 /**
@@ -136,8 +137,11 @@ export function parseCart(text: string): CartOutcome | undefined {
   return undefined;
 }
 
+export type ShopBrowser = "firefox" | "chrome";
+
 export interface CartAgentOptions {
   dataDir: string;
+  browser?: ShopBrowser;
   command: string;
   model: string;
   headless: boolean;
@@ -147,7 +151,31 @@ export interface CartAgentOptions {
 }
 
 /** The browser profile that keeps the store sign-ins, separate from the owner's own browser. */
-export const profileDir = (dataDir: string) => resolve(dataDir, "shop", "profile");
+export const profileDir = (dataDir: string, browser: ShopBrowser) => resolve(dataDir, "shop", browser === "firefox" ? "profile-firefox" : "profile");
+
+/** Playwright's own Firefox, which it can drive; an installed Firefox can't be. Fetched once. */
+export async function firefoxPath(dir: string, exec: typeof runProcess = runProcess): Promise<string> {
+  const tools = createRequire(join(dir, "tools", "package.json"));
+  const exe: string = tools("playwright").firefox.executablePath();
+  if (existsSync(exe)) return exe;
+  const r = await exec({ command: process.execPath, args: [join(dirname(tools.resolve("playwright")), "cli.js"), "install", "firefox"], timeoutMs: 600_000 });
+  if (!existsSync(exe)) throw new Error(`could not install Firefox for the agent: ${(r.stderr || r.spawnError || "").trim().slice(-300)}`);
+  return exe;
+}
+
+/** Firefox if it really starts here, else Chrome (Playwright's Firefox won't start on the Windows laptop: no mozglue assembly). */
+export async function pickBrowser(dir: string, wanted: ShopBrowser, exec: typeof runProcess = runProcess): Promise<{ browser: ShopBrowser; exe?: string }> {
+  if (wanted === "chrome") return { browser: "chrome" };
+  try {
+    const exe = await firefoxPath(dir, exec);
+    const r = await exec({ command: exe, args: ["--version"], timeoutMs: 20_000 });
+    if (r.code === 0 && !r.spawnError) return { browser: "firefox", exe };
+  } catch {
+    /* falls through to Chrome */
+  }
+  console.warn("Firefox won't start on this machine, so shopping uses Chrome.");
+  return { browser: "chrome" };
+}
 
 /**
  * The hub is a systemd user service that may start before anyone logs in, so it doesn't know the
@@ -172,7 +200,7 @@ export async function desktopEnv(exec: typeof runProcess = runProcess): Promise<
 }
 
 /** A pinned Playwright MCP in the agent's own folder, installed on first use; npx can't start it on Windows. */
-async function browserServer(dir: string, exec: typeof runProcess): Promise<string> {
+export async function browserServer(dir: string, exec: typeof runProcess = runProcess): Promise<string> {
   const cli = join(dir, "tools", "node_modules", "@playwright", "mcp", "cli.js");
   if (existsSync(cli)) return cli;
   const npm = ["install", "--no-audit", "--no-fund", "--prefix", join(dir, "tools"), "@playwright/mcp@0.0.83"];
@@ -188,12 +216,13 @@ export async function runCartAgent(store: StoreId | StoreId[], request: string, 
   writeFileSync(guard, GUARD_SCRIPT);
   const exec = o.exec ?? runProcess;
   const server = await browserServer(dir, exec);
+  const { browser } = await pickBrowser(dir, o.browser ?? "firefox", exec);
   const config = join(dir, "mcp.json");
   writeFileSync(
     config,
     JSON.stringify({
       mcpServers: {
-        browser: { command: process.execPath, args: [server, "--browser", "chrome", "--user-data-dir", profileDir(o.dataDir), "--init-script", guard, ...(o.headless ? ["--headless"] : [])] },
+        browser: { command: process.execPath, args: [server, "--browser", browser, "--user-data-dir", profileDir(o.dataDir, browser), "--init-script", guard, ...(o.headless ? ["--headless"] : [])] },
       },
     }),
   );
