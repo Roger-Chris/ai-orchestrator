@@ -7,8 +7,10 @@ const ActBody = z.object({
   action: z.string(),
   args: z.record(z.string(), z.unknown()).optional(),
   reason: z.string().max(2000).optional(),
+  /** Who is asking, for the log ("brain"); the owner's own apps leave it out. */
+  who: z.string().max(80).optional(),
 });
-const NodeActBody = ActBody.omit({ node: true }).extend({ approval: z.string().optional() });
+const NodeActBody = ActBody.omit({ node: true, who: true }).extend({ approval: z.string().optional() });
 const ClaimBody = z.object({ action: z.string(), hash: z.string(), node: z.string() });
 
 /**
@@ -26,11 +28,12 @@ export function mountActions(app: Hono, d: { actions?: ActionHub }) {
     if (!d.actions) return off(c);
     const body = ActBody.parse(await c.req.json());
     try {
-      return c.json(await d.actions.act(body.node, body));
+      return c.json(await d.actions.act(body.node, body, { who: body.who }));
     } catch (e) {
       return c.json({ status: "refused", node: body.node, action: body.action, error: (e as Error).message }, 502);
     }
   });
+  app.get("/api/action-log", (c) => (d.actions?.log ? c.json(d.actions.log.list({ who: c.req.query("who"), limit: Number(c.req.query("limit") ?? 100) })) : off(c)));
   app.get("/api/approvals", (c) => {
     if (!d.actions) return off(c);
     const status = c.req.query("status") as any;

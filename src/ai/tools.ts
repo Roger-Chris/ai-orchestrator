@@ -112,8 +112,8 @@ export class ToolRegistry {
 
     const status = await this.d.pool.status(fresh);
     for (const id of Object.keys(PROVIDER_FACTS) as ProviderId[]) {
-      const facts = PROVIDER_FACTS[id];
       const cfg = this.d.config.providers[id];
+      const facts = id === "manus" && this.d.config.providers.manus.free ? { ...PROVIDER_FACTS.manus, cost: "free" as const, note: "Your free Manus credits: a cloud agent with its own browser; takes minutes per task." } : PROVIDER_FACTS[id];
       const s = status.find((x) => x.id === id);
       const scores = Object.fromEntries((Object.keys(this.d.capabilities) as TaskKind[]).map((k) => [k, this.d.capabilities[k][id]])) as Record<TaskKind, number>;
       let state: ToolState = "ready";

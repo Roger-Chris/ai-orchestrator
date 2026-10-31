@@ -24,6 +24,11 @@ export interface PreviewResult {
   /** Where the files are on the hub (not shown in the app). */
   webRoot?: string;
   apkFile?: string;
+  /** Finished decks and videos from the repo's output/ folder. */
+  files?: { name: string; url: string }[];
+  filesRoot?: string;
+  /** The start of AUDIT.md, when the build wrote one. */
+  audit?: string;
   error?: string;
   log: string;
 }
@@ -215,8 +220,18 @@ export class PreviewMaker {
         }
       }
 
+      const output = join(dir, "output");
+      if (existsSync(output) && statSync(output).isDirectory()) {
+        const names = readdirSync(output).filter((n) => statSync(join(output, n)).isFile());
+        if (names.length) {
+          out.filesRoot = output;
+          out.files = names.map((name) => ({ name, url: `/p/${b.previewKey}/files/${encodeURIComponent(name)}` }));
+        }
+      }
+      if (existsSync(join(dir, "AUDIT.md"))) out.audit = readFileSync(join(dir, "AUDIT.md"), "utf8").slice(0, 4000);
+
       out.log = log.join("\n\n").slice(-6000);
-      if (!out.web && !out.apk) {
+      if (!out.web && !out.apk && !out.files) {
         const error = problems.length ? problems.join("; ") : "nothing to preview: no `build` script with a dist/ or build/ folder, no index.html, no Android build (looked in the top folder and its subfolders)";
         return { status: "failed", error, log: out.log };
       }

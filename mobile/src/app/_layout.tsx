@@ -56,6 +56,7 @@ export default function RootLayout() {
         <Stack.Screen name="connect" options={{ title: "Connect to your hub" }} />
         <Stack.Screen name="settings" options={{ title: "Settings" }} />
         <Stack.Screen name="tasks" options={{ title: "Tasks" }} />
+        <Stack.Screen name="record" options={{ title: "Record a conversation" }} />
         <Stack.Screen name="memory" options={{ title: "Memory" }} />
         <Stack.Screen name="wa-chats" options={{ title: "WhatsApp chats" }} />
         <Stack.Screen name="people" options={{ title: "People" }} />

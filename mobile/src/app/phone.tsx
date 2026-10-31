@@ -3,7 +3,7 @@ import { useCallback, useState } from "react";
 import { RefreshControl, ScrollView, Text, View } from "react-native";
 import { Button, Card, Chip, ErrorText, Muted, Row } from "../components/ui";
 import { Api, type PhoneAction } from "../lib/api";
-import { doPhoneAction } from "../lib/phone";
+import { doPhoneAction, openFreshApps } from "../lib/phone";
 import { useColors } from "../lib/theme";
 
 /**
@@ -29,7 +29,8 @@ export default function Phone() {
       setLoading(false);
     }
   }, []);
-  useFocusEffect(useCallback(() => void load(), [load]));
+  // Tapping the notice brings you here with the app on screen, so a fresh "open this app" just opens.
+  useFocusEffect(useCallback(() => void openFreshApps().catch(() => undefined).finally(() => void load()), [load]));
 
   const run = async (p: PhoneAction, f: () => Promise<unknown>) => {
     setBusy(p.id);

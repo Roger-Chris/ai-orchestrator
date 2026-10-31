@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -32,7 +32,7 @@ import type { Permission, ProviderId, RunEvent, RunMode } from "./types.js";
 import { learnStyle, type StyleBook } from "./whatsapp/learn.js";
 import { buildPool, poolPrompt } from "./whatsapp/pool.js";
 import { describe, peopleGraph } from "./whatsapp/graph.js";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { WhatsAppLink } from "./whatsapp/link.js";
 import { describeImages, ollamaProblem, transcribe } from "./whatsapp/local.js";
 import { WaStore, type WaMessage } from "./whatsapp/store.js";
@@ -44,6 +44,11 @@ import { WakeListener, wakeOptions } from "./voice/wake.js";
 import { ToolRegistry } from "./ai/tools.js";
 import { ModelRouter } from "./ai/route.js";
 import { BuildDesk } from "./builds/desk.js";
+import { createRepo } from "./builds/repo.js";
+import { projectsDir } from "./actions/registry.js";
+import { AGENTIC } from "./brain/capabilities.js";
+import { ConvoDesk, NoWhisperDevice } from "./convos/desk.js";
+import { whisperFile } from "./convos/whisper.js";
 import { FileClient } from "./files/client.js";
 import { PhoneDesk } from "./phone/desk.js";
 import { WorkDesk } from "./work/desk.js";
@@ -174,7 +179,55 @@ export function buildSystem(config: Config) {
     notify: (p) => void notifier.notify(p),
     onReady: (b) => void (config.builds.autoPreview ? preview?.(b) : undefined),
     node: config.node.name,
+    projectsDir: projectsDir(config),
+    guidelines: () => {
+      try {
+        return readFileSync(resolve(ROOT, config.builds.guidelines), "utf8");
+      } catch {
+        return "";
+      }
+    },
+    createRepo: (name, spec) => createRepo(name, spec, { dir: projectsDir(config), remote: config.branches.remote }),
+    pickAgents: async () => {
+      const [agent, reviewer] = (await models.routeFor("coding", "large")).chain.filter((id) => AGENTIC[id]);
+      return { agent, reviewer };
+    },
+    // Decks, videos and Android work go to the device built for it (the laptop), never to the small hub by choice.
+    pickNode: (kind, spec) => {
+      const heavy = kind !== "app" || /\b(android|apk|mobile app|expo|react native|flutter)\b/i.test(spec);
+      const node = config.builds.androidNode;
+      return heavy && node && (node === config.node.name || cluster.isOnline(node)) ? node : undefined;
+    },
+    direct: config.providers.manus.free && config.providers.manus.apiKey ? (prompt) => pool.run("manus", { prompt, permission: "read" }) : undefined,
   });
+  // Recorded conversations: Whisper runs on the laptop; while it is off, recordings wait.
+  const whisper = { here: config.convos.whisperHere, dataDir: resolve(config.dataDir), run: (file: string) => whisperFile(file, config.style, ROOT) };
+  const convos = new ConvoDesk({
+    store,
+    dataDir: resolve(config.dataDir),
+    replica,
+    owner: config.profile.name || process.env.OWNER_NAME || undefined,
+    notify: (p) => void notifier.notify(p),
+    transcribe: async (file) => {
+      if (whisper.here) return whisper.run(file);
+      const r = await cluster.transcribe(file);
+      if (!r) throw new NoWhisperDevice("Waiting for the laptop to come online to transcribe this.");
+      return r;
+    },
+    think: async (prompt) => (await models.run("convo", { prompt })).text,
+    // Unconfirmed: the words may be someone else's, so these wait for your Keep on the Tasks screen.
+    addTask: config.assistant.token
+      ? async (t) => {
+          const res = await fetch(`${config.assistant.url.replace(/\/$/, "")}/tasks`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.assistant.token}` },
+            body: JSON.stringify({ title: t.title, details: t.details, due_at: t.dueAt, unconfirmed: true }),
+          });
+          if (!res.ok) throw new Error(`the brain answered ${res.status} for a task`);
+        }
+      : undefined,
+  });
+  setInterval(() => void convos.pump(), config.convos.retrySeconds * 1000).unref();
   // Android APKs are built on the device with the Android SDK (builds.androidNode, the laptop) when it isn't this one.
   const androidNode = config.builds.androidNode && config.builds.androidNode !== config.node.name ? config.builds.androidNode : "";
   preview = previewer(
@@ -195,7 +248,7 @@ export function buildSystem(config: Config) {
     think: (kind, req) => models.run(kind, req),
     notify: (title, body) => void notifier.notify({ title, body, url: "/work", tag: `work:${title}` }),
   });
-  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts, tools, models, builds, preview, fileIndex, files, phone: new PhoneDesk(store, config, (p) => void notifier.notify(p)), outside: new OutsideAgents(store, replica), work };
+  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts, tools, models, builds, preview, convos, whisper, fileIndex, files, phone: new PhoneDesk(store, config, (p) => void notifier.notify(p)), outside: new OutsideAgents(store, replica), work };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */
@@ -873,6 +926,43 @@ async function cmdMcp(config: Config) {
   }
 }
 
+/**
+ * `orc record`: record this computer's microphone until Enter, then send it to the hub, which has
+ * the laptop's Whisper transcribe it and turns it into tasks and memory. A failed send keeps the file:
+ * `orc record --file <path>` sends it again.
+ */
+async function cmdRecord(config: Config, o: { seconds?: number; file?: string }) {
+  let file = o.file;
+  let seconds: number | undefined;
+  if (!file) {
+    const dir = join(resolve(config.dataDir), "recordings");
+    mkdirSync(dir, { recursive: true });
+    file = join(dir, `${new Date().toISOString().replace(/[:.]/g, "-")}.wav`);
+    console.log("Starting the microphone (the first run downloads what it needs)…");
+    const child = spawn(config.style.uv, ["run", resolve(ROOT, "tools", "record.py"), file, ...(o.seconds ? ["--seconds", String(o.seconds)] : [])], { stdio: ["inherit", "pipe", "inherit"] });
+    let out = "";
+    child.stdout.on("data", (d) => (out += d));
+    const code = await new Promise<number | null>((ok, no) => {
+      child.on("error", no);
+      child.on("close", ok);
+    });
+    if (code !== 0) throw new Error(`recording stopped with code ${code}`);
+    seconds = Number(out.trim()) || undefined;
+  }
+  const form = new FormData();
+  form.append("audio", new File([readFileSync(file)], basename(file), { type: "audio/wav" }));
+  form.append("source", "laptop");
+  if (seconds) form.append("durationSec", String(seconds));
+  const url = `${hubUrl(config)}/api/convos`;
+  try {
+    const res = await fetch(url, { method: "POST", headers: config.server.token ? { Authorization: `Bearer ${config.server.token}` } : {}, body: form });
+    if (!res.ok) throw new Error(`the hub answered ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    console.log(`Sent. It is being transcribed; you get a notice when tasks and notes are ready. (Saved in ${file})`);
+  } catch (e) {
+    throw new Error(`could not send it to ${url}: ${(e as Error).message}\nThe recording is safe. Send it later with: orc record --file "${file}"`);
+  }
+}
+
 /** `orc wake`: listen for "Hey Jarvis" on this computer and talk to the hub's assistant. Ctrl+C stops. */
 async function cmdWake(config: Config, over: { threshold?: number; device?: string }) {
   if (over.threshold !== undefined && !(over.threshold > 0 && over.threshold < 1)) throw new Error("--threshold is between 0 and 1 (default 0.5; lower wakes more easily)");
@@ -901,6 +991,8 @@ async function main() {
       draft: { type: "boolean" },
       raw: { type: "boolean" },
       threshold: { type: "string" },
+      seconds: { type: "string" },
+      file: { type: "string" },
       device: { type: "string" },
     },
   });
@@ -930,6 +1022,8 @@ async function main() {
       return cmdWhatsApp(config, rest[0]);
     case "wake":
       return cmdWake(config, { threshold: v.threshold ? Number(v.threshold) : undefined, device: v.device as string | undefined });
+    case "record":
+      return cmdRecord(config, { seconds: v.seconds ? Number(v.seconds) : undefined, file: v.file as string | undefined });
     case "style":
       return cmdStyle(config, rest[0], { who: rest.slice(1).join(" "), ask: v.ask as string | undefined, draft: !!v.draft, raw: !!v.raw });
     default:

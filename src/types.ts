@@ -518,7 +518,7 @@ export interface Usage {
 }
 
 /** The hub's own jobs the model router chooses for. */
-export const JOB_KINDS = ["whatsapp_draft", "mail", "call", "brain", "work"] as const;
+export const JOB_KINDS = ["whatsapp_draft", "mail", "call", "brain", "work", "convo"] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
 export type JobSize = "small" | "medium" | "large";
@@ -570,7 +570,12 @@ export interface Build {
   node?: string;
   agent: ProviderId;
   reviewer: ProviderId;
-  status: "running" | "ready" | "failed" | "merged" | "cancelled";
+  /** What is being made; decks and videos end as files in the repo's output/ folder. */
+  kind?: "app" | "slides" | "video";
+  /** Who started it, when it was not the owner ("brain"). */
+  by?: string;
+  /** `done`: made by a cloud agent without a repo (Manus), so there is nothing to merge. */
+  status: "running" | "ready" | "failed" | "merged" | "cancelled" | "done";
   runId: string;
   branches: BuildBranch[];
   summary?: string;
@@ -581,9 +586,53 @@ export interface Build {
   continuedFrom?: string;
   /** Unguessable key in the preview links (/p/<key>/...), so the phone's browser can open them without the token. */
   previewKey: string;
-  preview?: { status: "building" | "ready" | "failed"; web?: string; apk?: string; webRoot?: string; apkFile?: string; error?: string; log?: string; at: number };
+  preview?: { status: "building" | "ready" | "failed"; web?: string; apk?: string; webRoot?: string; apkFile?: string; files?: { name: string; url: string }[]; filesRoot?: string; audit?: string; error?: string; log?: string; at: number };
   createdAt: number;
   updatedAt: number;
+}
+
+// ---- Recorded conversations (src/convos; the app's Record screen, `orc record`)
+
+export interface ConvoTask {
+  title: string;
+  dueAt?: string;
+  details?: string;
+  /** Already handed to the brain, so a retry never adds it twice. */
+  sent?: boolean;
+}
+
+export interface Convo {
+  id: string;
+  source: string;
+  status: "waiting" | "transcribing" | "thinking" | "saving" | "done" | "failed";
+  /** The audio, on the hub (not shown in the app). */
+  file?: string;
+  bytes?: number;
+  durationSec?: number;
+  transcript?: string;
+  language?: string;
+  summary?: string;
+  day?: string;
+  tasks: ConvoTask[];
+  facts: string[];
+  aboutMe: string[];
+  error?: string;
+  attempts: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** One line of who did what on a device (src/actions/log.ts). */
+export interface ActionLogEntry {
+  id: number;
+  at: number;
+  who: string;
+  node: string;
+  action: string;
+  args: string;
+  reason?: string;
+  status: string;
+  detail?: string;
 }
 
 // ---- The phone (Jarvis D3: src/phone; the app's Phone screen)

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { ApkRequest, ApkResult } from "../builds/preview.js";
 import type { Config } from "../config.js";
 import type { Candidate } from "../brain/router.js";
@@ -225,6 +225,38 @@ export class Cluster {
     } catch (e) {
       return { ...r, ok: false, error: `copying the APK from ${node}: ${(e as Error).message}` };
     }
+  }
+
+  isOnline(node: string): boolean {
+    return !!this.peers.get(node)?.online;
+  }
+
+  /** A recording through the first online device with Whisper; undefined when none can take it now. */
+  async transcribe(file: string): Promise<{ text: string; language?: string } | undefined> {
+    const body = readFileSync(file);
+    const ext = file.split(".").pop() ?? "m4a";
+    for (const peer of this.peers.values()) {
+      if (!peer.online) continue;
+      let res: Response;
+      try {
+        res = await fetch(`${peer.url}/node/transcribe`, { method: "POST", headers: { ...this.headers(), "Content-Type": "application/octet-stream", "X-Audio-Ext": ext }, body });
+      } catch {
+        continue; // it went away; the next one, or try again later
+      }
+      if (!res.ok) continue; // 403: not a Whisper device; 404: not updated yet
+      let last: { result?: { text: string; language?: string }; error?: string } = {};
+      for (const line of (await res.text()).split("\n")) {
+        try {
+          const j = JSON.parse(line);
+          if (j.type === "result") last = j;
+        } catch {
+          /* not a whole line */
+        }
+      }
+      if (last.result) return last.result;
+      throw new Error(last.error ?? `${peer.url} gave no transcript`);
+    }
+    return undefined;
   }
 
   /** POSTs to a peer and reads its NDJSON stream of deltas, progress notes and one result. */

@@ -18,6 +18,7 @@ export const JOB_LABEL: Record<JobKind, string> = {
   call: "Answering on a call",
   brain: "The assistant's thinking",
   work: "Following your people's tasks",
+  convo: "Reading recorded conversations",
 };
 
 const prefKey = (job: JobKind) => `route.${job}`;

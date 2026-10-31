@@ -1,4 +1,5 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { cpus, freemem, homedir, hostname, loadavg, platform, release, totalmem, uptime } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
@@ -17,11 +18,60 @@ import { DESKTOP_ACTIONS } from "./desktop.js";
  * - ask:   runs only after the owner taps Approve on the phone (anything that changes things)
  * - never: refused (secrets, passwords)
  *
- * There is deliberately no delete action, and nothing overwrites a file without keeping the old
- * one: a changed file is backed up first, so the old version is there until the new one is checked.
+ * Nothing overwrites a file without keeping the old one: a changed file is backed up first, so the
+ * old version is there until the new one is checked. Nothing is really deleted either. The only way
+ * to remove something is `files.trash`, which works only in projects the agents created themselves,
+ * moves it to a trash folder that is never emptied automatically, and logs it; `files.restore` brings it back.
  */
 
 export type Risk = "safe" | "ask" | "never";
+
+/** The folder of projects the agents created: the only place they may remove anything. */
+export function projectsDir(config: Config): string {
+  return resolve(config.builds.projectsDir || join(config.node.workRoot, "projects"));
+}
+
+/** The path, links resolved, when it is something inside one project (never a project's top folder or its .git). */
+function trashable(path: string, config: Config): string | undefined {
+  const root = projectsDir(config);
+  if (!existsSync(root) || !existsSync(path)) return undefined;
+  const real = realpathSync(path);
+  const parts = relative(realpathSync(root), real).split(/[\\/]/);
+  return parts[0] && parts[0] !== ".." && !isAbsolute(parts[0]) && parts.length >= 2 && !parts.includes(".git") ? real : undefined;
+}
+
+function trashLog(config: Config): { file: string; dir: string; entries: () => { id: string; path: string; at: string; reason?: string }[] } {
+  const dir = resolve(config.dataDir, "trash");
+  const file = join(dir, "log.jsonl");
+  return { dir, file, entries: () => (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []) };
+}
+
+/** Rename, or copy then remove when the trash is on another drive. */
+function moveAcross(from: string, to: string) {
+  mkdirSync(dirname(to), { recursive: true });
+  try {
+    renameSync(from, to);
+  } catch {
+    cpSync(from, to, { recursive: true, errorOnExist: true, force: false });
+    rmSync(from, { recursive: true, force: true });
+  }
+}
+
+/** A program's bare name, as in "open Chrome" (no path, no arguments). */
+const PROGRAM_NAME = /^[\w][\w .+-]{0,60}$/;
+
+/** How this system opens a thing. A program may be a Store app (Windows) or a .desktop entry (Linux), which have no file to start. */
+export function openCommand(target: string, program: boolean, os: string): { command: string; args: string[]; timeoutMs: number } {
+  const timeoutMs = 20_000;
+  if (os === "win32") {
+    const script = program
+      ? 'try { Start-Process -FilePath $args[0] -ErrorAction Stop } catch { $a = Get-StartApps | Where-Object { $_.Name -like "*$($args[0])*" } | Select-Object -First 1; if (-not $a) { throw "no app called $($args[0])" }; Start-Process "shell:AppsFolder\\$($a.AppID)" }'
+      : "Start-Process -FilePath $args[0]";
+    return { command: "powershell.exe", args: ["-NoProfile", "-NonInteractive", "-Command", script, target], timeoutMs };
+  }
+  if (os === "darwin") return { command: "open", args: program ? ["-a", target] : [target], timeoutMs };
+  return { command: program ? "gtk-launch" : "xdg-open", args: [target], timeoutMs };
+}
 
 export interface ActionContext {
   config: Config;
@@ -124,9 +174,11 @@ export function insideRoots(p: string, config: Config, mustExist = true): string
 const SHELL_META = /[;&|<>`$\n\r(){}@]/;
 
 /** A command runs without asking only when it is on the safe list and chains nothing else. */
-export function shellRisk(command: string, config: Config): Risk {
+export function shellRisk(command: string, config: Config, os: string = platform()): Risk {
   const c = (command ?? "").trim();
   if (/\b(password|passwd|runas|sudo|ssh-keygen)\b/i.test(c)) return "never";
+  // The Linux hub is a small machine: an Android emulator would take everything else down with it.
+  if (os === "linux" && /\b(emulator|avdmanager|qemu-system\S*)\b/i.test(c)) return "never";
   if (SHELL_META.test(c)) return "ask";
   const safe = config.actions.safeCommands.some((s) => c === s || c.startsWith(`${s} `));
   return safe ? "safe" : "ask";
@@ -339,19 +391,53 @@ export const ACTIONS: ActionDef[] = [
     },
   }),
   def({
+    name: "files.trash",
+    describe:
+      "Remove a file or folder from a project the agents created (only inside the projects folder, never its top folder or .git). It moves to a trash folder and can be brought back with files.restore. Anything else cannot be removed.",
+    args: z.object({ path: z.string().min(1), reason: z.string().max(400).optional() }),
+    risk: (a, ctx) => (trashable(a.path, ctx.config) ? "safe" : "never"),
+    summary: (a) => `Move ${a.path} to the trash`,
+    run: async (a, ctx) => {
+      const real = trashable(a.path, ctx.config);
+      if (!real) return { ok: false, output: `${a.path} is not inside a project the agents created; nothing was removed` };
+      const t = trashLog(ctx.config);
+      const at = (ctx.now?.() ?? new Date()).toISOString();
+      const id = `${at.replace(/\D/g, "").slice(0, 14)}-${randomBytes(3).toString("hex")}`;
+      moveAcross(real, join(t.dir, id, basename(real)));
+      appendFileSync(t.file, `${JSON.stringify({ id, path: real, at, reason: a.reason })}\n`);
+      return { ok: true, output: `Moved to the trash as ${id}. files.restore with that id brings it back.` };
+    },
+  }),
+  def({
+    name: "files.restore",
+    describe: "Bring back something from the trash by its id, or list the trash when no id is given. Refuses to replace anything.",
+    args: z.object({ id: z.string().regex(/^[\w-]+$/).optional() }),
+    risk: () => "safe",
+    summary: (a) => (a.id ? `Restore ${a.id} from the trash` : "List the trash"),
+    run: async (a, ctx) => {
+      const t = trashLog(ctx.config);
+      const all = t.entries();
+      if (!a.id) return { ok: true, output: all.slice(-50).map((e) => `${e.id}  ${e.at}  ${e.path}${e.reason ? `  (${e.reason})` : ""}`).join("\n") || "The trash is empty." };
+      const e = all.find((x) => x.id === a.id);
+      const from = e && join(t.dir, e.id, basename(e.path));
+      if (!e || !from || !existsSync(from)) return { ok: false, output: `nothing in the trash with id ${a.id}` };
+      if (existsSync(e.path)) return { ok: false, output: `${e.path} exists again; nothing was replaced` };
+      moveAcross(from, e.path);
+      return { ok: true, output: `Restored ${e.path}` };
+    },
+  }),
+  def({
     name: "apps.open",
-    describe: "Open a file, folder, web address or program on this device's screen.",
+    describe: "Open a program by name (runs at once), or a file, folder or web address (asks first), on this device's screen.",
     args: z.object({ target: z.string().min(1) }),
-    risk: () => "ask",
+    // A program's bare name is harmless and is what "open Chrome" means. Files can run things, so they ask.
+    risk: (a) => (PROGRAM_NAME.test(a.target ?? "") ? "safe" : "ask"),
     summary: (a) => `Open ${a.target}`,
     run: async (a, ctx) => {
       const t = a.target;
       const isUrl = /^https?:\/\//i.test(t);
       if (!isUrl && (t.includes("/") || t.includes("\\"))) insideRoots(t, ctx.config); // a path must be allowed
-      const win = platform() === "win32";
-      const r = win
-        ? await runProcess({ command: "powershell.exe", args: ["-NoProfile", "-NonInteractive", "-Command", "Start-Process -FilePath $args[0]", t], timeoutMs: 20_000 })
-        : await runProcess({ command: platform() === "darwin" ? "open" : "xdg-open", args: [t], timeoutMs: 20_000 });
+      const r = await runProcess(openCommand(t, PROGRAM_NAME.test(t), platform()));
       return { ok: r.code === 0, output: r.code === 0 ? `Opened ${t}` : redact(r.stderr.trim() || `could not open ${t}`) };
     },
   }),
@@ -366,8 +452,12 @@ export const ACTIONS: ActionDef[] = [
       write: z.boolean().default(false),
       timeoutMinutes: z.number().min(1).max(120).default(20),
     }),
-    // Manus spends paid credits on every task, and Hermes has its own terminal so write=false binds nothing: never without the owner's tap.
-    risk: (a) => (a.write || ["manus", "hermes"].includes(AI_TOOLS[a.tool?.toLowerCase() ?? ""]) ? "ask" : "safe"),
+    // Manus spends credits on every task (free ones are fine), and Hermes has its own terminal so write=false binds nothing: never without the owner's tap.
+    risk: (a, ctx) => {
+      const tool = AI_TOOLS[a.tool?.toLowerCase() ?? ""];
+      if (a.write || tool === "hermes") return "ask";
+      return tool === "manus" && !ctx.config.providers.manus.free ? "ask" : "safe";
+    },
     summary: (a) => `${a.write ? "Let" : "Ask"} ${a.tool} ${a.write ? "change files" : "(read-only)"}${a.cwd ? ` in ${a.cwd}` : ""}: ${a.task.slice(0, 160)}`,
     run: async (a, ctx) => {
       const provider = AI_TOOLS[a.tool.toLowerCase()];

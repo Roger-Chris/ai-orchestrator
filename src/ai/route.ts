@@ -31,6 +31,8 @@ export const DEFAULT_ROUTES: Record<JobKind, ProviderId[]> = {
   brain: ["codex", "claude", "gemini", "groq"],
   // Reading a WhatsApp message against your people's tasks: small and frequent, so the quick ones first.
   work: ["groq", "gemini", "claude", "codex"],
+  // Reading a recorded conversation: long, and worth doing well.
+  convo: ["claude", "codex", "gemini", "groq"],
 };
 
 /** Characters above which a prompt counts as large (about 6k tokens) and below which small. */

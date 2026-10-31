@@ -4,6 +4,7 @@ import type { ProviderPool } from "../providers/registry.js";
 import type { Notifier } from "../server/push.js";
 import type { MemoryReplica } from "../shared/replica.js";
 import type { Store } from "../store/db.js";
+import { ActionLog } from "./log.js";
 import type { ActionContext } from "./registry.js";
 import { ActionHub, type ActRequest, type ActResponse, ActionRunner, type ApprovalCheck, ApprovalDesk } from "./desk.js";
 
@@ -39,5 +40,5 @@ export function buildActions(
     if (!res.ok) return { status: "refused", node, action: req.action, error: `HTTP ${res.status} from ${node}` };
     return (await res.json()) as ActResponse;
   };
-  return new ActionHub(runner, desk, peer);
+  return new ActionHub(runner, desk, peer, new ActionLog(d.store));
 }

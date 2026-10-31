@@ -27,6 +27,8 @@ import { JOB_KINDS, type JobKind, type ModelRouter, RouteError, sizeOf } from ".
 import { buildAiHub, setPreferred } from "./ai-hub.js";
 import { mountApkNode, mountBuilds } from "./builds.js";
 import { mountFiles } from "./files.js";
+import type { ConvoDesk } from "../convos/desk.js";
+import { mountConvos } from "./convos.js";
 import { mountPhone } from "./phone.js";
 import { mountOutside } from "./outside.js";
 import { mountWork } from "./work.js";
@@ -77,6 +79,9 @@ export interface AppDeps {
   files?: FileClient;
   /** Things to do on the phone, waiting for the owner's tap (D3). */
   phone?: PhoneDesk;
+  /** Recorded conversations, and running Whisper for the other devices. */
+  convos?: ConvoDesk;
+  whisper?: { here: boolean; dataDir: string; run: (file: string) => Promise<{ text: string; language?: string }> };
   /** Outside agents with their own tokens and scopes, over MCP at /mcp (phase 4). */
   outside?: OutsideAgents;
   /** Work: people you give tasks to, followed through WhatsApp. */
@@ -227,6 +232,7 @@ export function createApp(d: AppDeps) {
   mountApkNode(app, d);
   mountFiles(app, d);
   mountPhone(app, d);
+  mountConvos(app, d);
   mountOutside(app, {
     outside: d.outside,
     replica: d.replica,
@@ -315,6 +321,9 @@ export function createApp(d: AppDeps) {
     const book = (await c.req.json()) as StyleBook;
     if (book?.version !== 1 || !Array.isArray(book.contacts)) return c.json({ error: "not a style book" }, 400);
     d.drafter.saveBook(book);
+    // How you write, learnt from your own messages: Jarvis reads it to know you (tag about-me).
+    const voice = book.owner?.voice?.summary;
+    if (voice) d.replica?.put({ uid: "fact:owner-voice", kind: "fact", title: "How he talks and writes", body: voice, tags: ["about-me"], source: "style-book" });
     return c.json({ ok: true, contacts: book.contacts.length });
   });
   const WaMessageBody = z.object({

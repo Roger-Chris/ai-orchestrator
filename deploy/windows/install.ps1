@@ -56,6 +56,15 @@ Say "Scheduled tasks (code: $Code, config and data: $Root)"
 Install-Task "Orchestrator node" "serve" @("serve")
 if ($WhatsApp) { Install-Task "Orchestrator WhatsApp link" "whatsapp-link" @("whatsapp", "link") }
 
+Say "Desktop shortcut: Jarvis Record"
+$link = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path ([Environment]::GetFolderPath("Desktop")) "Jarvis Record.lnk"))
+$link.TargetPath = "powershell.exe"
+$link.Arguments = "-NoProfile -ExecutionPolicy Bypass -Command `"& '$(Join-Path $Code 'node_modules\.bin\tsx.cmd')' '$(Join-Path $Code 'src\cli.ts')' record; Read-Host 'Press Enter to close'`""
+$link.WorkingDirectory = $Root
+$link.Description = "Record a conversation; press Enter to stop and send it to Jarvis"
+$link.Save()
+Write-Host "double-click it, talk, press Enter to stop"
+
 Say "Done"
 Write-Host "Check it: curl http://127.0.0.1:4317/api/health   (the phone finds this PC as a backup through the Linux hub)"
 Write-Host "Stop it: Stop-ScheduledTask 'Orchestrator node'; turn it off: Disable-ScheduledTask 'Orchestrator node'"

@@ -32,6 +32,8 @@ export default function Settings() {
   const [restricted, setRestricted] = useState(false);
   const [waOn, setWaOn] = useState(false);
   const [gmail, setGmail] = useState<Awaited<ReturnType<typeof Api.gmail>>>();
+  const [controlOn, setControlOn] = useState(false);
+  const [canStart, setCanStart] = useState(true);
   const [gmailMsg, setGmailMsg] = useState("");
   const [brain, setBrain] = useState<Awaited<ReturnType<typeof Api.assistant>>>();
   const [usage, setUsage] = useState("");
@@ -60,6 +62,8 @@ export default function Settings() {
   useEffect(() => {
     const check = () => {
       setWaOn(WaReply.isEnabled());
+      setControlOn(WaReply.control.isOn());
+      setCanStart(WaReply.control.canStartApps());
       return batteryRestricted().then(setRestricted);
     };
     void check();
@@ -207,6 +211,34 @@ export default function Settings() {
           </View>
         )}
       </Card>
+
+      {WaReply.control.available && (
+        <Card>
+          <Text style={h2}>Let Jarvis open apps</Text>
+          <Muted small>Ask from anywhere, such as your laptop, and the app opens on this phone. A notification stays visible while this is on. Only opening apps works this way: alarms, calls, texts and files still wait for your tap.</Muted>
+          <Row style={{ justifyContent: "space-between", flexWrap: "nowrap" }}>
+            <Row style={{ flex: 1, flexWrap: "nowrap" }}>
+              <Dot color={controlOn ? c.ok : c.muted} />
+              <Text style={{ color: c.text, flex: 1 }}>{controlOn ? "On" : "Off"}</Text>
+            </Row>
+            <Button
+              small
+              title={controlOn ? "Turn off" : "Turn on"}
+              onPress={() => {
+                WaReply.control.set(!controlOn);
+                setControlOn(!controlOn);
+              }}
+            />
+          </Row>
+          {controlOn && !canStart && <Button small title="Allow display over other apps" onPress={() => WaReply.control.openOverlaySettings()} />}
+          {controlOn && isXiaomi && (
+            <>
+              <Muted small>On Xiaomi, also turn on "Display pop-up windows while running in the background".</Muted>
+              <Button small title="Open Xiaomi permissions" onPress={() => WaReply.control.openXiaomiPermissions()} />
+            </>
+          )}
+        </Card>
+      )}
 
       {WaReply.available && (
         <Card>

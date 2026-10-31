@@ -2,6 +2,7 @@ import * as IntentLauncher from "expo-intent-launcher";
 import * as Linking from "expo-linking";
 import * as Notifications from "expo-notifications";
 import { Api, type PhoneAction } from "./api";
+import { WaReply } from "./wareply";
 
 /**
  * Doing a phone action from the assistant (Jarvis D3) when the owner taps Do it. Android only lets a
@@ -18,7 +19,16 @@ const PACKAGES: Record<string, string> = {
 };
 
 export function packageFor(app: string, pkg?: string): string | undefined {
-  return pkg ?? PACKAGES[app.trim().toLowerCase()];
+  return pkg ?? WaReply.findApp(app) ?? PACKAGES[app.trim().toLowerCase()];
+}
+
+/**
+ * Opens what you just asked Jarvis to open. The app is on screen after a spoken or typed request, so
+ * Android allows it with no tap. Only apps, and only fresh requests: everything else waits for Do it.
+ */
+export async function openFreshApps(): Promise<void> {
+  const fresh = (await Api.phoneActions()).filter((p) => p.status === "pending" && p.action.kind === "open_app" && Date.now() - p.createdAt < 120_000);
+  for (const p of fresh) await doPhoneAction(p).catch(() => undefined); // it stays on the Phone screen
 }
 
 export async function doPhoneAction(p: PhoneAction): Promise<void> {

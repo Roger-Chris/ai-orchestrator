@@ -10,6 +10,12 @@ type WaReplyNative = {
   configure(url: string, token: string): void;
   isEnabled(): boolean;
   openSettings(): void;
+  findApp(name: string): string | null;
+  controlIsOn(): boolean;
+  setControl(on: boolean): void;
+  canStartApps(): boolean;
+  openOverlaySettings(): void;
+  openXiaomiPermissions(): void;
 };
 
 const native = requireOptionalNativeModule<WaReplyNative>("WaReply");
@@ -20,4 +26,15 @@ export const WaReply = {
   configure: (url: string, token: string) => native?.configure(url, token),
   isEnabled: () => native?.isEnabled() ?? false,
   openSettings: () => native?.openSettings(),
+  /** An installed app's package, from the name you call it. */
+  findApp: (name: string) => native?.findApp?.(name) ?? undefined,
+  /** Remote control: Jarvis opens apps while the phone is in your pocket (ControlService). */
+  control: {
+    available: !!native?.setControl,
+    isOn: () => native?.controlIsOn?.() ?? false,
+    set: (on: boolean) => native?.setControl?.(on),
+    canStartApps: () => native?.canStartApps?.() ?? false,
+    openOverlaySettings: () => native?.openOverlaySettings?.(),
+    openXiaomiPermissions: () => native?.openXiaomiPermissions?.(),
+  },
 };

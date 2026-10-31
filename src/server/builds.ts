@@ -29,11 +29,15 @@ const StartBody = z.object({
   agent: Agent.optional(),
   reviewer: Agent.optional(),
   continue: z.boolean().optional(),
+  kind: z.enum(["app", "slides", "video"]).optional(),
+  /** Who is asking ("brain"); the owner's own apps leave it out. */
+  by: z.string().max(80).optional(),
 });
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json",
   ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".ico": "image/x-icon",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", ".pdf": "application/pdf", ".mp4": "video/mp4", ".webm": "video/webm",
   ".woff": "font/woff", ".woff2": "font/woff2", ".txt": "text/plain; charset=utf-8", ".map": "application/json", ".wasm": "application/wasm",
 };
 
@@ -54,7 +58,7 @@ export function previewer(desk: BuildDesk, maker: PreviewMaker, now = Date.now) 
 }
 
 /** Builds as the app shows them: hub paths stay on the hub. */
-const pub = (b: Build) => (b.preview ? { ...b, preview: { ...b.preview, webRoot: undefined, apkFile: undefined } } : b);
+const pub = (b: Build) => (b.preview ? { ...b, preview: { ...b.preview, webRoot: undefined, apkFile: undefined, filesRoot: undefined } } : b);
 
 /**
  * "Update this app": the newest APK the hub built of the phone app itself (config `builds.selfApp`),
@@ -94,7 +98,7 @@ export function mountBuilds(app: Hono, d: { builds?: BuildDesk; preview?: (b: Bu
     if (!parsed.success) return c.json({ error: "invalid build", issues: parsed.error.issues }, 400);
     const body = parsed.data;
     try {
-      return c.json(pub(d.builds.start({ ...body, agent: body.agent as ProviderId | undefined, reviewer: body.reviewer as ProviderId | undefined })));
+      return c.json(pub(await d.builds.make({ ...body, agent: body.agent as ProviderId | undefined, reviewer: body.reviewer as ProviderId | undefined })));
     } catch (e) {
       return fail(c, e);
     }
@@ -132,6 +136,11 @@ export function mountBuilds(app: Hono, d: { builds?: BuildDesk; preview?: (b: Bu
     if (rest === "app.apk") {
       if (!b.preview.apkFile || !existsSync(b.preview.apkFile)) return c.text("no APK", 404);
       return send(b.preview.apkFile, "application/vnd.android.package-archive", `${b.name.replace(/[^\w.-]+/g, "-")}-${b.id}.apk`);
+    }
+    if (rest.startsWith("files/")) {
+      const name = rest.slice(6);
+      if (!b.preview.filesRoot || !b.preview.files?.some((f) => f.name === name)) return c.text("no such file", 404);
+      return send(join(b.preview.filesRoot, name), MIME[extname(name).toLowerCase()] ?? "application/octet-stream", name.replace(/[^\w.-]+/g, "-"));
     }
     const root = b.preview.webRoot;
     if (!root || !existsSync(root)) return c.text("no web preview", 404);

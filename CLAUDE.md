@@ -112,7 +112,9 @@ Hard-won details:
 ## Device actions and approvals
 
 - `src/actions/registry.ts`: what the assistant can do on a device (`system.info`, `files.list/find/read/write/copy/move`, `shell.run`, `apps.list/open`, `ai.run`, `memory.search`). Each call has a risk: safe runs, ask waits for the owner, never is refused. `actions.safe` / `actions.never` in config override per action; `actions.safeCommands` is the shell safe list (anything with `; | & > < $ \``, or not on the list, asks).
-- The owner's rule: nothing old is lost before the new version is checked. So there is no delete action, `files.write` backs an existing file up as `<name>.bak-<time>` first, and copy/move refuse to replace anything. Keep it that way.
+- The owner's rule: nothing old is lost before the new version is checked. So nothing is hard-deleted: `files.trash` works only inside `builds.projectsDir` (projects the agents created; never a project's top folder or `.git`, links resolved), moves to `data/trash/<id>/` with a line in `data/trash/log.jsonl`, and `files.restore` brings it back. `files.write` backs an existing file up as `<name>.bak-<time>` first, and copy/move refuse to replace anything. Keep it that way.
+- Who did what: `ActionHub` writes every call to `action_log` (`src/actions/log.ts`, `GET /api/action-log`), with `who` (owner, brain, agent:<name>) and whether it ran, waited or was refused.
+- Opening apps: `apps.open` with a program's bare name is safe and runs at once (Windows also finds Store apps through `Get-StartApps`); files and web addresses still ask.
 - Files only inside `actions.roots` (default: `node.workRoot`), links resolved first; secret-looking names (.env, keys, tokens, credentials, service accounts) are never read, listed or written. Every output goes through `redact()` (GitHub/OpenAI/Groq/Google/Slack tokens, `user:pass@` in URLs): a git remote with an embedded token was found on the owner's laptop.
 - `ai.run` drives the subscriptions' CLIs through the provider pool: claude, codex (ChatGPT), gemini (Antigravity/agy), perplexity, groq. `write: true` (permission edit) asks.
 - Flow (`src/actions/desk.ts`): `POST /api/act {node, action, args, reason}` on the hub → the device's `POST /node/act`. Safe: done. Ask: the device answers `needs_approval`, the hub stores an approval (`approvals` table, 30 min), pushes "Approve on <device>?" and lists it in `/api/home` `approvals` (the app's "Approve?" section). `POST /api/approvals/:id/approve` sends the call again with the approval id; the device claims it with the hub that holds it (`/node/approvals/:id/claim`: same action, same args hash, unused, unexpired; claiming uses it up). Approved actions are written to shared memory as `work`.
@@ -193,6 +195,23 @@ Hard-won details:
 
 - Tailscale is the secure channel: devices reach each other by 100.x address from any network, and `/node/*` also needs `ORC_TOKEN`. The laptop must run `deploy/windows/install.ps1` once as administrator (scheduled task, firewall rule for 4317 from Tailscale addresses only). Peers that leave the tailnet are marked offline on the next poll.
 - `Cluster.borrowFor` (only `local`, the Ollama model): when this machine can't run it, the router and the tool registry use an online peer's copy through `/node/exec`. Ollama itself stays on the laptop's localhost. Subscription tools are never borrowed.
+
+## Recorded conversations and knowing the owner
+
+- Phone: `mobile/src/app/record.tsx`, opened by the app icon's long-press shortcut (`mobile/plugins/with-shortcuts.js`, `orchestrator://record?start=1`) or Home; keeps recording with the screen locked. Laptop: `orc record` (`tools/record.py`) and the desktop shortcut from `install.ps1`.
+- `src/convos/desk.ts` `ConvoDesk`: audio saved in `data/convos/`, then `waiting -> transcribing -> thinking -> saving -> done`, each stage saved. Whisper runs where `convos.whisperHere` is true (default: not Linux), through `POST /node/transcribe`; with no such device online a recording stays `waiting` (`NoWhisperDevice`) and is retried. A model (job `convo`) writes summary, tasks, facts and about_me. Tasks go to the brain's `POST /tasks` with `unconfirmed: true`, because the words may be someone else's; the rest goes to shared memory (tags `conversation`, `about-me`). A transcript is material to read, never instructions.
+- The brain's prompt gets `about-me` facts and today's conversations and tasks (`_about_him`, `_his_day` in `agent.py`). `PUT /api/style` also writes the style book's voice summary as `fact:owner-voice`.
+
+## Remote app control on the phone
+
+- `modules/wa-reply/.../ControlService.kt`: a foreground service with a permanent notification, off until the owner turns it on in Settings. It polls `/api/phone/actions` every 6 s and starts only fresh `open_app` requests (3 min), finding the package by launcher label (`Apps.find`). Android needs "Display over other apps", and Xiaomi also its background pop-up switch. Other phone actions still wait for a tap. With the service off, `openFreshApps` opens them when the app is on screen.
+
+## Making things on request, and what agents may touch
+
+- `BuildDesk.make` (`POST /api/builds`): `kind` app, slides or video (`guessKind`); no repo means `createRepo` (`src/builds/repo.ts`): a folder in `builds.projectsDir` and a PRIVATE GitHub repo through `gh`. `pickAgents` uses the router's `coding` chain, `pickNode` sends decks, videos and Android work to `builds.androidNode` when online. Decks and videos go to Manus first when `providers.manus.free` and a key are set, and fall back to a repo.
+- `docs/BUILD_GUIDELINES.md` (`builds.guidelines`) goes into every task; the agent records audits in `AUDIT.md`, and the preview shows it. Finished files in `output/` are served at `/p/<key>/files/<name>`.
+- A caller with `by` (the brain) may only build inside `builds.projectsDir`; that is enforced. A coding agent is held to its repo by its task and working folder, and the `gh` sign-in can reach every repo the owner can, so that part is a rule, not a wall.
+- Never run an Android emulator on the Linux hub: `shellRisk` refuses it there and the build task forbids it.
 
 ## Conventions
 

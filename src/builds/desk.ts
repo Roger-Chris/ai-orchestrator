@@ -4,7 +4,8 @@ import { resolve } from "node:path";
 import type { PushPayload } from "../server/push.js";
 import { namedUid, slug, type MemoryReplica } from "../shared/replica.js";
 import type { Store } from "../store/db.js";
-import type { Build, BuildBranch, ProviderId, RunOptions, RunRecord } from "../types.js";
+import type { Build, BuildBranch, ProviderId, ProviderResult, RunOptions, RunRecord } from "../types.js";
+import { insideProjects } from "./repo.js";
 
 /**
  * Building apps on command (Jarvis phase 2). A build is an Orchestrator run with branch work on:
@@ -39,6 +40,19 @@ export interface BuildInput {
   reviewer?: ProviderId;
   /** Continue the last build of this app (same folder, device and agents, on top of its branch). */
   continue?: boolean;
+  /** An app, a deck or a video. Worked out from the words when left out. */
+  kind?: BuildKind;
+  /** Who is asking, when it is not the owner ("brain"): such a caller may only use projects the agents created. */
+  by?: string;
+}
+
+export type BuildKind = NonNullable<Build["kind"]>;
+
+/** What "create a ppt / a video / an app" is asking for. */
+export function guessKind(text: string): BuildKind {
+  if (/\b(ppt|pptx|powerpoint|slides?|deck|presentation)\b/i.test(text)) return "slides";
+  if (/\b(video|mp4|reel|animation)\b/i.test(text)) return "video";
+  return "app";
 }
 
 export interface BuildDeskDeps {
@@ -50,12 +64,24 @@ export interface BuildDeskDeps {
   onReady?: (b: Build) => void;
   node: string;
   now?: () => number;
+  /** The folder of projects the agents created: their authority. Empty: no limit is checked. */
+  projectsDir?: string;
+  /** Rules and audits for every build, put into the task. */
+  guidelines?: () => string;
+  /** A new private repo for a project; returns its folder (`./repo.ts`). */
+  createRepo?: (name: string, spec: string) => Promise<string>;
+  /** The best free coding agent and a different reviewer right now. */
+  pickAgents?: () => Promise<{ agent?: ProviderId; reviewer?: ProviderId }>;
+  /** The device for this kind of work; undefined lets the router choose. */
+  pickNode?: (kind: BuildKind, spec: string) => string | undefined;
+  /** A cloud agent that makes decks and videos without a repo (your free Manus credits). */
+  direct?: (prompt: string) => Promise<ProviderResult>;
 }
 
 export class BuildError extends Error {
   constructor(
     message: string,
-    readonly status: 400 | 404 | 409 = 400,
+    readonly status: 400 | 403 | 404 | 409 = 400,
   ) {
     super(message);
   }
@@ -100,6 +126,65 @@ export class BuildDesk {
     return row ? (JSON.parse(row.record) as Build) : undefined;
   }
 
+  /**
+   * "Create a ppt / a video / an app": works out what is wanted, makes a private repo when there is
+   * none, chooses the agents and the device, then starts it. Decks and videos go to the free cloud
+   * agent when there is one, and to a coding agent in a repo when there is not or when it fails.
+   */
+  async make(input: BuildInput, noCloud = false): Promise<Build> {
+    const kind = input.kind ?? guessKind(`${input.name} ${input.spec}`);
+    let next: BuildInput = { ...input, kind };
+    if (!next.repo && !next.continue) {
+      if (kind !== "app" && this.d.direct && !next.agent && !noCloud) return this.direct(next);
+      if (!this.d.createRepo) throw new BuildError("which folder is the app in? (repo: a git clone with a remote)");
+      next = { ...next, repo: await this.d.createRepo(next.name, next.spec) };
+    }
+    if (!next.continue) {
+      const picked = next.agent ? undefined : await this.d.pickAgents?.().catch(() => undefined);
+      next = { ...next, node: next.node ?? this.d.pickNode?.(kind, next.spec), agent: next.agent ?? picked?.agent, reviewer: next.reviewer ?? picked?.reviewer };
+    }
+    return this.start(next);
+  }
+
+  /** A deck or video from the cloud agent: no repo and nothing to merge; the answer has the file links. */
+  private direct(input: BuildInput): Build {
+    const id = `b${randomBytes(4).toString("hex")}`;
+    const at = this.now();
+    const b: Build = { id, name: input.name.trim(), spec: input.spec.trim(), repo: "", kind: input.kind, by: input.by, agent: "manus", reviewer: "manus", status: "running", runId: `direct-${id}`, branches: [], previewKey: randomBytes(16).toString("hex"), createdAt: at, updatedAt: at };
+    if (!b.name) throw new BuildError("it needs a name");
+    if (!b.spec) throw new BuildError("say what to make");
+    this.save(b);
+    const prompt = `Make this ${input.kind === "video" ? "video" : "presentation (PowerPoint .pptx)"}: "${b.name}".\n\n${b.spec}\n\n${this.d.guidelines?.() ?? ""}`;
+    void this.d.direct!(prompt).then(
+      (r) => this.directDone(id, input, r.ok ? r.text : undefined, r.error),
+      (e) => this.directDone(id, input, undefined, (e as Error).message),
+    );
+    return b;
+  }
+
+  private async directDone(id: string, input: BuildInput, text?: string, error?: string) {
+    const b = this.get(id);
+    if (!b || b.status !== "running") return;
+    if (text) {
+      b.status = "done";
+      b.summary = text.slice(0, 4000);
+      this.save(b);
+      this.remember(b);
+      this.d.notify?.({ title: `${b.name}: ready`, body: "Made with your free Manus credits. The file links are on the Builds screen.", url: `/builds?id=${b.id}`, tag: `build-${b.id}` });
+      return;
+    }
+    b.status = "failed";
+    try {
+      const next = await this.make(input, true);
+      b.error = `The cloud agent could not make it (${error ?? "no answer"}), so build ${next.id} is doing it in a repo instead.`;
+    } catch (e) {
+      b.error = `The cloud agent could not make it (${error ?? "no answer"}), and no coding agent could start: ${(e as Error).message}`;
+      this.d.notify?.({ title: `${b.name}: build failed`, body: b.error, url: `/builds?id=${b.id}`, tag: `build-${b.id}` });
+    }
+    this.save(b);
+    this.remember(b);
+  }
+
   /** B1/B3: start a build, or continue the last one of that app. */
   start(input: BuildInput): Build {
     const name = input.name.trim();
@@ -124,18 +209,23 @@ export class BuildDesk {
     if (!repo) throw new BuildError("which folder is the app in? (repo: a git clone with a remote)");
     const folder = resolve(repo);
     if (!existsSync(folder)) throw new BuildError(`folder not found on ${this.d.node}: ${folder}`);
+    // Agents work only in projects they created. A repo of yours needs you to start the build.
+    if (input.by && this.d.projectsDir && !insideProjects(folder, this.d.projectsDir)) throw new BuildError(`${input.by} may only build in projects the agents created (in ${this.d.projectsDir}), not ${folder}. Leave out the repo to make a new one, or start it from the Builds screen.`, 403);
     agent ??= "claude";
     reviewer ??= otherAgent(agent);
     if (reviewer === agent) reviewer = otherAgent(agent);
 
     const id = `b${randomBytes(4).toString("hex")}`;
-    const task = buildTask({ name, spec: input.spec, agent, reviewer, prev });
+    const kind = input.kind ?? prev?.kind ?? "app";
+    const task = buildTask({ name, spec: input.spec, agent, reviewer, prev, kind, guidelines: this.d.guidelines?.() });
     const run = this.d.runner.submit(task, { branches: true, permission: "edit", cwd: folder, nodes: node ? [node] : undefined, mode: "plan" });
     const b: Build = {
       id,
       name,
       spec: input.spec.trim(),
       repo: folder,
+      kind,
+      by: input.by,
       node,
       agent,
       reviewer,
@@ -195,6 +285,11 @@ export class BuildDesk {
   cancel(id: string): Build {
     const b = this.must(id);
     if (b.status !== "running") throw new BuildError(`the build is ${b.status}`, 409);
+    if (b.runId.startsWith("direct-")) {
+      b.status = "cancelled"; // the cloud task carries on in Manus; its answer is ignored here
+      this.save(b);
+      return b;
+    }
     this.d.runner.cancel(b.runId);
     return b;
   }
@@ -229,7 +324,7 @@ export class BuildDesk {
     b.preview = preview;
     this.save(b);
     if (preview.status === "ready")
-      this.d.notify?.({ title: `${b.name}: preview ready`, body: [preview.web && "web preview", preview.apk && "Android APK"].filter(Boolean).join(" and ") || "preview", url: `/builds?id=${b.id}`, tag: `build-${b.id}` });
+      this.d.notify?.({ title: `${b.name}: preview ready`, body: `${[preview.web && "web preview", preview.apk && "Android APK", preview.files?.length && `${preview.files.length} file(s)`].filter(Boolean).join(" and ") || "preview"}. ${preview.audit ? "Audit report attached." : "No audit report was written."}`, url: `/builds?id=${b.id}`, tag: `build-${b.id}` });
     return b;
   }
 
@@ -275,8 +370,10 @@ export class BuildDesk {
 }
 
 /** The run's task: the spec plus how a build is done (branches, tests, a second model's review). */
-export function buildTask(p: { name: string; spec: string; agent: ProviderId; reviewer: ProviderId; prev?: Pick<Build, "spec" | "branches"> & { id?: string } }): string {
-  const lines = [`BUILD THE APP "${p.name}".`, "", "WHAT TO BUILD:", p.spec.trim(), ""];
+export function buildTask(p: { name: string; spec: string; agent: ProviderId; reviewer: ProviderId; prev?: Pick<Build, "spec" | "branches"> & { id?: string }; kind?: BuildKind; guidelines?: string }): string {
+  const kind = p.kind ?? "app";
+  const what = kind === "slides" ? "PRESENTATION" : kind === "video" ? "VIDEO" : "APP";
+  const lines = [`BUILD THE ${what} "${p.name}".`, "", "WHAT TO BUILD:", p.spec.trim(), ""];
   if (p.prev) {
     const last = p.prev.branches.at(-1);
     lines.push(
@@ -292,8 +389,14 @@ export function buildTask(p: { name: string; spec: string; agent: ProviderId; re
     "- Write tests for what you build and run them; fix failures before finishing. If you may not run commands, still write the tests: the orchestrator installs the dependencies and runs them after your edit, and sends you the failures.",
     `- Then a review step with ${p.reviewer} (a different model, read-only): it reads the diff for bugs, security problems and missing tests; fix what it finds.`,
     "- Never touch the main branch, never delete files the owner made, never put keys or tokens in the code.",
-    "- If it is a web app, make `npm run build` produce a static site (dist/ or build/) so a preview can be served. If it is an Android app, make a debug APK buildable (`./gradlew assembleDebug` or `npm run build:apk`).",
+    "- Work only in this repo. Never read, change or delete other repos or folders, on this device or on GitHub.",
+    "- Never run an Android emulator or AVD on a Linux machine: the Linux hub cannot take it. Use unit and component tests there.",
+    kind === "app"
+      ? "- If it is a web app, make `npm run build` produce a static site (dist/ or build/) so a preview can be served. If it is an Android app, make a debug APK buildable (`./gradlew assembleDebug` or `npm run build:apk`)."
+      : `- Keep the script that makes it in the repo, and put the finished ${kind === "slides" ? ".pptx (and a .pdf copy)" : ".mp4"} in an output/ folder at the top of the repo, committed, so it can be downloaded from the phone.`,
+    "- Do every audit in the guidelines below and write the results to AUDIT.md at the top of the repo. Never mark something passed that did not run; write \"not run\" and why.",
     "- Finish with a short summary: what was built, how to run it, what is left.",
   );
+  if (p.guidelines?.trim()) lines.push("", "GUIDELINES:", p.guidelines.trim().slice(0, 8000));
   return lines.filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n");
 }

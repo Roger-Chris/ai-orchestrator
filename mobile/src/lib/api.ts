@@ -2,8 +2,10 @@ import * as SecureStore from "expo-secure-store";
 import { WaReply } from "./wareply";
 import type { PersonSummary } from "../../../src/types";
 import type { WorkPerson, WorkPersonView, WorkStatus, WorkTask } from "../../../src/types";
+import type { ActionLogEntry, Convo } from "../../../src/types";
 import type { AiHub, Build, BrainAlert, OutsideAgent, OutsideAgentScopes, OutsideAuditEntry, PhoneAction, Home, Insights, JobKind, ProviderId, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
 
+export type { ActionLogEntry, Convo } from "../../../src/types";
 export type { PersonSummary } from "../../../src/types";
 export type { WorkPerson, WorkPersonView, WorkStatus, WorkTask, WorkUpdate } from "../../../src/types";
 export type { AiHub, Build, BuildBranch, OutsideAgent, OutsideAgentScopes, OutsideAuditEntry, PhoneAction, JobKind, ProviderId, ToolInfo, ToolState } from "../../../src/types";
@@ -403,6 +405,23 @@ export const Api = {
   /** The kill switch for every outside agent at once. */
   pauseOutsideAgents: (paused: boolean) => api<{ paused: boolean }>("/api/outside-agents/paused", { method: "PUT", body: { paused } }),
   outsideAudit: (agent?: string) => api<OutsideAuditEntry[]>(`/api/outside-agents/audit?${q({ agent, limit: 60 })}`),
+  // ---- recorded conversations
+  convos: () => api<Convo[]>("/api/convos"),
+  convoRetry: (id: string) => api<Convo>(`/api/convos/${id}/retry`, { body: {} }),
+  async convoUpload(uri: string, durationSec: number): Promise<Convo> {
+    if (!current) throw new Error("Not connected to a hub yet.");
+    const form = new FormData();
+    const name = uri.split("/").pop() || "conversation.m4a";
+    form.append("audio", { uri, name, type: name.endsWith(".3gp") ? "audio/3gpp" : "audio/mp4" } as never);
+    form.append("durationSec", String(durationSec));
+    form.append("source", "phone");
+    const res = await fetch(`${current.url}/api/convos`, { method: "POST", headers: authHeaders(), body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`);
+    return data as Convo;
+  },
+  /** Who did what on your devices. */
+  actionLog: () => api<ActionLogEntry[]>("/api/action-log?limit=100"),
   // ---- the phone's to-do from the assistant (alarms, reminders, apps, files; calls and texts drafted)
   phoneActions: () => api<PhoneAction[]>("/api/phone/actions"),
   phoneDone: (id: string) => api(`/api/phone/actions/${id}/done`, { body: {} }),

@@ -493,6 +493,9 @@ export default function Home() {
         ) : (
           <>
             <Text style={{ color: c.text, fontFamily: "serif", fontSize: 30, lineHeight: 38, marginTop: 10 }}>{headline(home)}</Text>
+            <View style={{ marginTop: 12, flexDirection: "row" }}>
+              <TextLink title="● Record a conversation" onPress={() => router.push("/record?start=1" as never)} />
+            </View>
 
             {(home.approvals?.length ?? 0) > 0 && (
               <Section label="Approve?" right={home.approvals!.length}>

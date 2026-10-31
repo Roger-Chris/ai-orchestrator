@@ -8,6 +8,7 @@ import { ErrorText } from "../components/ui";
 import { Api, type PendingApproval, type TalkReply } from "../lib/api";
 import { convo, type Turn } from "../lib/convo";
 import { canListen, speak, stopSpeaking, useListen } from "../lib/listen";
+import { openFreshApps } from "../lib/phone";
 import { useColors } from "../lib/theme";
 
 /**
@@ -60,6 +61,7 @@ export default function Talk() {
 
   const answered = async (r: TalkReply) => {
     if (r.pending?.length) void refreshApprovals();
+    void openFreshApps().catch(() => undefined);
     setPhase("speaking");
     await speak(r.say);
     if (!alive.current) return;

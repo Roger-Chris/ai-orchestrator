@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { hostname } from "node:os";
+import { hostname, platform } from "node:os";
 import { resolve } from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
@@ -90,6 +90,8 @@ const ConfigSchema = z.object({
           /** Seconds between checks on a running task. */
           pollSeconds: z.number().min(1).default(5),
           maxConcurrent: z.number().int().min(1).default(2),
+          /** Your plan's free credits: tasks run without asking, and decks and videos go here first. */
+          free: z.boolean().default(false),
         })
         .prefault({}),
       /**
@@ -165,6 +167,22 @@ const ConfigSchema = z.object({
       apkTimeoutMinutes: z.number().min(5).max(120).default(40),
       /** The builds of this app (the Orchestrator phone app) are offered in its Settings → Update this app. */
       selfApp: z.string().default("orchestrator"),
+      /**
+       * Projects the agents create (empty: `projects` in node.workRoot). This folder is their
+       * authority: they build and delete only here. Your own repos stay yours.
+       */
+      projectsDir: z.string().default(""),
+      /** Rules and audits for every build, put into the coding agent's task. */
+      guidelines: z.string().default("docs/BUILD_GUIDELINES.md"),
+    })
+    .prefault({}),
+  /** Recorded conversations. */
+  convos: z
+    .object({
+      /** This device runs Whisper for the others (POST /node/transcribe). Never on the small Linux hub. */
+      whisperHere: z.boolean().default(platform() !== "linux"),
+      /** How often unfinished recordings are tried again (a laptop that was off, say). */
+      retrySeconds: z.number().min(10).default(120),
     })
     .prefault({}),
   /** Coding on branches across devices (run option `branches`). */

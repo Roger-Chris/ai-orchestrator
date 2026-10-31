@@ -11,8 +11,8 @@ import { type Colors, LABEL, useColors } from "../lib/theme";
  * main branch without that tap.
  */
 
-const STATUS: Record<Build["status"], string> = { running: "building", ready: "ready to check", failed: "failed", merged: "merged", cancelled: "cancelled" };
-const statusColor = (c: Colors, s: Build["status"]) => ({ running: c.accent, ready: c.warn, failed: c.err, merged: c.ok, cancelled: c.muted })[s];
+const STATUS: Record<Build["status"], string> = { running: "building", ready: "ready to check", failed: "failed", merged: "merged", cancelled: "cancelled", done: "done" };
+const statusColor = (c: Colors, s: Build["status"]) => ({ running: c.accent, ready: c.warn, failed: c.err, merged: c.ok, cancelled: c.muted, done: c.ok })[s];
 
 export default function Builds() {
   const c = useColors();
@@ -127,7 +127,9 @@ export default function Builds() {
               {!!b.summary && <Muted small>{b.summary.slice(0, 1200)}</Muted>}
               {b.preview?.status === "building" && <Muted small>Making the preview…</Muted>}
               {b.preview?.status === "failed" && <ErrorText text={`Preview: ${b.preview.error}`} />}
+              {b.preview?.status === "ready" && b.branches.length > 0 && (b.preview.audit ? <Muted small>{`Audit report:\n${b.preview.audit.slice(0, 1500)}`}</Muted> : <Text style={{ color: c.warn, fontSize: 13 }}>No audit report was written.</Text>)}
               <Row>
+                {b.preview?.files?.map((f) => <Button key={f.name} kind="primary" small title={`Open ${f.name}`} onPress={() => void Linking.openURL(Api.hubUrl(f.url))} />)}
                 {b.preview?.web && <Button kind="primary" small title="Open preview" onPress={() => void Linking.openURL(Api.hubUrl(b.preview!.web!))} />}
                 {b.preview?.apk && <Button kind="primary" small title="Install APK" onPress={() => void Linking.openURL(Api.hubUrl(b.preview!.apk!))} />}
                 {b.branches.length > 0 && b.status !== "merged" && b.preview?.status !== "building" && (

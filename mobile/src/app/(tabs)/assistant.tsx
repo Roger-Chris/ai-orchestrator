@@ -6,6 +6,7 @@ import { ErrorText } from "../../components/ui";
 import { Api } from "../../lib/api";
 import { convo, type Turn } from "../../lib/convo";
 import { canListen, speak, stopSpeaking, useListen } from "../../lib/listen";
+import { openFreshApps } from "../../lib/phone";
 import { useColors } from "../../lib/theme";
 
 const SUGGESTIONS = ["What's on my plate today?", "Where is my thrust test sheet?", "What did I decide about Zapprise's colours?", "Which devices are online?"];
@@ -50,6 +51,7 @@ export default function Assistant() {
         convo.touch();
         void speak(r.say);
       } else turn.reply = await Api.ask(you, history);
+      void openFreshApps().catch(() => undefined);
     } catch (e) {
       turn.error = (e as Error).message;
     } finally {

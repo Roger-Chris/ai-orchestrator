@@ -31,7 +31,7 @@ interface RpcRequest {
 /** Arguments that name a file or folder, per action. Anything else is checked by the action itself. */
 const PATH_ARGS: Record<string, string[]> = {
   "files.list": ["path"], "files.find": ["path"], "files.read": ["path"], "files.write": ["path"],
-  "files.copy": ["from", "to"], "files.move": ["from", "to"], "files.send": ["path"], "ai.run": ["cwd"], "apps.open": ["target"],
+  "files.copy": ["from", "to"], "files.move": ["from", "to"], "files.send": ["path"], "files.trash": ["path"], "ai.run": ["cwd"], "apps.open": ["target"],
 };
 /** Actions that can reach anything on the device, so they are refused for an agent held to folders. */
 const UNBOUNDED = new Set(["shell.run", "gui.task"]);

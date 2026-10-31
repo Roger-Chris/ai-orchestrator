@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { Config } from "../config.js";
 import type { ProviderPool } from "../providers/registry.js";
 import type { MemoryReplica } from "../shared/replica.js";
+import type { ActionLog } from "./log.js";
 import { type ActionContext, type ActionResult, ACTIONS, findAction, type Risk, redact, riskOf } from "./registry.js";
 
 /**
@@ -244,16 +245,28 @@ export class ActionHub {
     readonly runner: ActionRunner,
     readonly desk: ApprovalDesk,
     private peer: PeerAct,
+    /** Who did what: every call, whether it ran, waits for you or was refused. */
+    readonly log?: ActionLog,
   ) {}
+
+  private record(who: string, node: string, req: ActRequest, status: string, detail?: string) {
+    try {
+      this.log?.add({ who, node, action: req.action, args: JSON.stringify(req.args ?? {}), reason: req.reason, status, detail });
+    } catch {
+      /* the log must never stop the action it describes */
+    }
+  }
 
   private send(node: string | undefined, req: ActRequest) {
     return !node || node === this.runner.node ? this.runner.act(req) : this.peer(node, req);
   }
 
   /** `noApprovals`: a call that would need the owner's Approve is refused instead of asked (outside agents limited to safe calls). */
-  async act(node: string | undefined, req: ActRequest, opts: { noApprovals?: boolean; by?: string } = {}): Promise<ActResponse | { status: "pending"; node: string; action: string; approval: Approval }> {
+  async act(node: string | undefined, req: ActRequest, opts: { noApprovals?: boolean; by?: string; who?: string } = {}): Promise<ActResponse | { status: "pending";node: string; action: string; approval: Approval }> {
     const target = node || this.runner.node;
+    const who = opts.who ?? opts.by ?? "owner";
     const res = await this.send(target, { action: req.action, args: req.args, reason: req.reason });
+    this.record(who, target, req, res.status === "done" ? (res.result.ok ? "done" : "failed") : res.status === "needs_approval" ? (opts.noApprovals ? "refused" : "waiting for approval") : "refused", res.status === "done" ? res.result.output : res.status === "refused" ? res.error : undefined);
     if (res.status !== "needs_approval") return res;
     if (opts.noApprovals) return { status: "refused", node: target, action: req.action, error: "this needs the owner's approval, which this caller may not ask for" };
     const approval = this.desk.request({ node: target, action: req.action, args: req.args ?? {}, summary: res.summary, reason: req.reason, by: opts.by });
@@ -263,13 +276,17 @@ export class ActionHub {
   /** The owner tapped Approve (or Deny). Approve runs the call now and keeps the result. */
   async decide(id: string, approve: boolean): Promise<Approval> {
     const a = this.desk.decide(id, approve);
-    if (!approve) return a;
+    if (!approve) {
+      this.record("owner", a.node, { action: a.action, args: a.args, reason: a.reason }, "denied");
+      return a;
+    }
     const res = await this.send(a.node, { action: a.action, args: a.args, reason: a.reason, approval: a.id }).catch(
       (e): ActResponse => ({ status: "refused", node: a.node, action: a.action, error: (e as Error).message }),
     );
     this.desk.markUsed(id);
     const result: ActionResult = res.status === "done" ? res.result : { ok: false, output: res.status === "refused" ? res.error : "the device asked for approval again" };
     this.desk.finish(id, result);
+    this.record(`owner approved for ${a.by ?? "assistant"}`, a.node, { action: a.action, args: a.args, reason: a.reason }, result.ok ? "done" : "failed", result.output);
     return this.desk.get(id)!;
   }
 }

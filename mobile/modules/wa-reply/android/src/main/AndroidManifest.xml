@@ -1,4 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- Remote control (ControlService): see installed apps by name, keep running with a visible
+       notification, and start an app from the background once you grant "Display over other apps". -->
+  <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <uses-permission android:name="android.permission.INTERNET" />
   <application>
     <!-- Reads WhatsApp's own notifications (only after you grant Notification access) so you can
          answer from Orchestrator's notification; WhatsApp itself sends the reply. -->
@@ -12,5 +20,13 @@
       </intent-filter>
     </service>
     <receiver android:name="expo.modules.wareply.WaActionReceiver" android:exported="false" />
+    <service android:name="expo.modules.wareply.ControlService" android:exported="false" android:foregroundServiceType="specialUse">
+      <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Opens apps when the device owner asks their assistant from another device" />
+    </service>
+    <receiver android:name="expo.modules.wareply.BootReceiver" android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+      </intent-filter>
+    </receiver>
   </application>
 </manifest>
