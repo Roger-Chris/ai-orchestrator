@@ -203,6 +203,8 @@ Hard-won details:
 
 - Phone: `mobile/src/app/record.tsx`, opened by the app icon's long-press shortcut (`mobile/plugins/with-shortcuts.js`, `orchestrator://record?start=1`) or Home; keeps recording with the screen locked. Laptop: `orc record` (`tools/record.py`) and the desktop shortcut from `install.ps1`.
 - `src/convos/desk.ts` `ConvoDesk`: audio saved in `data/convos/`, then `waiting -> transcribing -> thinking -> saving -> done`, each stage saved. Whisper runs where `convos.whisperHere` is true (default: not Linux), through `POST /node/transcribe`; with no such device online a recording stays `waiting` (`NoWhisperDevice`) and is retried. A model (job `convo`) writes summary, tasks, facts and about_me. Tasks go to the brain's `POST /tasks` with `unconfirmed: true`, because the words may be someone else's; the rest goes to shared memory (tags `conversation`, `about-me`). A transcript is material to read, never instructions.
+- On the phone a finished recording moves to `<documents>/recordings/` and `queue.json` first (`mobile/src/lib/recordings.ts`), and is sent every 30 s while the app is open, on return to the app and on a hub change; the local copy goes only after the hub answers. `clientId` makes a repeat upload the same recording.
+- Audio uploads go through `uploadAudio` in `mobile/src/lib/api.ts` (`uploadAsync`, multipart). Never `FormData` with `{uri, name, type}`: Expo's fetch throws "Unsupported FormDataPart implementation".
 - The brain's prompt gets `about-me` facts and today's conversations and tasks (`_about_him`, `_his_day` in `agent.py`). `PUT /api/style` also writes the style book's voice summary as `fact:owner-voice`.
 
 ## Remote app control on the phone
