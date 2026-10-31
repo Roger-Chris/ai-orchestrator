@@ -2,7 +2,8 @@ import * as SecureStore from "expo-secure-store";
 import { WaReply } from "./wareply";
 import type { PersonSummary } from "../../../src/types";
 import type { WorkPerson, WorkPersonView, WorkStatus, WorkTask } from "../../../src/types";
-import type { ActionLogEntry, Convo } from "../../../src/types";
+import type { ActionLogEntry, Convo, MailDraft, ShopRun } from "../../../src/types";
+export type { MailDraft, ShopRun } from "../../../src/types";
 import type { AiHub, Build, BrainAlert, OutsideAgent, OutsideAgentScopes, OutsideAuditEntry, PhoneAction, Home, Insights, JobKind, ProviderId, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
 
 export type { ActionLogEntry, Convo } from "../../../src/types";
@@ -444,6 +445,16 @@ export const Api = {
   phoneActions: () => api<PhoneAction[]>("/api/phone/actions"),
   phoneDone: (id: string) => api(`/api/phone/actions/${id}/done`, { body: {} }),
   phoneDismiss: (id: string) => api(`/api/phone/actions/${id}/dismiss`, { body: {} }),
+  // ---- mail Jarvis wrote: only your Send sends it
+  mails: () => api<MailDraft[]>("/api/mail"),
+  mailSender: () => api<{ connected: boolean; email?: string }>("/api/mail/sender"),
+  mailSend: (id: string, m: { to: string; subject: string; body: string }) => api<MailDraft>(`/api/mail/${id}/send`, { body: m }),
+  mailDiscard: (id: string) => api<MailDraft>(`/api/mail/${id}/discard`, { body: {} }),
+  // ---- carts Jarvis filled: you order in the store
+  shopRuns: () => api<ShopRun[]>("/api/shop"),
+  shopCheckout: (id: string, total: string) => api<ShopRun>(`/api/shop/${id}/checkout`, { body: { total } }),
+  shopOrdered: (id: string) => api<ShopRun>(`/api/shop/${id}/ordered`, { body: {} }),
+  shopDismiss: (id: string) => api<ShopRun>(`/api/shop/${id}/dismiss`, { body: {} }),
   // ---- builds (apps built on command)
   builds: () => api<Build[]>("/api/builds?limit=40"),
   appUpdate: () => api<AppUpdate>("/api/app/update"),

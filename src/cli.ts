@@ -14,7 +14,10 @@ import { Router } from "./brain/router.js";
 import { Cluster } from "./cluster/cluster.js";
 import { workspaceMap } from "./context/graphify.js";
 import { AssistantTasks } from "./integrations/assistant.js";
-import { GmailReader } from "./integrations/gmail.js";
+import { GmailReader, SEND_SCOPES } from "./integrations/gmail.js";
+import { MailDesk } from "./mail/desk.js";
+import { profileDir, STORE_IDS, STORES, type StoreId } from "./shop/agent.js";
+import { ShopDesk } from "./shop/desk.js";
 import { Memory } from "./memory/memory.js";
 import { openReplica } from "./shared/setup.js";
 import { buildActions } from "./actions/setup.js";
@@ -255,7 +258,29 @@ export function buildSystem(config: Config) {
     think: (kind, req) => models.run(kind, req),
     notify: (title, body) => void notifier.notify({ title, body, url: "/work", tag: `work:${title}` }),
   });
-  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, assistant, drafter, calls, tts, tools, models, builds, preview, convos, whisper, fileIndex, files, phone: new PhoneDesk(store, config, (p) => void notifier.notify(p)), outside: new OutsideAgents(store, replica), work };
+  // Mail: its own sign-in that may send (`orc gmail connect-send`), never polled, so nothing is read twice.
+  const mailSender = new GmailReader(store, pool, { clientFile: resolve(config.gmail.clientFile), dataDir: resolve(config.dataDir), query: "", provider: "auto", node: config.node.name, tokenName: "gmail-send-token.json", scopes: SEND_SCOPES });
+  const mail = new MailDesk({
+    store,
+    gmail: mailSender,
+    think: async (prompt) => (await models.run("mail_write", { prompt, timeoutMs: 120_000 })).text,
+    voice: () => drafter.book()?.owner.voice?.summary,
+    knowledge: replica ? (name) => personKnowledge(replica, { name, chatId: "", isGroup: false }).join("\n") || undefined : undefined,
+    log: actions.log,
+    notify: (p) => void notifier.notify(p),
+    node: config.node.name,
+  });
+  // Shopping: the browser agent runs on the device set for it, normally the laptop.
+  const shop = new ShopDesk({
+    store,
+    act: (node, req, who) => actions.act(node, req, { who }),
+    log: actions.log,
+    notify: (p) => void notifier.notify(p),
+    node: config.shopping.node || config.builds.androidNode || undefined,
+    logNode: config.node.name,
+    linkOnly: config.shopping.linkOnly,
+  });
+  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, mail, mailSender, shop, assistant, drafter, calls, tts, tools, models, builds, preview, convos, whisper, fileIndex, files, phone: new PhoneDesk(store, config, (p) => void notifier.notify(p)), outside: new OutsideAgents(store, replica), work };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */
@@ -421,10 +446,32 @@ async function cmdDoctor(config: Config, live: boolean) {
   sys.store.close();
 }
 
+/** Opens the cart agent's own browser profile at a store, so the owner can sign in there by hand. */
+function cmdShop(config: Config, sub = "", store = "") {
+  if (sub !== "login" || !STORE_IDS.includes(store as StoreId)) {
+    console.log(`usage: orc shop login <${STORE_IDS.join("|")}>`);
+    return;
+  }
+  const chrome = process.platform === "win32" ? `${process.env.ProgramFiles}\\Google\\Chrome\\Application\\chrome.exe` : process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "google-chrome";
+  spawn(chrome, [`--user-data-dir=${profileDir(resolve(config.dataDir))}`, STORES[store as StoreId].home], { detached: true, stdio: "ignore" }).unref();
+  console.log(`Sign in to ${STORES[store as StoreId].name} in the window that opened, then close it. Jarvis never sees your password; it only reuses the sign-in.`);
+}
+
 /** Connect, check, inspect or disconnect the Gmail reader. */
 async function cmdGmail(config: Config, sub = "status") {
   const sys = buildSystem(config);
   try {
+    if (sub === "connect-send") {
+      const rl = createInterface({ input: process.stdin, output: process.stdout });
+      const pasted = new Promise<string>((r) => rl.once("line", r));
+      try {
+        const email = await sys.mailSender.connect({ print: (s) => console.log(s), pasted });
+        console.log(`\n✓ Jarvis can send as ${email}, and only after your Send on the phone.`);
+      } finally {
+        rl.close();
+      }
+      return;
+    }
     if (sub === "connect") {
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       const pasted = new Promise<string>((r) => rl.once("line", r));
@@ -1064,6 +1111,8 @@ async function main() {
       return cmdMcp(config);
     case "gmail":
       return cmdGmail(config, rest[0]);
+    case "shop":
+      return cmdShop(config, rest[0], rest[1]);
     case "whatsapp":
       return cmdWhatsApp(config, rest[0]);
     case "wake":
@@ -1073,7 +1122,7 @@ async function main() {
     case "style":
       return cmdStyle(config, rest[0], { who: rest.slice(1).join(" "), ask: v.ask as string | undefined, draft: !!v.draft, raw: !!v.raw });
     default:
-      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|check|status|disconnect]|whatsapp [link|status]|style [learn|push|pull|show|graph|pool <name> [--ask "…"] [--draft]]|wake [--threshold 0.5] [--device <mic>]|init|mcp>`);
+      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|connect-send|check|status|disconnect]|shop login <store>|whatsapp [link|status]|style [learn|push|pull|show|graph|pool <name> [--ask "…"] [--draft]]|wake [--threshold 0.5] [--device <mic>]|init|mcp>`);
       process.exitCode = 1;
   }
 }

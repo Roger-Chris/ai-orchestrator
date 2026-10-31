@@ -309,6 +309,19 @@ const ConfigSchema = z.object({
       provider: z.enum(["auto", "groq", "claude", "codex", "gemini"]).default("auto"),
     })
     .prefault({}),
+  /** Carts filled by a browser agent (src/shop). It stops at the cart; the owner orders in the store. */
+  shopping: z
+    .object({
+      /** The device with a screen, Chrome and the Claude CLI; empty = builds.androidNode, else this one. */
+      node: z.string().default(""),
+      command: z.string().default("claude"),
+      model: z.string().default("sonnet"),
+      headless: z.boolean().default(false),
+      timeoutMinutes: z.number().min(1).max(30).default(10),
+      /** Stores that only get a search link on the phone, never the agent. */
+      linkOnly: z.array(z.string()).default(["amazon"]),
+    })
+    .prefault({}),
   /** Your WhatsApp as a read-only linked device (`orc whatsapp link`). Nothing is ever sent. */
   whatsapp: z
     .object({

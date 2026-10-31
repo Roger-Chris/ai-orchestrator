@@ -33,6 +33,7 @@ export const DEFAULT_ROUTES: Record<JobKind, ProviderId[]> = {
   work: ["groq", "gemini", "claude", "codex"],
   // Reading a recorded conversation: long, and worth doing well.
   convo: ["claude", "codex", "gemini", "groq"],
+  mail_write: ["claude", "codex", "gemini", "groq"],
 };
 
 /** Characters above which a prompt counts as large (about 6k tokens) and below which small. */

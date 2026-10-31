@@ -9,6 +9,7 @@ import type { ProviderPool } from "../providers/registry.js";
 import type { MemoryReplica } from "../shared/replica.js";
 import type { ProviderId } from "../types.js";
 import { REPO_ACTIONS } from "../repos/actions.js";
+import { SHOP_ACTIONS } from "../shop/actions.js";
 import { DESKTOP_ACTIONS } from "./desktop.js";
 
 /**
@@ -494,6 +495,8 @@ export const ACTIONS: ActionDef[] = [
 ACTIONS.push(...DESKTOP_ACTIONS);
 // Repos the orchestrator looks after (../repos/actions.ts).
 ACTIONS.push(...REPO_ACTIONS);
+// Filling a cart in a browser (../shop/actions.ts).
+ACTIONS.push(...SHOP_ACTIONS);
 
 export const ACTION_NAMES = ACTIONS.map((a) => a.name);
 

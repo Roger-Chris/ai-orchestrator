@@ -5,6 +5,8 @@ import type { Orchestrator } from "../brain/orchestrator.js";
 import type { ProviderPool } from "../providers/registry.js";
 import type { AssistantTasks } from "../integrations/assistant.js";
 import type { GmailReader } from "../integrations/gmail.js";
+import type { MailDesk } from "../mail/desk.js";
+import type { ShopDesk } from "../shop/desk.js";
 import type { Store } from "../store/db.js";
 import type { ReplyDrafter } from "../whatsapp/drafter.js";
 import { quietChats } from "../whatsapp/convo.js";
@@ -42,6 +44,8 @@ export async function buildHome(d: {
   drafter?: ReplyDrafter;
   actions?: ActionHub;
   builds?: BuildDesk;
+  mail?: MailDesk;
+  shop?: ShopDesk;
 }): Promise<Home> {
   const decisions: Decision[] = [];
   const running: Running[] = [];
@@ -116,6 +120,8 @@ export async function buildHome(d: {
       id: a.id, node: a.node, action: a.action, by: a.by, summary: a.summary, reason: a.reason, since: a.createdAt, expiresAt: a.expiresAt,
     })),
     builds: homeBuilds(d.builds),
+    mail: d.mail?.list(10).filter((m) => m.status === "draft" || m.status === "failed") ?? [],
+    shopping: d.shop?.open() ?? [],
   };
 }
 

@@ -229,6 +229,9 @@ export interface Home {
   approvals?: PendingApproval[];
   /** Builds to try or still building (Jarvis U1); absent from an older hub. */
   builds?: HomeBuild[];
+  /** Mail waiting for the owner's Send, and carts to look at; absent from an older hub. */
+  mail?: MailDraft[];
+  shopping?: ShopRun[];
 }
 
 /** A build on Home: ready to try (preview), building, or its preview failed. Merge stays on the Builds screen. */
@@ -518,7 +521,7 @@ export interface Usage {
 }
 
 /** The hub's own jobs the model router chooses for. */
-export const JOB_KINDS = ["whatsapp_draft", "mail", "call", "brain", "work", "convo"] as const;
+export const JOB_KINDS = ["whatsapp_draft", "mail", "call", "brain", "work", "convo", "mail_write"] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
 export type JobSize = "small" | "medium" | "large";
@@ -658,6 +661,56 @@ export interface PhoneAction {
   fileKey?: string;
   createdAt: number;
   closedAt?: number;
+}
+
+// ---- Mail the assistant writes (src/mail; the app's Mail screen)
+
+export interface MailDraft {
+  id: string;
+  /** Empty until the owner fills it in, when the assistant only had a name. */
+  to: string;
+  toName?: string;
+  subject: string;
+  body: string;
+  /** What was asked for. */
+  about: string;
+  by?: string;
+  status: "draft" | "sent" | "failed" | "discarded";
+  error?: string;
+  gmailId?: string;
+  createdAt: number;
+  updatedAt: number;
+  sentAt?: number;
+}
+
+// ---- Shopping (src/shop; the app's Shopping screen)
+
+export interface ShopItem {
+  name: string;
+  qty: number;
+  price?: string;
+}
+
+export interface ShopRun {
+  id: string;
+  store: string;
+  storeName: string;
+  request: string;
+  by?: string;
+  node?: string;
+  /**
+   * working: the browser agent is at it. ready: the cart is read back. needs_you: the store wants a sign-in or the like.
+   * link: this store only gets a link, no agent. checkout: the owner tapped through to the store. ordered: the owner says it is placed.
+   */
+  status: "working" | "ready" | "needs_you" | "not_found" | "blocked" | "failed" | "link" | "checkout" | "ordered" | "dismissed";
+  items: ShopItem[];
+  total?: string;
+  note?: string;
+  /** The store's own pages, opened on the phone. */
+  cartUrl: string;
+  searchUrl: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 // ---- Outside agents (Jarvis phase 4: src/outside; the app's Agents screen)

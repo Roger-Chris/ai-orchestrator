@@ -507,6 +507,26 @@ export default function Home() {
               </Section>
             )}
 
+            {(home.mail?.length ?? 0) > 0 && (
+              <Section label="Mail to send" right={<TextLink title="Open →" color={c.muted} onPress={() => router.push("/mail" as never)} />}>
+                {home.mail!.map((m) => (
+                  <Text key={m.id} style={{ color: c.text, paddingVertical: 6 }} numberOfLines={1} onPress={() => router.push("/mail" as never)}>
+                    {m.toName ?? m.to}: {m.subject}
+                  </Text>
+                ))}
+              </Section>
+            )}
+
+            {(home.shopping?.length ?? 0) > 0 && (
+              <Section label="Shopping" right={<TextLink title="Open →" color={c.muted} onPress={() => router.push("/shop" as never)} />}>
+                {home.shopping!.map((r) => (
+                  <Text key={r.id} style={{ color: c.text, paddingVertical: 6 }} numberOfLines={1} onPress={() => router.push("/shop" as never)}>
+                    {r.storeName}: {r.status === "working" ? "finding it…" : r.total ? `cart ${r.total}` : r.status === "needs_you" ? "needs you" : r.request}
+                  </Text>
+                ))}
+              </Section>
+            )}
+
             {(home.builds?.length ?? 0) > 0 && (
               <Section label="Builds" right={<TextLink title="All builds →" color={c.muted} onPress={() => router.push("/builds" as never)} />}>
                 {home.builds!.map((b, i) => (

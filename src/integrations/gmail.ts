@@ -19,8 +19,13 @@ const AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+/** The sign-in that may send: kept apart from the reader's, so the reader never holds send rights. */
+export const SEND_SCOPES = ["https://www.googleapis.com/auth/gmail.send", SCOPE];
 
 export interface GmailOptions {
+  /** Token file in dataDir (default gmail-token.json) and what it may do (default read-only). */
+  tokenName?: string;
+  scopes?: string[];
   /** OAuth client file downloaded from Google Cloud (Desktop app). */
   clientFile: string;
   dataDir: string;
@@ -93,6 +98,14 @@ export function mailText(payload: any): string {
     : "";
 }
 
+/** A plain UTF-8 mail as Gmail wants it. Line breaks in a header could add recipients, so they are refused. */
+export function rawMessage(m: { to: string; subject: string; body: string }): string {
+  if (/[\r\n]/.test(m.to) || /[\r\n]/.test(m.subject)) throw new Error("a line break in the address or subject is not allowed");
+  const subject = /^[\x20-\x7e]*$/.test(m.subject) ? m.subject : `=?UTF-8?B?${Buffer.from(m.subject).toString("base64")}?=`;
+  const text = [`To: ${m.to}`, `Subject: ${subject}`, "MIME-Version: 1.0", 'Content-Type: text/plain; charset="UTF-8"', "Content-Transfer-Encoding: base64", "", Buffer.from(m.body).toString("base64")].join("\r\n");
+  return Buffer.from(text).toString("base64url");
+}
+
 /** The prompt that asks a model to pick today's and upcoming tasks out of a batch of mail. */
 export function taskPrompt(mails: Mail[], now = new Date()): string {
   const today = `${localDay(now)} (${now.toLocaleDateString("en-GB", { weekday: "long" })})`;
@@ -146,7 +159,7 @@ export class GmailReader {
   }
 
   private get tokenFile() {
-    return join(this.opts.dataDir, "gmail-token.json");
+    return join(this.opts.dataDir, this.opts.tokenName ?? "gmail-token.json");
   }
 
   private token(): Token | undefined {
@@ -242,6 +255,34 @@ export class GmailReader {
     return pick;
   }
 
+  /** Sends one finished message and returns Gmail's id. Only MailDesk calls this, after the owner's Send. */
+  async send(mail: { to: string; subject: string; body: string }): Promise<string> {
+    const res = await this.http(`${API}/messages/send`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${await this.accessToken()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ raw: rawMessage(mail) }),
+    });
+    const body = (await res.json().catch(() => ({}))) as { id?: string; error?: { message?: string } };
+    if (res.status === 403) throw new Error("Gmail refused: this sign-in can't send. Run `orc gmail connect-send` on the hub and allow sending.");
+    if (!res.ok || !body.id) throw new Error(`Gmail ${res.status}: ${body.error?.message ?? res.statusText}`);
+    return body.id;
+  }
+
+  /** The owner's own recent mail, as examples of their voice: to this person when there is any, else any. */
+  async recentSent(to?: string, count = 5): Promise<string[]> {
+    const search = async (q: string) => (await this.get<{ messages?: { id: string }[] }>(`/messages?maxResults=${count}&q=${encodeURIComponent(q)}`)).messages ?? [];
+    let found = to ? await search(`in:sent to:${to}`) : [];
+    if (!found.length) found = await search("in:sent");
+    const out: string[] = [];
+    for (const m of found) {
+      const msg = await this.get<any>(`/messages/${m.id}?format=full`);
+      // Only the owner's words: quoted replies below "On ... wrote:" are someone else's words.
+      const text = mailText(msg.payload).split(/\r?\n(?:On .{5,200} wrote:|>)/)[0].trim();
+      if (text) out.push(text.slice(0, 800));
+    }
+    return out;
+  }
+
   private async get<T>(path: string): Promise<T> {
     const res = await this.http(`${API}${path}`, { headers: { Authorization: `Bearer ${await this.accessToken()}` } });
     if (res.status === 401) this.access = undefined;
@@ -253,7 +294,7 @@ export class GmailReader {
     if (this.access && this.access.until > Date.now() + 60_000) return this.access.token;
     const client = readClient(this.opts.clientFile);
     const token = this.token();
-    if (!client || !token) throw new Error("Gmail is not connected: run `orc gmail connect` on the hub");
+    if (!client || !token) throw new Error(`Gmail is not connected: run \`orc gmail ${this.opts.scopes ? "connect-send" : "connect"}\` on the hub`);
     const res = await this.http(TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -292,14 +333,14 @@ export class GmailReader {
         client_id: client.client_id,
         redirect_uri: redirect,
         response_type: "code",
-        scope: SCOPE,
+        scope: (this.opts.scopes ?? [SCOPE]).join(" "),
         access_type: "offline",
         prompt: "consent",
         state,
         code_challenge: b64url(createHash("sha256").update(verifier).digest()),
         code_challenge_method: "S256",
       })}`;
-      io.print(`Open this link and allow read-only access to Gmail:\n\n${url}\n\nIf the last page says it can't connect (the hub is another machine), copy that page's address and paste it here.`);
+      io.print(`Open this link and allow ${this.opts.scopes ? "reading your mail and sending the mail you approve" : "read-only access to Gmail"}:\n\n${url}\n\nIf the last page says it can't connect (the hub is another machine), copy that page's address and paste it here.`);
       const back = await Promise.race([got, io.pasted.then((s) => new URL(s.trim()))]);
       if (back.searchParams.get("error")) throw new Error(`Google said: ${back.searchParams.get("error")}`);
       if (back.searchParams.get("state") !== state) throw new Error("that address is from a different sign-in attempt; run connect again");

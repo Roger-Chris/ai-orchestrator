@@ -201,7 +201,7 @@ describe("AI hub (R4)", () => {
     await models.run("call", { prompt: "what now?" });
 
     const hub = await (await app.request("/api/ai-hub", { headers: auth })).json();
-    expect(hub.jobs.map((j: { kind: string }) => j.kind)).toEqual(["whatsapp_draft", "mail", "call", "brain", "work", "convo"]);
+    expect(hub.jobs.map((j: { kind: string }) => j.kind)).toEqual(["whatsapp_draft", "mail", "call", "brain", "work", "convo", "mail_write"]);
     expect(hub.jobs[0]).toMatchObject({ label: "WhatsApp replies", route: { chain: ["claude", "codex", "groq"] } });
     expect(hub.today).toEqual({ calls: 1, failed: 0, spentUsd: 0 });
     expect(hub.caps).toEqual([

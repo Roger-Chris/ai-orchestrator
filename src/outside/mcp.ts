@@ -41,6 +41,8 @@ const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCas
 /** Why this call is outside the agent's scopes, or undefined when it is allowed to try. */
 export function scopeProblem(agent: OutsideAgent, device: string, action: string, args: Json): string | undefined {
   const s = agent.scopes;
+  // It acts inside the owner's signed-in store accounts, so it is only for the owner's own assistant.
+  if (action === "shop.cart") return "shop.cart is only for the owner's own assistant";
   if (!s.devices.includes("*") && !s.devices.includes(device)) return `device ${device} is not in this agent's scopes`;
   if (action === "files.send" && !s.devices.includes("*") && !s.devices.includes(String(args.to ?? ""))) return `device ${args.to} is not in this agent's scopes`;
   if (!s.folders.length) return undefined;

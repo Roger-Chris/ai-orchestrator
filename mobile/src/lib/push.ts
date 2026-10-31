@@ -70,7 +70,7 @@ export function routeFor(response: Notifications.NotificationResponse | null | u
   if (call) return `/call/${call[1]}`;
   const m = data?.url?.match(/#\/t\/([\w-]+)/);
   if (m) return `/t/${m[1]}`;
-  // Screens that link themselves: "/builds?id=b1", "/agents", "/phone", "/work"
-  const screen = data?.url?.match(/^\/(builds|agents|phone|work)(\?[\w=&%-]*)?$/);
+  // Screens that link themselves: "/builds?id=b1", "/agents", "/phone", "/work", "/mail?id=m1", "/shop?id=s1"
+  const screen = data?.url?.match(/^\/(builds|agents|phone|work|mail|shop)(\?[\w=&%-]*)?$/);
   return screen ? data!.url : undefined;
 }

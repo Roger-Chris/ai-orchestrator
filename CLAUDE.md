@@ -8,7 +8,7 @@ A brain that routes work across the owner's Claude, ChatGPT (Go), Gemini (Google
 - `web/`: React + Vite web app (PWA), built to `web/dist` by `npm start`.
 - `mobile/`: Expo (SDK 58) React Native Android app, installed from an APK, not the Play Store. It has its own `AGENTS.md`: read it before touching Expo APIs.
 - `agents/`: specialist agent YAML files.
-- `tests/`: vitest with fake providers. `npm test` must stay green (175 tests); `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
+- `tests/`: vitest with fake providers. `npm test` must stay green; `npm run typecheck` covers the hub and the web app; `cd mobile && npx tsc --noEmit` covers the app.
 
 ## Running the hub
 
@@ -223,6 +223,16 @@ Hard-won details:
 - `src/repos/actions.ts`, actions on the device that holds the repo: `repos.list`, `repos.create` (asks; always private, in `<node.workRoot>/repos/<name>`), `repos.adopt` (asks; an existing clone inside `actions.roots`), `repos.sync` (fast-forward only), `repos.files`, `repos.read`, `repos.write` (asks; commit + push), `repos.check_delete`, `repos.delete` (asks). The list is `<dataDir>/repos/registry.json`, per device. Nothing outside these repos, nothing in `.git`, no secret names, and writes refuse a repo with uncommitted changes.
 - `repos.delete` removes one committed file, and `verifyDelete` runs again at the moment of deleting. Every gate must pass and anything unproven fails: `clean`, `on_github` (same version on the origin branch, nothing unpushed), `references` (no other tracked file names it), `review` (an AI finds nothing only it holds; no model, unreadable answer, binary or over 40 kB all fail), `tests` (on a throwaway worktree without the file; only at the real delete). A copy and the report stay in `<dataDir>/repos/deleted/<repo>/<time>/`. Whole repos can't be deleted. Keep it that way.
 - Outside agents held to folders can't use `repos.*` (`UNBOUNDED` in `src/outside/mcp.ts`).
+
+## Mail and shopping
+
+- Mail (`src/mail/desk.ts`, `src/server/mail.ts`, app `mail.tsx`): the brain's `mail` tool only calls `POST /api/mail`, which writes a draft (router job `mail_write`; voice from the style book, up to 5 real sent mails as examples, memory as background) and pushes `/mail?id=`. Only the app's Send (`POST /api/mail/:id/send {to, subject, body}`) reaches Gmail, with the words on screen; taking the draft is one atomic step, so a double tap sends once. Every draft, send and discard goes in `action_log` (to and subject, not the words). Never give the brain a tool for send or discard.
+- Sending has its own sign-in, `orc gmail connect-send` on the hub (`data/gmail-send-token.json`, scopes gmail.send + readonly; never polled, so it reads nothing twice and the reader stays read-only). The brain's own Google token has `gmail.compose`, which can technically send; the send path is deliberately not in the brain, next to the thinking loop.
+- Shopping (`src/shop`, `src/server/shop.ts`, app `shop.tsx`): the brain's `shop` tool calls `POST /api/shop`, `ShopDesk` runs action `shop.cart` on `shopping.node` (else `builds.androidNode`, else here), one at a time. `runCartAgent` runs the Claude CLI (`shopping.model`) with a pinned Playwright MCP in `<dataDir>/shop/tools` (npx can't start it on Windows) driving real Chrome with its own profile `<dataDir>/shop/profile`. The owner signs in there with `orc shop login <store>`.
+- Walls, because Playwright MCP is not a security boundary: no page-scripting or file tools (`--tools ""`, an allow-list, `browser_evaluate`/`run_code` disallowed), and `GUARD_SCRIPT` in every frame kills clicks on order/pay controls (`ORDER_WORDS`) and typing into password/OTP/card fields (`SECRET_FIELD`). A control a store labels with other words is covered only by the prompt, so extend `ORDER_WORDS` when one turns up. Outside agents are refused `shop.cart` outright.
+- Ordering: Jarvis never places one. Go to checkout (`POST /api/shop/:id/checkout {total}`) must carry the total on the screen, is logged, and opens the store on the phone; the owner orders and pays there. The phone must be signed in to the same store account to see the same cart.
+- `shopping.linkOnly` (default amazon): only a search link, no agent. Amazon won a court order against Perplexity's shopping agent (March 2026), so a bot on the owner's signed-in account risks that account; it is the owner's call to empty the list.
+- Tried for real with guest carts, Oct 2026: Amazon.in full run, 3.5 min, total read back; Flipkart clicked Add to cart but its guest cart page was blank; Blinkit stopped for a delivery location. Expect a few minutes per cart, and Blinkit, Zepto, Swiggy and Zomato to need sign-in and an address first. `headless: false` needs a logged-in desktop session on that device. Swiggy has official MCP servers (mcp.swiggy.com), not used yet.
 
 ## Conventions
 

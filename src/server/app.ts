@@ -30,7 +30,11 @@ import { mountApkNode, mountBuilds } from "./builds.js";
 import { mountFiles } from "./files.js";
 import type { ConvoDesk } from "../convos/desk.js";
 import { mountConvos } from "./convos.js";
+import type { MailDesk } from "../mail/desk.js";
+import type { ShopDesk } from "../shop/desk.js";
+import { mountMail } from "./mail.js";
 import { mountPhone } from "./phone.js";
+import { mountShop } from "./shop.js";
 import { mountOutside } from "./outside.js";
 import { mountWork } from "./work.js";
 import type { WorkDesk } from "../work/desk.js";
@@ -80,6 +84,11 @@ export interface AppDeps {
   files?: FileClient;
   /** Things to do on the phone, waiting for the owner's tap (D3). */
   phone?: PhoneDesk;
+  /** Mail written for the owner's Send, and the sign-in that may send. */
+  mail?: MailDesk;
+  mailSender?: GmailReader;
+  /** Carts filled by the browser agent, stopping before any order. */
+  shop?: ShopDesk;
   /** Recorded conversations, and running Whisper for the other devices. */
   convos?: ConvoDesk;
   whisper?: { here: boolean; dataDir: string; run: (file: string) => Promise<{ text: string; language?: string }> };
@@ -233,6 +242,8 @@ export function createApp(d: AppDeps) {
   mountApkNode(app, d);
   mountFiles(app, d);
   mountPhone(app, d);
+  mountMail(app, d);
+  mountShop(app, d);
   mountConvos(app, d);
   mountOutside(app, {
     outside: d.outside,

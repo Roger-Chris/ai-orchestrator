@@ -70,6 +70,8 @@ export default function RootLayout() {
         <Stack.Screen name="learning" options={{ title: "Learning" }} />
         <Stack.Screen name="builds" options={{ title: "Builds" }} />
         <Stack.Screen name="phone" options={{ title: "Phone" }} />
+        <Stack.Screen name="mail" options={{ title: "Mail" }} />
+        <Stack.Screen name="shop" options={{ title: "Shopping" }} />
         <Stack.Screen name="agents" options={{ title: "Outside agents" }} />
         <Stack.Screen name="update" options={{ title: "Update this app" }} />
         <Stack.Screen name="t/[id]" options={{ title: "Conversation" }} />
