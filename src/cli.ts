@@ -14,9 +14,10 @@ import { Router } from "./brain/router.js";
 import { Cluster } from "./cluster/cluster.js";
 import { workspaceMap } from "./context/graphify.js";
 import { AssistantTasks } from "./integrations/assistant.js";
+import { WritingLessons } from "./integrations/writing.js";
 import { GmailReader, SEND_SCOPES } from "./integrations/gmail.js";
 import { MailDesk } from "./mail/desk.js";
-import { browserServer, desktopEnv, pickBrowser, profileDir, STORE_IDS, STORES, type StoreId } from "./shop/agent.js";
+import { browserServer, desktopEnv, isDelivery, pickBrowser, profileDir, STORE_IDS, STORES, type StoreId } from "./shop/agent.js";
 import { ShopDesk } from "./shop/desk.js";
 import { Memory } from "./memory/memory.js";
 import { openReplica } from "./shared/setup.js";
@@ -127,6 +128,8 @@ export function buildSystem(config: Config) {
     ? new AssistantTasks(store, { url: config.assistant.url, token: config.assistant.token, pollMinutes: config.assistant.pollMinutes })
     : undefined;
   addTerms(config.style.addressTerms);
+  // What the owner changes in drafts teaches the brain; only where the brain runs.
+  const writing = config.assistant.token ? new WritingLessons({ url: config.assistant.url, token: config.assistant.token }) : undefined;
   const drafter = new ReplyDrafter(
     store,
     new WaStore(store),
@@ -138,6 +141,8 @@ export function buildSystem(config: Config) {
       groups: config.whatsapp.draftGroups,
       provider: config.whatsapp.replyProvider,
       node: config.node.name,
+      writing: writing && (() => writing.for("whatsapp")),
+      learn: writing && ((o) => writing.report({ kind: "whatsapp", ...o })),
       // who they are, facts and open tasks with them, from the shared memory
       knowledge: replica ? (who) => personKnowledge(replica, who) : undefined,
       router: models,
@@ -266,6 +271,8 @@ export function buildSystem(config: Config) {
     think: async (prompt) => (await models.run("mail_write", { prompt, timeoutMs: 120_000 })).text,
     voice: () => drafter.book()?.owner.voice?.summary,
     knowledge: replica ? (name) => personKnowledge(replica, { name, chatId: "", isGroup: false }).join("\n") || undefined : undefined,
+    writing: writing && (() => writing.for("mail")),
+    learn: writing && ((o) => writing.report({ kind: "mail", ...o })),
     log: actions.log,
     notify: (p) => void notifier.notify(p),
     node: config.node.name,
@@ -465,6 +472,7 @@ async function cmdShop(config: Config, sub = "", store = "") {
   const args = browser === "firefox" ? ["-profile", profile, STORES[store as StoreId].home] : [`--user-data-dir=${profile}`, STORES[store as StoreId].home];
   spawn(exe ?? chrome, args, { detached: true, stdio: "ignore", env: { ...process.env, ...(await desktopEnv()) } }).unref();
   console.log(`Sign in to ${STORES[store as StoreId].name} in the window that opened, then close it. Jarvis never sees your password; it only reuses the sign-in.`);
+  if (isDelivery(store)) console.log("Set your delivery address there too, before closing it. Jarvis stops if none is set, and it never changes one.");
 }
 
 /** Connect, check, inspect or disconnect the Gmail reader. */

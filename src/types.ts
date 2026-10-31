@@ -793,7 +793,9 @@ export interface ShopRun {
   /** The name that store shows as signed in. */
   account?: string;
   /** Other sellers from a DuckDuckGo results page, for the owner to open. */
-  alternatives?: { name: string; url: string; price?: string }[];
+  alternatives?: { name: string; url: string; host?: string; price?: string }[];
+  /** The delivery address the store shows, on the food and quick stores. */
+  deliverTo?: string;
   /** The store's own pages, opened on the phone. */
   cartUrl: string;
   searchUrl: string;

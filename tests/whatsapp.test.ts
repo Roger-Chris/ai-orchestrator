@@ -507,3 +507,23 @@ describe("first contacts", () => {
     expect(poolPrompt(p).prompt).not.toContain("never written to");
   });
 });
+
+describe("what you really sent after a draft", () => {
+  it("is reported against the closest option, and a message on something else says nothing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "orc-wa-learn-"));
+    const store = new Store(join(dir, "t.db"));
+    const told: { draft: string; sent: string }[] = [];
+    const drafter = new ReplyDrafter(store, new WaStore(store), {} as any, { dataDir: dir, delaySeconds: 0, auto: false, groups: false, provider: "auto", node: "hub", learn: (o) => told.push(o) });
+    const open = (id: string) => store.db.prepare("INSERT INTO wa_drafts (id, chat_id, incoming, text, options, provider, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, "1@s.whatsapp.net", "their words", "yes da coming now", JSON.stringify([{ label: "No", text: "no da cant come today" }]), "claude", 1);
+    const mine = (id: string, text: string) => ({ id, chatId: "1@s.whatsapp.net", senderId: "me", fromMe: true, isGroup: false, text, ts: Date.now() / 1000 });
+    open("d1");
+    drafter.ingest([mine("m1", "no da cant come")]);
+    expect(told).toEqual([{ draft: "no da cant come today", sent: "no da cant come" }]);
+    open("d2");
+    drafter.ingest([mine("m2", "did you see the match")]);
+    expect(told).toHaveLength(1);
+    drafter.ingest([mine("m3", "no da cant come")]); // no open draft left
+    expect(told).toHaveLength(1);
+  });
+});
+

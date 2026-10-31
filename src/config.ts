@@ -328,6 +328,8 @@ const ConfigSchema = z.object({
       linkOnly: z.array(z.string()).default([]),
       /** Searched by "find X" but never carted, for stores the owner isn't signed in to: if best, the owner gets a link. */
       compareOnly: z.array(z.string()).default([]),
+      /** Sites the cart agent may open beyond each run's stores, if a store really sends it to one (its sign-in page lives elsewhere, say). */
+      allowHosts: z.array(z.string()).default([]),
     })
     .prefault({}),
   /** Your WhatsApp as a read-only linked device (`orc whatsapp link`). Nothing is ever sent. */

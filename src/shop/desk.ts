@@ -5,7 +5,10 @@ import type { PushPayload } from "../server/push.js";
 import type { Store } from "../store/db.js";
 import type { ShopRun } from "../types.js";
 import type { CartOutcome, StoreId } from "./agent.js";
-import { STORE_IDS, storeLink, STORES } from "./agent.js";
+import { isDelivery, STORE_IDS, storeLink, STORES } from "./agent.js";
+
+/** How the owner may say or spell a store, after dropping everything but letters. */
+const STORE_NAMES: Record<string, StoreId> = { amazonin: "amazon", swiggyinstamart: "instamart", swiggyfood: "swiggy", swizzy: "swiggy", swigy: "swiggy", zomoto: "zomato", blink: "blinkit", zeptonow: "zepto" };
 
 /**
  * Shopping, on the hub. Asking starts the browser agent on the device set for it; the phone is told
@@ -61,7 +64,8 @@ export class ShopDesk {
   /** Starts it and returns at once; `done` is for tests and anything that wants to wait. */
   start(i: { store?: string; request: string; by?: string }): { run: ShopRun; done: Promise<ShopRun> } {
     if (!i.store || /^(any|all|anywhere)$/i.test(i.store)) return this.find(i.request, i.by);
-    const store = i.store.toLowerCase().replace(/[^a-z]/g, "").replace(/^amazonin$/, "amazon").replace(/^swiggyinstamart$/, "instamart") as StoreId;
+    const said = i.store.toLowerCase().replace(/[^a-z]/g, "");
+    const store = (STORE_NAMES[said] ?? said) as StoreId;
     if (!STORE_IDS.includes(store)) throw new Error(`I don't shop on ${i.store} yet. Stores: ${STORE_IDS.join(", ")}`);
     const request = i.request.trim();
     if (request.length < 2) throw new Error("what should I look for?");
@@ -111,7 +115,7 @@ export class ShopDesk {
     let next: ShopRun;
     if (res.status === "done" && res.result.ok && res.result.data) {
       const c = res.result.data as CartOutcome;
-      next = { ...run, status: c.status, items: c.items, total: "total" in c ? c.total : undefined, note: "note" in c ? c.note : undefined, checked: c.checked, account: c.account, alternatives: c.alternatives };
+      next = { ...run, status: c.status, items: c.items, total: "total" in c ? c.total : undefined, note: "note" in c ? c.note : undefined, checked: c.checked, account: c.account, alternatives: c.alternatives, deliverTo: c.deliverTo };
       // A ready cart must say whose it is, or Go to checkout would open the wrong store.
       if (among && c.status === "ready" && !(c.store && among.includes(c.store))) next = { ...next, status: "failed", note: "The agent filled a cart but did not say which store. Look in your carts." };
       else if (c.status === "link" && !(c.store && this.d.compareOnly?.includes(c.store))) next = { ...next, status: "failed", note: "The agent stopped at a link for a store that should have got a cart." };
@@ -122,6 +126,8 @@ export class ShopDesk {
       const why = res.status === "done" ? res.result.output : res.status === "refused" ? res.error : "the device asked for approval, which a cart should not need";
       next = { ...run, status: "failed", note: why.slice(0, 300) };
     }
+    // A delivery cart is only ready if the owner can see where it would go.
+    if (next.status === "ready" && isDelivery(next.store) && !next.deliverTo) next = { ...next, status: "needs_you", note: `The cart is filled, but the agent could not read the delivery address. Check it in ${next.storeName} yourself.` };
     // A compare-only store it could not read may still be cheapest, so the owner gets its search.
     const unread = (next.checked ?? []).filter((k) => !k.found && this.d.compareOnly?.includes(k.store) && STORES[k.store as StoreId]);
     if (unread.length) next = { ...next, alternatives: [...(next.alternatives ?? []), ...unread.map((k) => ({ name: `${STORES[k.store as StoreId].name} (could not check)`, url: `${STORES[k.store as StoreId].search}${encodeURIComponent(run.request)}` }))] };

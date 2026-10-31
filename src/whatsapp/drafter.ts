@@ -8,6 +8,7 @@ import type { ProviderId, ReplyDraft, ReplyOption } from "../types.js";
 import { fitAddress, fixAddress } from "./address.js";
 import type { StyleBook } from "./learn.js";
 import { parseJson } from "./local.js";
+import { writingNote } from "../integrations/writing.js";
 import { buildPool, type ContextPool, poolPrompt } from "./pool.js";
 import { mimic } from "./spelling.js";
 import { spoken, type WaMessage, type WaStore } from "./store.js";
@@ -31,8 +32,20 @@ export interface DrafterOptions {
   node: string;
   /** What the shared memory knows about the person a reply is for (knowledge.ts); none when absent. */
   knowledge?: (who: { name: string; chatId: string; isGroup: boolean }) => string[];
+  /** How he wants replies written, from his edits to earlier drafts, and where to tell what he really sent. */
+  writing?: () => string[];
+  learn?: (o: { draft: string; sent: string }) => void;
   /** The model router (R2): picks the model and falls back. Without it, the fixed ORDER below. */
   router?: ModelRouter;
+}
+
+/** How much two messages share, 0 to 1, by their words. */
+export function nearness(a: string, b: string): number {
+  const words = (t: string) => new Set(t.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? []);
+  const x = words(a);
+  const y = words(b);
+  const both = [...x].filter((w) => y.has(w)).length;
+  return x.size + y.size ? both / (x.size + y.size - both) : 0;
 }
 
 /** Gemini last: its free tier is often busy; ChatGPT (codex) and Groq answer first. */
@@ -147,6 +160,7 @@ export class ReplyDrafter {
       const last = messages.filter((m) => m.chatId === chatId).reduce((a, b) => (b.ts > a.ts ? b : a));
       clearTimeout(this.timers.get(chatId));
       if (last.fromMe) {
+        this.learnFrom(chatId, last);
         this.retire(chatId, "sent");
         continue;
       }
@@ -160,6 +174,21 @@ export class ReplyDrafter {
       scheduled++;
     }
     return { saved, scheduled };
+  }
+
+  /** What he really sent, against the option of the open draft it is closest to. A message on something else says nothing. */
+  private learnFrom(chatId: string, mine: WaMessage) {
+    try {
+      const sent = (mine.text ?? "").trim();
+      if (!sent || !this.opts.learn) return;
+      const row = this.store.db.prepare("SELECT text, options FROM wa_drafts WHERE chat_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 1").get(chatId) as { text: string; options: string | null } | undefined;
+      if (!row) return;
+      const options = [row.text, ...((JSON.parse(row.options ?? "[]") as ReplyOption[]).map((o) => o.text))];
+      const best = options.map((text) => ({ text, near: nearness(text, sent) })).reduce((a, b) => (b.near > a.near ? b : a));
+      if (best.near >= 0.3) this.opts.learn({ draft: best.text, sent });
+    } catch {
+      /* learning must never get in the way of the messages */
+    }
   }
 
   private wanted(chatId: string, isGroup: boolean): boolean {
@@ -256,7 +285,9 @@ export class ReplyDrafter {
   }
 
   /** The first ready model (or the configured one) answers; usage is recorded per try. */
-  private async generate(system: string, prompt: string): Promise<{ provider: ProviderId; text: string }> {
+  private async generate(baseSystem: string, prompt: string): Promise<{ provider: ProviderId; text: string }> {
+    const note = writingNote(this.opts.writing?.() ?? []);
+    const system = note ? `${baseSystem}\n\n${note}` : baseSystem;
     if (this.opts.router) {
       // a pinned replyProvider stays the only one, as before; "auto" lets the router choose and fall back
       const r = await this.opts.router.run("whatsapp_draft", { system, prompt, timeoutMs: 120_000 }, { override: this.opts.provider, strict: this.opts.provider !== "auto" });

@@ -1,4 +1,5 @@
-import { mkdtempSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -6,8 +7,10 @@ import { ActionLog } from "../src/actions/log.js";
 import { rawMessage } from "../src/integrations/gmail.js";
 import { MailDesk, parseMail } from "../src/mail/desk.js";
 import { scopeProblem } from "../src/outside/mcp.js";
-import { cartPrompt, desktopVars, GUARD_SCRIPT, ORDER_WORDS, parseCart, SECRET_FIELD, storeLink } from "../src/shop/agent.js";
+import { allowedHosts, CART_CONTROL, cartPrompt, desktopVars, GUARD_SCRIPT, guardScript, ORDER_WORDS, PAY_PATH, parseCart, SECRET_FIELD, sellerLink, SHORT_ORDER, storeLink } from "../src/shop/agent.js";
 import { ShopDesk } from "../src/shop/desk.js";
+import { writingNote, WritingLessons } from "../src/integrations/writing.js";
+import { nearness } from "../src/whatsapp/drafter.js";
 import { Store } from "../src/store/db.js";
 
 const newStore = () => new Store(join(mkdtempSync(join(tmpdir(), "orc-mail-")), "t.db"));
@@ -121,12 +124,12 @@ describe("the cart agent's answer and walls", () => {
 
   it("other sellers from the web search need a name and an https address", () => {
     const c = parseCart('{"status":"not_found","items":[],"alternatives":[{"name":"Shop","url":"https://shop.example/r","price":"₹5"},{"name":"Bad","url":"javascript:alert(1)"},{"url":"https://x.example"}]}');
-    expect(c?.alternatives).toEqual([{ name: "Shop", url: "https://shop.example/r", price: "₹5" }]);
+    expect(c?.alternatives).toEqual([{ name: "Shop", url: "https://shop.example/r", host: "shop.example", price: "₹5" }]);
   });
 
   it("order and pay controls match, adding to a cart does not", () => {
-    for (const t of ["Buy Now", "Place your order", "Place Order", "Proceed to Buy", "Proceed to Pay", "Click to Pay", "Pay now", "Checkout", "Check out", "/checkout/start"]) expect(ORDER_WORDS.test(t), t).toBe(true);
-    for (const t of ["Add to Cart", "Go to Cart", "Search", "Add", "Pen, set of 10", "Payback points"]) expect(ORDER_WORDS.test(t), t).toBe(false);
+    for (const t of ["Buy Now", "Place your order", "Place Order", "Proceed to Buy", "Proceed to Pay", "Click to Pay", "Pay now", "Checkout", "Check out", "/checkout/start", "Pay ₹249", "Pay Rs. 1,249", "Order now", "Proceed", "Login to proceed", "Start afresh", "Replace cart", "Clear the cart"]) expect(ORDER_WORDS.test(t), t).toBe(true);
+    for (const t of ["Add to Cart", "Go to Cart", "Search", "Add", "Pen, set of 10", "Payback points", "View cart", "Add item", "Paytm"]) expect(ORDER_WORDS.test(t), t).toBe(false);
     for (const t of ["password", "ap_password", "enter otp", "cardNumber", "cc-number", "cvv", "upi id"]) expect(SECRET_FIELD.test(t), t).toBe(true);
     expect(SECRET_FIELD.test("twotabsearchtextbox")).toBe(false);
     expect(() => new Function(GUARD_SCRIPT)).not.toThrow();
@@ -140,6 +143,104 @@ describe("the cart agent's answer and walls", () => {
   it("outside agents can't drive the owner's store accounts", () => {
     const agent = { scopes: { devices: ["*"], folders: [], risk: "ask", memoryWrite: false } } as any;
     expect(scopeProblem(agent, "omen", "shop.cart", {})).toMatch(/owner/);
+  });
+});
+
+describe("learning from what was really sent", () => {
+  it("mail reports the words sent and uses what was learnt", async () => {
+    const told: any[] = [];
+    let prompt = "";
+    const desk = new MailDesk({ store: newStore(), node: "hub", gmail: { send: async () => "g1", recentSent: async () => [] } as any, think: async (p) => ((prompt = p), WRITTEN), writing: () => ["He ends with just his first name."], learn: (o) => told.push(o) });
+    const m = await desk.draft({ to: "a@b.co", about: "move it" });
+    expect(prompt).toContain("He ends with just his first name.");
+    await desk.send(m.id, { to: "a@b.co", subject: "Monday", body: "Monday ok? Roger" });
+    expect(told).toEqual([{ about: "move it", draft: m.body, sent: "Monday ok? Roger" }]);
+  });
+
+  it("a learning failure or a failed send doesn't reach the mail or teach anything", async () => {
+    let calls = 0;
+    const ok = new MailDesk({ store: newStore(), node: "hub", gmail: { send: async () => "g1", recentSent: async () => [] } as any, think: async () => WRITTEN, learn: () => { throw new Error("brain down"); } });
+    const a = await ok.draft({ to: "a@b.co", about: "x" });
+    expect((await ok.send(a.id, { to: "a@b.co", subject: "s", body: "b" })).status).toBe("sent");
+    const bad = new MailDesk({ store: newStore(), node: "hub", gmail: { send: async () => { throw new Error("down"); }, recentSent: async () => [] } as any, think: async () => WRITTEN, learn: () => calls++ });
+    const b = await bad.draft({ to: "a@b.co", about: "x" });
+    expect((await bad.send(b.id, { to: "a@b.co", subject: "s", body: "b" })).status).toBe("failed");
+    expect(calls).toBe(0);
+  });
+
+  it("lessons come back from the brain for the next draft, and a brain that is down costs nothing", async () => {
+    let at = 0;
+    const seen: string[] = [];
+    const brain = (async (url: string, init?: RequestInit) => {
+      seen.push(`${init?.method ?? "GET"} ${url}`);
+      return new Response(JSON.stringify({ lessons: ["short"] }));
+    }) as typeof fetch;
+    const w = new WritingLessons({ url: "http://brain/", token: "t", fetch: brain, now: () => at });
+    expect(w.for("mail")).toEqual([]);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(w.for("mail")).toEqual(["short"]);
+    expect(seen).toEqual(["GET http://brain/learn/writing?kind=mail"]);
+    at = 11 * 60_000;
+    w.for("mail");
+    expect(seen).toHaveLength(2);
+    w.report({ kind: "whatsapp", draft: "a", sent: "b" });
+    expect(seen[2]).toBe("POST http://brain/learn/drafts");
+    const down = new WritingLessons({ url: "http://brain", token: "t", fetch: (async () => { throw new Error("down"); }) as typeof fetch });
+    expect(down.for("mail")).toEqual([]);
+    expect(() => down.report({ kind: "mail", draft: "a", sent: "b" })).not.toThrow();
+    expect(writingNote([])).toBe("");
+    expect(nearness("ok da tomorrow", "ok da tmrw")).toBe(0.5);
+    expect(nearness("ok da", "where is the bus")).toBe(0);
+  });
+});
+
+describe("what the agent may open and press", () => {
+  const hook = (input: unknown, hosts = allowedHosts(["swiggy", "quartz"], ["login.example"], true), carts = ["https://www.swiggy.com/checkout"]) => {
+    const dir = mkdtempSync(join(tmpdir(), "shop-hook-"));
+    const policy = join(dir, "policy.json");
+    writeFileSync(policy, JSON.stringify({ hosts, carts, payPath: PAY_PATH }));
+    return spawnSync(process.execPath, ["src/shop/hook.mjs", policy], { input: typeof input === "string" ? input : JSON.stringify(input), encoding: "utf8" });
+  };
+  const go = (url: string) => hook({ tool_name: "mcp__browser__browser_navigate", tool_input: { url } }).status;
+
+  it("goes anywhere inside the run's stores, and nowhere else", () => {
+    for (const ok of ["https://www.swiggy.com/restaurants/x?q=checkout", "https://www.swiggy.com/checkout", "https://quartzcomponents.com/products/card-payment-reader", "https://shopify.com/30064246919/account/profile", "https://html.duckduckgo.com/html/?q=lm7805", "https://login.example/a"]) expect(go(ok), ok).toBe(0);
+    for (const bad of ["https://evil.example/?a=home", "https://swiggy.com.evil.example/", "https://evilswiggy.com/", "javascript:alert(1)", "file:///etc/passwd", "not a url", "https://duckduckgo.com/?q=x", "https://www.swiggy.com/payment", "https://quartzcomponents.com/checkouts/abc", "https://www.amazon.in/gp/buy/spc"]) expect(go(bad), bad).toBe(2);
+    expect(hook({ tool_name: "mcp__browser__browser_tabs", tool_input: { action: "new", url: "https://evil.example" } }).status).toBe(2);
+    expect(hook({ tool_name: "mcp__browser__browser_tabs", tool_input: { action: "list" } }).status).toBe(0);
+    expect(hook({ tool_name: "mcp__browser__browser_click", tool_input: { ref: "e1" } }).status).toBe(0);
+    expect(hook({ tool_name: "mcp__browser__browser_snapshot", tool_input: { filename: "x" } }).status).toBe(2);
+  });
+
+  it("refuses when it can't read what it was given", () => {
+    expect(hook("not json").status).toBe(2);
+  });
+
+  it("short pay labels stop, long ones and cart controls don't", () => {
+    for (const t of ["Pay", "₹499 Pay", "Pay · ₹499", "Pay INR 499", "Pay using UPI", "Pay on delivery", "Make Payment", "Continue to payment", "Use this payment method", "Confirm", "Buy", "Order", "Cash on Delivery"]) expect(SHORT_ORDER.test(t), t).toBe(true);
+    for (const t of ["Order Online", "Your Orders", "Paytm", "Payback points", "Add to cart", "Confirmed seller"]) expect(SHORT_ORDER.test(t), t).toBe(false);
+    for (const t of ["Add", "ADD", "Add to Cart", "+ Add", "View Cart", "Remove"]) expect(CART_CONTROL.test(t), t).toBe(true);
+    for (const t of ["Add address to proceed", "Pay", "Buy now"]) expect(CART_CONTROL.test(t), t).toBe(false);
+    expect(() => new Function(guardScript(["swiggy.com"]))).not.toThrow();
+  });
+
+  it("a seller's link shows its real site", () => {
+    expect(sellerLink("https://www.shop.example/r")).toEqual({ url: "https://www.shop.example/r", host: "shop.example" });
+    expect(sellerLink("https://duckduckgo.com/l/?uddg=https%3A%2F%2Fshop.example%2Fr&rut=1")?.host).toBe("shop.example");
+    for (const bad of ["http://shop.example", "https://amazon.in@evil.example/", "https://duckduckgo.com/y.js?ad=1", "javascript:alert(1)", "intent://x", 5]) expect(sellerLink(bad), String(bad)).toBeUndefined();
+  });
+});
+
+describe("food and quick delivery stores", () => {
+  it("their prompt holds the address and the cart; other stores' prompt doesn't mention them", () => {
+    const p = cartPrompt("blinkit", "milk");
+    expect(p).toMatch(/Never choose, type, detect or change/);
+    expect(p).toMatch(/Never empty or replace a cart/);
+    expect(p).toMatch(/Cart button/);
+    expect(cartPrompt("swiggy", "biryani")).toMatch(/one exception to never opening checkout/);
+    expect(cartPrompt("amazon", "pen")).not.toMatch(/deliverTo/);
+    expect(cartPrompt(["amazon", "zepto"], "pen")).toMatch(/On zepto, which deliver/);
+    expect(parseCart('{"status":"ready","store":"zomato","deliverTo":" Home, Chennai ","items":[{"name":"Dosa"}],"total":"₹120"}')).toMatchObject({ deliverTo: "Home, Chennai" });
   });
 });
 
@@ -180,6 +281,22 @@ describe("shopping", () => {
     expect(log.list().filter((e) => e.action === "shop.checkout")).toHaveLength(1);
     expect(desk.close(run.id, "ordered").status).toBe("ordered");
     expect(() => desk.checkout(run.id, "₹95")).toThrow(/not ready/);
+  });
+
+  it("a delivery cart shows its address, and without one it can't reach checkout", async () => {
+    const withAddress = make(cart({ ...READY, deliverTo: "Home, Chennai" }));
+    expect(await withAddress.desk.start({ store: "blinkit", request: "milk" }).done).toMatchObject({ status: "ready", deliverTo: "Home, Chennai" });
+    const without = make(cart(READY));
+    const { run, done } = without.desk.start({ store: "zomato", request: "dosa" });
+    expect(await done).toMatchObject({ status: "needs_you", total: "₹95" });
+    expect(() => without.desk.checkout(run.id, "₹95")).toThrow(/not ready/);
+    expect(await make(cart(READY)).desk.start({ store: "flipkart", request: "pen" }).done).toMatchObject({ status: "ready" });
+  });
+
+  it("knows the stores however they are said", () => {
+    const { desk } = make(cart(READY));
+    for (const [said, id] of [["Swizzy", "swiggy"], ["blink it", "blinkit"], ["Zomoto", "zomato"], ["Swiggy Instamart", "instamart"], ["Amazon.in", "amazon"]]) expect(desk.start({ store: said, request: "milk" }).run.store, said).toBe(id);
+    expect(() => desk.start({ store: "dunzo", request: "milk" })).toThrow(/don't shop on/);
   });
 
   it("a cart that is not ready can't go to checkout", async () => {

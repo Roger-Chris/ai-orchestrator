@@ -43,7 +43,7 @@ export default function Shop() {
     }
   };
   const checkout = (r: ShopRun) =>
-    Alert.alert(`Go to checkout: ${r.total}?`, `${r.items.map((i) => `${i.qty} x ${i.name}`).join("\n")}\n\nThe store opens. You place the order and pay there yourself.`, [
+    Alert.alert(`Go to checkout: ${r.total}?`, `${r.items.map((i) => `${i.qty} x ${i.name}`).join("\n")}${r.deliverTo ? `\n\nDelivers to ${r.deliverTo}` : ""}\n\nThe store opens. You place the order and pay there yourself.`, [
       { text: "Not yet", style: "cancel" },
       { text: "Open the store", onPress: () => void run(r, async () => { await Api.shopCheckout(r.id, r.total ?? ""); await Linking.openURL(r.cartUrl); }) },
     ]);
@@ -65,12 +65,13 @@ export default function Shop() {
           ))}
           {!!r.total && <Text style={{ color: c.text, fontSize: 18, fontWeight: "600" }}>Total {r.total}</Text>}
           {!!r.account && <Muted small>In the cart of {r.account}</Muted>}
+          {!!r.deliverTo && <Text style={{ color: c.text }}>Delivers to {r.deliverTo}</Text>}
           {!!r.note && <Muted small>{r.note}</Muted>}
           {r.checked?.map((k) => (
             <Muted key={k.store} small>{k.store}: {k.found ? `has it${k.price ? ` at ${k.price}` : ""}` : "not found"}{k.note ? ` (${k.note})` : ""}</Muted>
           ))}
           {r.alternatives?.map((a) => (
-            <Text key={a.url} style={{ color: c.accent }} onPress={() => void Linking.openURL(a.url)}>Also at {a.name}{a.price ? `: ${a.price}` : ""} →</Text>
+            <Text key={a.url} style={{ color: c.accent }} onPress={() => void Linking.openURL(a.url)}>Also at {a.name}{a.price ? `: ${a.price}` : ""}{a.host ? ` (${a.host}, not checked)` : ""} →</Text>
           ))}
           <Row>
             {(r.status === "ready" || r.status === "checkout") && <Button kind="primary" small title="Go to checkout" busy={busy === r.id} onPress={() => checkout(r)} />}

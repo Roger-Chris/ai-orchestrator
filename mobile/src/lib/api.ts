@@ -253,7 +253,7 @@ export interface AssistantReply {
 export type LessonStatus = "proposed" | "trial" | "active" | "off";
 export interface Lesson {
   id: number;
-  kind: "preference" | "fact" | "skill" | "rule" | "voice";
+  kind: "preference" | "fact" | "skill" | "rule" | "voice" | "writing";
   text: string;
   when: string;
   status: LessonStatus;
@@ -266,7 +266,7 @@ export interface Lesson {
 export interface LearnRun {
   id: number;
   at: string;
-  kind: "reflect" | "evaluate";
+  kind: "reflect" | "evaluate" | "review" | "practice";
   ok: boolean;
   passed: number;
   total: number;
@@ -280,6 +280,12 @@ export interface LearnStatus {
   bad: number;
   waiting: number;
   cases: number;
+  /** Absent from an older brain. */
+  examples?: number;
+  drafts?: { kept: number; edited: number };
+  reviewed?: number;
+  /** The coach's average on practice, oldest first. */
+  practice_scores?: number[];
   last_eval?: { at: string; passed: number; total: number } | null;
   runs: LearnRun[];
 }

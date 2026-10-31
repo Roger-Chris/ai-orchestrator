@@ -17,7 +17,7 @@ const GROUPS: { status: LessonStatus; title: string; hint: string }[] = [
   { status: "active", title: "In use", hint: "Taught by you, kept by you, or passed the evaluation." },
   { status: "off", title: "Off", hint: "Turned off by you, by too many 'Not right', or rolled back." },
 ];
-const KIND: Record<Lesson["kind"], string> = { preference: "preference", fact: "fact", skill: "how to", rule: "rule", voice: "voice" };
+const KIND: Record<Lesson["kind"], string> = { preference: "preference", fact: "fact", skill: "how to", rule: "rule", voice: "voice", writing: "writing" };
 
 export default function LearningScreen() {
   const c = useColors();
@@ -78,10 +78,14 @@ export default function LearningScreen() {
     try {
       const r = await Api.learnNow();
       const rf = (r.reflect ?? {}) as { added?: string[]; episodes?: number; note?: string };
+      const rv = (r.review ?? {}) as { episodes?: number };
+      const pr = (r.practice ?? {}) as { drills?: number; average?: number | null };
       const ev = r.evaluate as { passed?: number; total?: number; promoted?: number[]; rolled_back?: number[] } | undefined;
       setRan(
         [
+          rv.episodes ? `Reviewed ${rv.episodes} answers.` : "",
           rf.note ?? `Read ${rf.episodes ?? 0} answers, learnt ${rf.added?.length ?? 0} new thing(s).`,
+          pr.drills ? `Practised ${pr.drills}${pr.average != null ? `, scoring ${pr.average}/10` : ""}.` : "",
           ev && `Evaluation ${ev.passed}/${ev.total}: ${ev.rolled_back ? `rolled back ${ev.rolled_back.length}` : `kept ${ev.promoted?.length ?? 0}`}.`,
         ]
           .filter(Boolean)
@@ -112,6 +116,11 @@ export default function LearningScreen() {
             {`${st.episodes} answers so far: ${st.good} good, ${st.bad} not right${st.waiting ? `, ${st.waiting} to learn from tonight` : ""}. ` +
               `${st.cases} check${st.cases === 1 ? "" : "s"} made from mistakes.` +
               (st.last_eval ? ` Last evaluation: ${st.last_eval.passed}/${st.last_eval.total} passed.` : "")}
+          </Muted>
+          <Muted>
+            {`It reviewed ${st.reviewed ?? 0} answers itself and keeps ${st.examples ?? 0} as examples.` +
+              (st.practice_scores?.length ? ` Practice scores out of 10, oldest first: ${st.practice_scores.join(", ")}.` : " No practice yet.") +
+              (st.drafts && st.drafts.kept + st.drafts.edited ? ` Drafts you sent: ${st.drafts.kept} as written, ${st.drafts.edited} changed.` : "")}
           </Muted>
           {!st.enabled && <Text style={{ color: c.warn, marginTop: 6 }}>Learning is off on the brain (LEARN_ENABLED).</Text>}
           <View style={{ flexDirection: "row", gap: 16, alignItems: "center", marginTop: 10 }}>
@@ -178,7 +187,7 @@ export default function LearningScreen() {
           <Text style={h2}>Recent runs</Text>
           {st.runs.map((r) => (
             <Muted key={r.id} small>
-              {`${new Date(r.at).toLocaleString()} · ${r.kind === "reflect" ? "reflection" : `evaluation ${r.passed}/${r.total}`}${r.ok ? "" : " · did not finish or rolled back"}`}
+              {`${new Date(r.at).toLocaleString()} · ${r.kind === "evaluate" ? `evaluation ${r.passed}/${r.total}` : r.kind === "practice" ? `practice ${r.passed}/${r.total} sharp` : r.kind === "review" ? "self-review" : "reflection"}${r.ok ? "" : " · did not finish or rolled back"}`}
             </Muted>
           ))}
         </Card>
