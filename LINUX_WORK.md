@@ -18,7 +18,9 @@ What the session on the Linux hub (`roger-all-series`, 100.104.185.17) is doing,
 
 The link now runs on Linux as its own service (`orchestrator-whatsapp`), so new messages reach the hub with the laptop off. It is a new linked device with its own QR scan: the laptop's sign-in is not copied. Live voice notes go to Groq's Whisper and live photos to Gemini (`whatsapp.media: online`); history's voice notes are not downloaded on Linux.
 
-On the laptop, once the owner says Linux is receiving messages:
+**Live since 31 Oct 2026, 17:58 IST: the owner scanned the QR and Linux is receiving messages, so do the steps below now.** A real text, voice note and photo arrived and a draft was written, on the first link in a terminal. The service then took over and connected; no new message has been checked through the service itself yet. History came with the link: the hub went from 4,848 messages (30 Oct backup) to 30,448. A photo's description took a minute or two (cause not found), against the link's 3-minute hold.
+
+On the laptop:
 1. `git pull` and restart the orchestrator.
 2. Stop and disable the scheduled task `Orchestrator WhatsApp link`. Keep `data\whatsapp\auth` and all messages: nothing is deleted. The owner removes the old device on the phone (Linked devices).
 3. Leave `whatsapp.hub` set. `orc style learn` now pulls the hub's new messages first (`orc style pull` does only that), then run `orc style graph` and `orc style push` as before. Learning, the graph and the GPU stay on the laptop.
@@ -39,7 +41,8 @@ Linux has an older `data/style/stylebook.json` (29 Oct) and no people graph. The
 What each thing does without the laptop:
 
 - Works once the push is done: reply suggestions for WhatsApp notifications on the phone (`/api/whatsapp/suggest`), written on Linux from the style book and the messages it holds.
-- Stops: the WhatsApp link, Whisper and photo descriptions run only on the laptop, so while it is off no new messages reach Linux. Drafts on Home, the chat history here and Work updates wait for it, and suggestions rely on what the phone sees.
+- Works since the link moved: new messages, voice notes and photos reach Linux and drafts are written with the laptop off.
+- Waits for the laptop: `orc style learn` (the GPU work) and refreshing the book and graph.
 
 ## The goal
 
