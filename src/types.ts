@@ -706,6 +706,10 @@ export interface ShopRun {
   items: ShopItem[];
   total?: string;
   note?: string;
+  /** Searching every store: what each one had. The run's store is the one whose cart was filled. */
+  checked?: { store: string; found: boolean; price?: string; note?: string }[];
+  /** The name that store shows as signed in. */
+  account?: string;
   /** The store's own pages, opened on the phone. */
   cartUrl: string;
   searchUrl: string;

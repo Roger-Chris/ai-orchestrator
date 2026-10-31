@@ -12,7 +12,7 @@ export function mountShop(app: Hono, d: { shop?: ShopDesk }) {
     if (!d.shop) return off(c);
     const b = (await c.req.json().catch(() => ({}))) as { store?: string; request?: string; by?: string };
     try {
-      return c.json(d.shop.start({ store: String(b.store ?? ""), request: String(b.request ?? ""), by: b.by }).run);
+      return c.json(d.shop.start({ store: b.store || undefined, request: String(b.request ?? ""), by: b.by }).run);
     } catch (e) {
       return c.json({ error: (e as Error).message }, 400);
     }

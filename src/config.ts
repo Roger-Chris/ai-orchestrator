@@ -317,7 +317,9 @@ const ConfigSchema = z.object({
       command: z.string().default("claude"),
       model: z.string().default("sonnet"),
       headless: z.boolean().default(false),
-      timeoutMinutes: z.number().min(1).max(30).default(10),
+      timeoutMinutes: z.number().min(1).max(30).default(20),
+      /** Stores searched when the owner names none. */
+      findIn: z.array(z.string()).default(["robu", "robocraze", "quartz", "amazon", "flipkart"]),
       /** Stores that only get a search link on the phone, never the agent. */
       linkOnly: z.array(z.string()).default([]),
     })

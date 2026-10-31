@@ -156,6 +156,25 @@ describe("shopping", () => {
     expect(() => desk.checkout(run.id, "")).toThrow(/not ready/);
   });
 
+  it("with no store named it searches them all and says whose cart it went into", async () => {
+    let asked: any;
+    const act = async (_n: unknown, req: any) => ((asked = req.args), { status: "done", node: "omen", action: "shop.cart", result: { ok: true, output: "", data: { ...READY, store: "robu", account: "Roger", checked: [{ store: "robu", found: true, price: "₹95" }, { store: "quartz", found: false }] } } }) as any;
+    const store = newStore();
+    const desk = new ShopDesk({ store, act, logNode: "hub", linkOnly: ["flipkart"], findIn: ["robu", "quartz", "flipkart", "nonsense"] });
+    const r = await desk.start({ request: "esp32" }).done;
+    expect(asked.store).toEqual(["robu", "quartz"]);
+    expect(r).toMatchObject({ status: "ready", store: "robu", storeName: "Robu.in", cartUrl: "https://robu.in/cart/", account: "Roger" });
+    expect(r.checked).toHaveLength(2);
+  });
+
+  it("a ready cart that doesn't say which store can't reach checkout", async () => {
+    const store = newStore();
+    const desk = new ShopDesk({ store, act: cart(READY), logNode: "hub", linkOnly: [], findIn: ["robu"] });
+    const { run, done } = desk.start({ store: "any", request: "esp32" });
+    expect((await done).status).toBe("failed");
+    expect(() => desk.checkout(run.id, "₹95")).toThrow(/not ready/);
+  });
+
   it("link-only stores never start the agent", async () => {
     let called = false;
     const { desk } = make(async () => ((called = true), {}), ["amazon"]);

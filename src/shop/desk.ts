@@ -23,6 +23,8 @@ export interface ShopDeskDeps {
   logNode: string;
   /** Stores that only get a link (config shopping.linkOnly). */
   linkOnly: string[];
+  /** Stores searched when none is named (config shopping.findIn). */
+  findIn?: string[];
   now?: () => number;
 }
 
@@ -55,7 +57,8 @@ export class ShopDesk {
   }
 
   /** Starts it and returns at once; `done` is for tests and anything that wants to wait. */
-  start(i: { store: string; request: string; by?: string }): { run: ShopRun; done: Promise<ShopRun> } {
+  start(i: { store?: string; request: string; by?: string }): { run: ShopRun; done: Promise<ShopRun> } {
+    if (!i.store || /^(any|all|anywhere)$/i.test(i.store)) return this.find(i.request, i.by);
     const store = i.store.toLowerCase().replace(/[^a-z]/g, "").replace(/^amazonin$/, "amazon").replace(/^swiggyinstamart$/, "instamart") as StoreId;
     if (!STORE_IDS.includes(store)) throw new Error(`I don't shop on ${i.store} yet. Stores: ${STORE_IDS.join(", ")}`);
     const request = i.request.trim();
@@ -87,14 +90,29 @@ export class ShopDesk {
     return { run, done };
   }
 
-  private async work(run: ShopRun): Promise<ShopRun> {
+  /** No store named: search them all; the answer says which store's cart it went into. */
+  private find(request: string, by?: string): { run: ShopRun; done: Promise<ShopRun> } {
+    const words = request.trim();
+    if (words.length < 2) throw new Error("what should I look for?");
+    const stores = (this.d.findIn ?? []).filter((s) => STORE_IDS.includes(s as StoreId) && !this.d.linkOnly.includes(s)) as StoreId[];
+    if (!stores.length) throw new Error("no stores to search (config shopping.findIn)");
+    const run = this.save({ id: `s${randomBytes(4).toString("hex")}`, store: "any", storeName: `${stores.length} stores`, request: words.slice(0, 500), by, node: this.d.node, status: "working", items: [], cartUrl: STORES[stores[0]].cart, searchUrl: `${STORES[stores[0]].search}${encodeURIComponent(words)}`, createdAt: this.now, updatedAt: this.now });
+    const done = this.queue.then(() => this.work(run, stores));
+    this.queue = done.catch(() => undefined);
+    return { run, done };
+  }
+
+  private async work(run: ShopRun, among?: StoreId[]): Promise<ShopRun> {
     const res = await this.d
-      .act(this.d.node, { action: "shop.cart", args: { store: run.store, request: run.request } }, run.by ?? "owner")
+      .act(this.d.node, { action: "shop.cart", args: { store: among ?? run.store, request: run.request } }, run.by ?? "owner")
       .catch((e): ActResponse => ({ status: "refused", node: this.d.node ?? "", action: "shop.cart", error: (e as Error).message }));
     let next: ShopRun;
     if (res.status === "done" && res.result.ok && res.result.data) {
       const c = res.result.data as CartOutcome;
-      next = { ...run, status: c.status, items: c.items, total: "total" in c ? c.total : undefined, note: "note" in c ? c.note : undefined };
+      next = { ...run, status: c.status, items: c.items, total: "total" in c ? c.total : undefined, note: "note" in c ? c.note : undefined, checked: c.checked, account: c.account };
+      // A ready cart must say whose it is, or Go to checkout would open the wrong store.
+      if (among && c.status === "ready" && !(c.store && among.includes(c.store))) next = { ...next, status: "failed", note: "The agent filled a cart but did not say which store. Look in your carts." };
+      else if (c.store && STORES[c.store]) next = { ...next, store: c.store, storeName: STORES[c.store].name, cartUrl: STORES[c.store].cart, searchUrl: `${STORES[c.store].search}${encodeURIComponent(run.request)}` };
     } else {
       const why = res.status === "done" ? res.result.output : res.status === "refused" ? res.error : "the device asked for approval, which a cart should not need";
       next = { ...run, status: "failed", note: why.slice(0, 300) };

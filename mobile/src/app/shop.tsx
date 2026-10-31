@@ -64,7 +64,11 @@ export default function Shop() {
             <Text key={n} style={{ color: c.text }}>{i.qty} x {i.name}{i.price ? `  ${i.price}` : ""}</Text>
           ))}
           {!!r.total && <Text style={{ color: c.text, fontSize: 18, fontWeight: "600" }}>Total {r.total}</Text>}
+          {!!r.account && <Muted small>In the cart of {r.account}</Muted>}
           {!!r.note && <Muted small>{r.note}</Muted>}
+          {r.checked?.map((k) => (
+            <Muted key={k.store} small>{k.store}: {k.found ? `has it${k.price ? ` at ${k.price}` : ""}` : "not found"}{k.note ? ` (${k.note})` : ""}</Muted>
+          ))}
           <Row>
             {(r.status === "ready" || r.status === "checkout") && <Button kind="primary" small title="Go to checkout" busy={busy === r.id} onPress={() => checkout(r)} />}
             {r.status === "checkout" && <Button small title="I ordered it" onPress={() => void run(r, () => Api.shopOrdered(r.id))} />}
