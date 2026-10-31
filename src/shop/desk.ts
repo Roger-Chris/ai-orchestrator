@@ -122,6 +122,9 @@ export class ShopDesk {
       const why = res.status === "done" ? res.result.output : res.status === "refused" ? res.error : "the device asked for approval, which a cart should not need";
       next = { ...run, status: "failed", note: why.slice(0, 300) };
     }
+    // A compare-only store it could not read may still be cheapest, so the owner gets its search.
+    const unread = (next.checked ?? []).filter((k) => !k.found && this.d.compareOnly?.includes(k.store) && STORES[k.store as StoreId]);
+    if (unread.length) next = { ...next, alternatives: [...(next.alternatives ?? []), ...unread.map((k) => ({ name: `${STORES[k.store as StoreId].name} (could not check)`, url: `${STORES[k.store as StoreId].search}${encodeURIComponent(run.request)}` }))] };
     next = this.save(next);
     const s = next.status;
     this.d.notify?.({

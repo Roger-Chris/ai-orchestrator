@@ -1,3 +1,4 @@
+import { sendWake } from "../cluster/wake.js";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { randomUUID, timingSafeEqual } from "node:crypto";
@@ -263,6 +264,12 @@ export function createApp(d: AppDeps) {
     return c.json({ ok: true });
   });
   app.get("/api/nodes", async (c) => c.json({ self: await d.cluster.localInfo(), peers: d.cluster.list() }));
+  app.post("/api/nodes/:name/wake", async (c) => {
+    const mac = d.config.cluster.wake[c.req.param("name")];
+    if (!mac) return c.json({ error: `no MAC for ${c.req.param("name")} (config cluster.wake)` }, 404);
+    await sendWake(mac);
+    return c.json({ sent: true });
+  });
   app.post("/api/nodes/refresh", async (c) => {
     await d.cluster.refresh();
     return c.json({ self: await d.cluster.localInfo(), peers: d.cluster.list() });

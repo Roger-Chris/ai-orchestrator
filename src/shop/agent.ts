@@ -23,6 +23,19 @@ export const STORES = {
   robocraze: { name: "Robocraze", home: "https://robocraze.com", cart: "https://robocraze.com/cart", search: "https://robocraze.com/search?q=" },
   quartz: { name: "Quartz Components", home: "https://quartzcomponents.com", cart: "https://quartzcomponents.com/cart", search: "https://quartzcomponents.com/search?q=" },
 } as const;
+
+/** Pages too big to read whole, and where each signed-in store shows the account's name. Checked on the live sites, Oct 2026. */
+const READ_HINTS: Partial<Record<keyof typeof STORES, string>> = {
+  amazon: 'read one result at a time: browser_snapshot with target [data-component-type="s-search-result"][data-index="N"], N from 2 to 12, until you have read at least 4 that are not sponsored',
+  flipkart: 'read one product link at a time: browser_snapshot with target a[href*="/p/itm"] >> nth=N, N from 0 to 8, reading at least 4',
+};
+const ACCOUNT_PAGES: Partial<Record<keyof typeof STORES, string>> = {
+  amazon: "https://www.amazon.in/gp/css/homepage.html",
+  flipkart: "https://www.flipkart.com/account/",
+  robocraze: "https://account.robocraze.com/profile",
+  quartz: "https://shopify.com/30064246919/account/profile",
+};
+
 export type StoreId = keyof typeof STORES;
 export const STORE_IDS = Object.keys(STORES) as [StoreId, ...StoreId[]];
 
@@ -100,11 +113,12 @@ export type CartOutcome = Where &
 export function cartPrompt(where: StoreId | StoreId[], request: string, compareOnly: StoreId[] = []): string {
   const stores = Array.isArray(where) ? where : [where];
   const s = STORES[stores[0]];
-  const list = stores.map((id) => `- ${id}: ${STORES[id].name}, search at ${STORES[id].search}<words>, cart at ${STORES[id].cart}`).join("\n");
+  const list = stores.map((id) => `- ${id}: ${STORES[id].name}, search at ${STORES[id].search}<words>, cart at ${STORES[id].cart}${READ_HINTS[id] ? `; ${READ_HINTS[id]}` : ""}`).join("\n");
+  const accounts = stores.filter((id) => ACCOUNT_PAGES[id]).map((id) => `${id}: ${ACCOUNT_PAGES[id]}`).join(", ");
   const task = Array.isArray(where)
     ? [
         `Using the browser tools only: find what is asked for below. Search every one of these stores for it, using a short search, one store after another, spending little time on each:\n${list}`,
-        "Then choose ONE store: the right item first, in stock, then the lowest price. Add it to the cart on that store only, open that store's cart, read it, and stop. Never add it at a second store.",
+        "Then choose ONE store: the right item first, in stock, then the lowest price for what was asked. If pack sizes differ, compare the price per piece and give it in the note, unless the owner asked for a set quantity. Add it to the cart on that store only, open that store's cart, read it, and stop. Never add it at a second store.",
         `Last, for other sellers: open https://html.duckduckgo.com/html/?q=<the item>+buy+online+india once. This one results page is the only exception to staying on the stores' sites. Only read it and open no result. List up to 3 sellers that are not in the list above in "alternatives" (name, the result's address, the price if shown). They never get a cart and don't change which store you choose. If it asks for a robot check, leave "alternatives" empty and say so in the note.`,
         ...(compareOnly.length ? [`Compare only, never add to their carts: ${compareOnly.join(", ")}. If the best choice is one of these, add nothing at any store and report status "link" with that store, the item and its price, and "url" set to the product page's address.`] : []),
       ]
@@ -122,7 +136,8 @@ export function cartPrompt(where: StoreId | StoreId[], request: string, compareO
     "",
     "Your last message must be only this JSON, with the items and the total exactly as the cart page shows them:",
     '{"status":"ready|needs_you|not_found|blocked|link","store":"<the store id whose cart this is>","account":"<the name the store shows you are signed in as, or empty>","checked":[{"store":"<store id>","found":true,"price":"₹499","note":"out of stock, or empty"}],"items":[{"name":"...","qty":1,"price":"₹499"}],"total":"₹499","url":"","alternatives":[{"name":"...","url":"https://...","price":"₹499"}],"note":"one short line, or empty"}',
-    '"blocked" means the site refused the browser (robot check, access denied). "ready" only when you read the item\'s name and the total on the cart page. List every store in "checked"; if one store needs you or blocks you, note it there and carry on with the others. Read each store\'s results before judging it: "found": false only when you read them and the item is not there. If you did not read them, say "not checked" in its note. Pages can be too big to read whole, so read results with browser_find and a narrow regex for the item (a word from its exact name, like /10k.*ohm/i), and browser_snapshot with a small "depth" or a target; if a result is still too big, narrow it further. A store you cannot read is noted as "not checked", and then you carry on: never stop before trying every store. Look past sponsored results. Fill "account" from the name in the store\'s header, on the store whose cart you used.',
+    '"blocked" means the site refused the browser (robot check, access denied). "ready" only when you read the item\'s name and the total on the cart page. List every store in "checked"; if one store needs you or blocks you, note it there and carry on with the others. Read each store\'s results before judging it: "found": false only when you read them and the item is not there. If you did not read them, say "not checked" in its note. Pages can be too big to read whole, so read results with browser_find and a narrow regex for the item (a word from its exact name, like /10k.*ohm/i), and browser_snapshot with a small "depth" or a target; if a result is still too big, narrow it further. A store you cannot read is noted as "not checked", and then you carry on: never stop before trying every store. Look past sponsored results.',
+    `Fill "account" with the name on the account page of the store whose cart you used, opened once after reading the cart${accounts ? ` (${accounts})` : ""}. Only read that page; it is the one other page you may open. If it asks for a sign-in, leave "account" empty and say so in the note.`,
   ].join("\n");
 }
 

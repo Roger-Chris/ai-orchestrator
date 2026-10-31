@@ -452,6 +452,7 @@ export const Api = {
   mailDiscard: (id: string) => api<MailDraft>(`/api/mail/${id}/discard`, { body: {} }),
   // ---- carts Jarvis filled: you order in the store
   shopRuns: () => api<ShopRun[]>("/api/shop"),
+  wakeNode: (name: string) => api<{ sent: boolean }>(`/api/nodes/${encodeURIComponent(name)}/wake`, { body: {} }),
   shopRun: (id: string) => api<ShopRun>(`/api/shop/${id}`),
   shopCheckout: (id: string, total: string) => api<ShopRun>(`/api/shop/${id}/checkout`, { body: { total } }),
   shopOrdered: (id: string) => api<ShopRun>(`/api/shop/${id}/ordered`, { body: {} }),

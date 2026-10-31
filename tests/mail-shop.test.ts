@@ -112,6 +112,13 @@ describe("the cart agent's answer and walls", () => {
     for (const bad of ["https://robu.in.evil.com/p", "http://robu.in/p", "javascript:alert(1)", "https://evilrobu.in/p", undefined]) expect(storeLink("robu", bad), String(bad)).toBeUndefined();
   });
 
+  it("tells the agent how to read big stores and where the account name is", () => {
+    const p = cartPrompt(["amazon", "quartz"], "resistor");
+    expect(p).toMatch(/s-search-result/);
+    expect(p).toMatch(/gp\/css\/homepage/);
+    expect(p).toMatch(/shopify\.com\/30064246919/);
+  });
+
   it("other sellers from the web search need a name and an https address", () => {
     const c = parseCart('{"status":"not_found","items":[],"alternatives":[{"name":"Shop","url":"https://shop.example/r","price":"₹5"},{"name":"Bad","url":"javascript:alert(1)"},{"url":"https://x.example"}]}');
     expect(c?.alternatives).toEqual([{ name: "Shop", url: "https://shop.example/r", price: "₹5" }]);
@@ -145,6 +152,14 @@ describe("shopping", () => {
     return { desk: new ShopDesk({ store, act, log, node: "omen", logNode: "hub", linkOnly, notify: (p) => notes.push(p) }), log, notes, store };
   };
   const READY = { status: "ready", items: [{ name: "Pen", qty: 1, price: "₹95" }], total: "₹95" };
+
+  it("a compare-only store it could not read comes back as a search link", async () => {
+    const store = newStore();
+    const act = cart({ ...READY, store: "quartz", checked: [{ store: "robu", found: false, note: "robot check" }, { store: "quartz", found: true }] });
+    const desk = new ShopDesk({ store, act, logNode: "hub", linkOnly: [], compareOnly: ["robu"], findIn: ["robu", "quartz"] });
+    const r = await desk.start({ request: "10k resistor" }).done;
+    expect(r.alternatives).toEqual([{ name: "Robu.in (could not check)", url: "https://robu.in/?post_type=product&s=10k%20resistor" }]);
+  });
 
   it("stops at the cart and tells the phone the items and total", async () => {
     const { desk, notes } = make(cart(READY));
@@ -223,5 +238,16 @@ describe("shopping", () => {
     const { run } = desk.start({ store: "zepto", request: "milk" });
     const again = new ShopDesk({ store, act: (async () => ({})) as any, logNode: "hub", linkOnly: [] });
     expect(again.get(run.id)).toMatchObject({ status: "failed" });
+  });
+});
+
+describe("wake on LAN", () => {
+  it("builds the magic packet and refuses a bad address", async () => {
+    const { magicPacket } = await import("../src/cluster/wake.js");
+    const p = magicPacket("e6:65:86:b8:47:6f");
+    expect(p.length).toBe(102);
+    expect(p.subarray(0, 6).toString("hex")).toBe("ffffffffffff");
+    expect(p.subarray(96).toString("hex")).toBe("e66586b8476f");
+    expect(() => magicPacket("nope")).toThrow(/MAC/);
   });
 });

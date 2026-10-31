@@ -70,5 +70,4 @@ Seen from Linux: Tailscale answers, but ports 22, 3389 and 4317 are closed (445 
 
 ## Not built yet
 
-- Whisper and photo descriptions on request from Linux (only the laptop's WhatsApp link uses them).
-- Waking a sleeping laptop.
+- Nothing listed for now. Voice notes and photos work on Linux with `whatsapp.media: online`; waking the laptop is built (`cluster.wake`) but not yet tried on a sleeping laptop.

@@ -466,6 +466,8 @@ const ConfigSchema = z.object({
       pollSeconds: z.number().default(20),
       /** Score bonus for running on this device (avoids network hops when equal). */
       localBias: z.number().default(0.5),
+      /** Device name to its network card's MAC, for Wake-on-LAN. */
+      wake: z.record(z.string(), z.string()).default({}),
     })
     .prefault({}),
 });

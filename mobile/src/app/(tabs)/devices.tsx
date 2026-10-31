@@ -55,6 +55,18 @@ export default function Devices() {
   }, []);
   useFocusEffect(useCallback(() => void load(), [load]));
 
+  const wake = async (node: string) => {
+    setBusy(`${node}:wake`);
+    setNote("");
+    try {
+      await Api.wakeNode(node);
+      setNote(`Wake sent to ${node}. If it comes online, it shows here within a minute.`);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(undefined);
+    }
+  };
   const act = async (node: string, action: string, label: string) => {
     setBusy(`${node}:${action}`);
     setNote("");
@@ -157,6 +169,11 @@ export default function Devices() {
                 <Muted key={p.id} small>{`${LABEL[p.id] ?? p.id}: ${toolState(c, p).word}${!p.ready && p.detail && toolState(c, p).word !== p.detail ? `. ${p.detail}` : ""}`}</Muted>
               ))}
 
+            {!up && (
+              <Row>
+                <Button small title="Wake" busy={busy === `${n.name}:wake`} onPress={() => void wake(n.name)} />
+              </Row>
+            )}
             {up && n.actions !== false && (
               <Row>
                 <Button small title="Screenshot" busy={busy === `${n.name}:screen.shot`} onPress={() => void act(n.name, "screen.shot", "Screenshot")} />
