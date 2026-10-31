@@ -105,7 +105,7 @@ export function cartPrompt(where: StoreId | StoreId[], request: string): string 
     "",
     "Your last message must be only this JSON, with the items and the total exactly as the cart page shows them:",
     '{"status":"ready|needs_you|not_found|blocked","store":"<the store id whose cart this is>","account":"<the name the store shows you are signed in as, or empty>","checked":[{"store":"<store id>","found":true,"price":"₹499","note":"out of stock, or empty"}],"items":[{"name":"...","qty":1,"price":"₹499"}],"total":"₹499","note":"one short line, or empty"}',
-    '"blocked" means the site refused the browser (robot check, access denied). "ready" only when you saw the item in the cart page. List every store you looked at in "checked"; if one store needs you or blocks you, note it there and carry on with the others.',
+    '"blocked" means the site refused the browser (robot check, access denied). "ready" only when you read the item\'s name and the total on the cart page. List every store in "checked"; if one store needs you or blocks you, note it there and carry on with the others. Read each store\'s results before judging it: "found": false only when you read them and the item is not there. If you did not read them, say "not checked" in its note. Look past sponsored results. Fill "account" from the name in the store\'s header, on the store whose cart you used.',
   ].join("\n");
 }
 
