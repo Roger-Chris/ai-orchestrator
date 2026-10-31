@@ -350,6 +350,13 @@ export function createApp(d: AppDeps) {
     if (body.live && d.work) void d.work.onMessages(body.messages).catch(() => undefined);
     return c.json(out);
   });
+  // The device that learns your style pulls what the link saved here (`orc style pull`).
+  app.get("/api/whatsapp/messages", (c) => {
+    if (!d.drafter) return noDrafter(c);
+    const after = Math.max(0, Number(c.req.query("after") ?? 0) || 0);
+    const limit = Math.min(2000, Math.max(1, Number(c.req.query("limit") ?? 2000) || 2000));
+    return c.json(d.drafter.wa.since(after, limit));
+  });
   // Hidden-id chats' phone numbers, which the link learns from WhatsApp: "Send in WhatsApp" then opens that chat.
   app.post("/api/whatsapp/phones", async (c) => {
     if (!d.drafter) return noDrafter(c);

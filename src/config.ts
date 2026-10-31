@@ -300,6 +300,10 @@ const ConfigSchema = z.object({
       voiceNotes: z.boolean().default(true),
       /** Download photos sent to you in direct chats so the local vision model can describe them. */
       images: z.boolean().default(true),
+      /** Who reads live voice notes and photos: this device's Whisper and Ollama, or (no GPU) Groq's Whisper and Gemini. "online" also skips history's voice notes. */
+      media: z.enum(["local", "online"]).default("local"),
+      /** Gemini model that looks at photos when `media` is "online". */
+      onlineVisionModel: z.string().default("gemini-flash-lite-latest"),
       /** Chat ids to leave alone, e.g. 9190000…@s.whatsapp.net or …@g.us. */
       ignore: z.array(z.string()).default([]),
       /**

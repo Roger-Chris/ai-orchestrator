@@ -22,6 +22,8 @@ export interface LinkOptions {
   onLive?: (messages: WaMessage[]) => void;
   /** Download photos people send you in direct chats (live ones only), so they can be described. */
   images: boolean;
+  /** Also download the voice notes in history (for a device that transcribes them itself). */
+  historyVoice?: boolean;
   /** A queued voice note or photo was downloaded (`ok`) or could not be. Fired for history voice notes too. */
   onMedia?: (message: WaMessage, ok: boolean) => void;
   print: (s: string) => void;
@@ -234,7 +236,7 @@ export class WhatsAppLink {
    * (yours anywhere, everyone's in direct chats) and, when live, photos sent to you in direct chats.
    */
   wantsMedia(m: WaMessage, live = true): boolean {
-    if (m.mediaType === "audio") return this.opts.voiceNotes && (m.fromMe || !m.isGroup);
+    if (m.mediaType === "audio") return this.opts.voiceNotes && (live || this.opts.historyVoice !== false) && (m.fromMe || !m.isGroup);
     return m.mediaType === "image" && live && this.opts.images && !m.fromMe && !m.isGroup;
   }
 

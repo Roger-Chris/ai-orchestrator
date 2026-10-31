@@ -141,6 +141,17 @@ export class WaStore {
     return (this.store.db.prepare("SELECT * FROM wa_messages WHERE from_me = 1 AND (length(text) > 3 OR transcript IS NOT NULL) ORDER BY random() LIMIT ?").all(limit) as any[]).map(row);
   }
 
+  /** Messages stored after a position, oldest first, with chat names: what another device pulls. `next` is where to go on from. */
+  since(after: number, limit: number): { messages: WaMessage[]; next: number } {
+    const rows = this.store.db
+      .prepare("SELECT m.rowid AS pos, m.*, c.name AS chat_name, c.phone AS chat_phone FROM wa_messages m LEFT JOIN wa_chats c ON c.id = m.chat_id WHERE m.rowid > ? ORDER BY m.rowid LIMIT ?")
+      .all(after, limit) as any[];
+    return {
+      messages: rows.map((r) => ({ ...row(r), mediaPath: undefined, chatName: r.chat_name ?? undefined, chatPhone: r.chat_phone ?? undefined })),
+      next: rows.length ? Number(rows[rows.length - 1].pos) : after,
+    };
+  }
+
   /** Voice notes downloaded but not yet transcribed, newest first. */
   untranscribed(limit = 2000): WaMessage[] {
     return (

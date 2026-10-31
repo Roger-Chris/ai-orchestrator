@@ -51,6 +51,9 @@ mkdir -p "$unit_dir"
 sed -e "s|@REPO@|$REPO|g" -e "s|@PATH@|$PATH|g" \
   "$REPO/deploy/linux/orchestrator-hub.service.in" >"$unit_dir/orchestrator-hub.service"
 echo "wrote $unit_dir/orchestrator-hub.service"
+sed -e "s|@REPO@|$REPO|g" -e "s|@PATH@|$PATH|g" \
+  "$REPO/deploy/linux/orchestrator-whatsapp.service.in" >"$unit_dir/orchestrator-whatsapp.service"
+echo "wrote $unit_dir/orchestrator-whatsapp.service"
 systemctl --user daemon-reload
 
 # Without lingering, user services stop at logout and don't start at boot.
@@ -72,6 +75,11 @@ for _ in $(seq 45); do
 done
 [ "$up" = yes ] || die "the hub did not answer on :4317: journalctl --user -u orchestrator-hub -n 50"
 echo "hub is up: http://127.0.0.1:4317"
+if [ -f "$REPO/data/whatsapp/auth/creds.json" ]; then
+  systemctl --user enable orchestrator-whatsapp >/dev/null
+  systemctl --user restart orchestrator-whatsapp
+  echo "WhatsApp link is running: journalctl --user -u orchestrator-whatsapp -f"
+fi
 ip="$(tailscale ip -4 2>/dev/null | head -1 || true)"
 if [ -n "$ip" ]; then echo "phone app address: http://$ip:4317"; fi
 
