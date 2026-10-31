@@ -8,6 +8,7 @@ import { runProcess } from "../providers/base.js";
 import type { ProviderPool } from "../providers/registry.js";
 import type { MemoryReplica } from "../shared/replica.js";
 import type { ProviderId } from "../types.js";
+import { REPO_ACTIONS } from "../repos/actions.js";
 import { DESKTOP_ACTIONS } from "./desktop.js";
 
 /**
@@ -22,6 +23,7 @@ import { DESKTOP_ACTIONS } from "./desktop.js";
  * old version is there until the new one is checked. Nothing is really deleted either. The only way
  * to remove something is `files.trash`, which works only in projects the agents created themselves,
  * moves it to a trash folder that is never emptied automatically, and logs it; `files.restore` brings it back.
+ * Committed files in repos it looks after have a stricter route, repos.delete (../repos/actions.ts).
  */
 
 export type Risk = "safe" | "ask" | "never";
@@ -490,6 +492,8 @@ export const ACTIONS: ActionDef[] = [
 
 // Phase 3: desktop control and files across devices (./desktop.ts).
 ACTIONS.push(...DESKTOP_ACTIONS);
+// Repos the orchestrator looks after (../repos/actions.ts).
+ACTIONS.push(...REPO_ACTIONS);
 
 export const ACTION_NAMES = ACTIONS.map((a) => a.name);
 

@@ -66,6 +66,8 @@ export interface BuildDeskDeps {
   now?: () => number;
   /** The folder of projects the agents created: their authority. Empty: no limit is checked. */
   projectsDir?: string;
+  /** Other folders agents may work in: repos the owner handed over (repos.adopt). */
+  isOwned?: (folder: string) => boolean;
   /** Rules and audits for every build, put into the task. */
   guidelines?: () => string;
   /** A new private repo for a project; returns its folder (`./repo.ts`). */
@@ -210,7 +212,7 @@ export class BuildDesk {
     const folder = resolve(repo);
     if (!existsSync(folder)) throw new BuildError(`folder not found on ${this.d.node}: ${folder}`);
     // Agents work only in projects they created. A repo of yours needs you to start the build.
-    if (input.by && this.d.projectsDir && !insideProjects(folder, this.d.projectsDir)) throw new BuildError(`${input.by} may only build in projects the agents created (in ${this.d.projectsDir}), not ${folder}. Leave out the repo to make a new one, or start it from the Builds screen.`, 403);
+    if (input.by && this.d.projectsDir && !insideProjects(folder, this.d.projectsDir) && !this.d.isOwned?.(folder)) throw new BuildError(`${input.by} may only build in projects the agents created (in ${this.d.projectsDir}), not ${folder}. Leave out the repo to make a new one, or start it from the Builds screen.`, 403);
     agent ??= "claude";
     reviewer ??= otherAgent(agent);
     if (reviewer === agent) reviewer = otherAgent(agent);

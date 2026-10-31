@@ -34,7 +34,7 @@ const PATH_ARGS: Record<string, string[]> = {
   "files.copy": ["from", "to"], "files.move": ["from", "to"], "files.send": ["path"], "files.trash": ["path"], "ai.run": ["cwd"], "apps.open": ["target"],
 };
 /** Actions that can reach anything on the device, so they are refused for an agent held to folders. */
-const UNBOUNDED = new Set(["shell.run", "gui.task"]);
+const UNBOUNDED = new Set(["shell.run", "gui.task", "repos.list", "repos.create", "repos.adopt", "repos.sync", "repos.files", "repos.read", "repos.write", "repos.check_delete", "repos.delete"]);
 
 const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 

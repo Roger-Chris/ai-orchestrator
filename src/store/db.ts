@@ -13,6 +13,7 @@ export class Store implements CooldownStore, FeedbackSource {
     mkdirSync(dataDir, { recursive: true });
     this.db = new DatabaseSync(join(dataDir, "orchestrator.db"));
     this.db.exec(`
+      PRAGMA busy_timeout = 5000; -- the WhatsApp link is a second process on this file
       PRAGMA journal_mode = WAL;
       PRAGMA synchronous = NORMAL;
       CREATE TABLE IF NOT EXISTS runs (

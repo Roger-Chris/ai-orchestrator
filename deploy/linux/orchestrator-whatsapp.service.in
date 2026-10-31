@@ -1,0 +1,18 @@
+[Unit]
+Description=AI Orchestrator WhatsApp link (read-only)
+After=network-online.target orchestrator-hub.service
+Wants=network-online.target
+# Only after the first link: scanning the QR code needs a terminal (npm run orc -- whatsapp link).
+ConditionPathExists=@REPO@/data/whatsapp/auth/creds.json
+
+[Service]
+WorkingDirectory=@REPO@
+Environment="PATH=@PATH@"
+ExecStart=@REPO@/node_modules/.bin/tsx src/cli.ts whatsapp link
+Restart=always
+RestartSec=30
+# Its own process, so WhatsApp's library can't take the hub down, and small on an 8 GB machine.
+MemoryHigh=1G
+
+[Install]
+WantedBy=default.target

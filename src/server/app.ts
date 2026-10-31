@@ -17,6 +17,7 @@ import type { AssistantTasks } from "../integrations/assistant.js";
 import type { GmailReader } from "../integrations/gmail.js";
 import { type Notifier, alertPayload } from "./push.js";
 import { letGo } from "../whatsapp/convo.js";
+import { saveGraphFiles } from "../whatsapp/graph.js";
 import { people } from "../whatsapp/people.js";
 import type { ReplyDrafter } from "../whatsapp/drafter.js";
 import { CallError, type CallDesk } from "../calls/desk.js";
@@ -326,6 +327,15 @@ export function createApp(d: AppDeps) {
     if (voice) d.replica?.put({ uid: "fact:owner-voice", kind: "fact", title: "How he talks and writes", body: voice, tags: ["about-me"], source: "style-book" });
     return c.json({ ok: true, contacts: book.contacts.length });
   });
+  // The people graph from the laptop (`orc style push`), so a copy stays here when it is away.
+  app.put("/api/style/graph", async (c) => {
+    const files = z.record(z.string(), z.string()).parse((await c.req.json()).files ?? {});
+    try {
+      return c.json({ ok: true, saved: saveGraphFiles(resolve(d.config.dataDir), files) });
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+  });
   const WaMessageBody = z.object({
     id: z.string().min(1),
     chatId: z.string().min(3),
@@ -348,6 +358,13 @@ export function createApp(d: AppDeps) {
     // a live message with one of your Work people can move their task on (in the background)
     if (body.live && d.work) void d.work.onMessages(body.messages).catch(() => undefined);
     return c.json(out);
+  });
+  // The device that learns your style pulls what the link saved here (`orc style pull`).
+  app.get("/api/whatsapp/messages", (c) => {
+    if (!d.drafter) return noDrafter(c);
+    const after = Math.max(0, Number(c.req.query("after") ?? 0) || 0);
+    const limit = Math.min(2000, Math.max(1, Number(c.req.query("limit") ?? 2000) || 2000));
+    return c.json(d.drafter.wa.since(after, limit));
   });
   // Hidden-id chats' phone numbers, which the link learns from WhatsApp: "Send in WhatsApp" then opens that chat.
   app.post("/api/whatsapp/phones", async (c) => {

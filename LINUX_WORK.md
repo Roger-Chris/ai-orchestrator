@@ -14,6 +14,33 @@ What the session on the Linux hub (`roger-all-series`, 100.104.185.17) is doing,
 - Linux's `builds.androidNode` is now `roger`. Android builds still need `builds.androidHere: true` in the laptop's config, which the owner edits.
 - Still to try: a reboot of the laptop, to see both tasks come back at logon.
 
+## WhatsApp link moves to Linux (31 Oct 2026): Windows, please read
+
+The link now runs on Linux as its own service (`orchestrator-whatsapp`), so new messages reach the hub with the laptop off. It is a new linked device with its own QR scan: the laptop's sign-in is not copied. Live voice notes go to Groq's Whisper and live photos to Gemini (`whatsapp.media: online`); history's voice notes are not downloaded on Linux.
+
+On the laptop, once the owner says Linux is receiving messages:
+1. `git pull` and restart the orchestrator.
+2. Stop and disable the scheduled task `Orchestrator WhatsApp link`. Keep `data\whatsapp\auth` and all messages: nothing is deleted. The owner removes the old device on the phone (Linked devices).
+3. Leave `whatsapp.hub` set. `orc style learn` now pulls the hub's new messages first (`orc style pull` does only that), then run `orc style graph` and `orc style push` as before. Learning, the graph and the GPU stay on the laptop.
+
+The earlier request below still stands: push the book and graph now.
+
+## WhatsApp style files: Windows, please send them
+
+Linux has an older `data/style/stylebook.json` (29 Oct) and no people graph. The graph should be on the laptop in `C:\development\AI Assistant\Orchestrator\data\style\`: `graph\graphify-out\graph.json` and `graph.html`, and the full profiles in `graph\people.md`. Linux could not open that folder to confirm.
+
+`orc style push` now also sends the graph (`PUT /api/style/graph`). On the next update, in the `Orchestrator` folder, with `whatsapp.hub` set to `http://100.104.185.17:4317`:
+
+1. Update the code to this `main`.
+2. Run `npm run orc -- style graph` if `graph.json` is missing or older than the style book.
+3. Run `npm run orc -- style push`, and check that it prints "People graph sent".
+4. Run it again after every `orc style learn` or `orc style graph`, and say so in `WINDOWS_WORK.md`.
+
+What each thing does without the laptop:
+
+- Works once the push is done: reply suggestions for WhatsApp notifications on the phone (`/api/whatsapp/suggest`), written on Linux from the style book and the messages it holds.
+- Stops: the WhatsApp link, Whisper and photo descriptions run only on the laptop, so while it is off no new messages reach Linux. Drafts on Home, the chat history here and Work updates wait for it, and suggestions rely on what the phone sees.
+
 ## The goal
 
 The owner's AI tools and agents keep working while they travel. Neither machine is "the" worker: each uses the other when it is available, from any network. Tailscale is the secure channel (`/node/*` also needs `ORC_TOKEN`). SSH is not part of the design.

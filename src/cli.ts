@@ -31,10 +31,11 @@ import { Store } from "./store/db.js";
 import type { Permission, ProviderId, RunEvent, RunMode } from "./types.js";
 import { learnStyle, type StyleBook } from "./whatsapp/learn.js";
 import { buildPool, poolPrompt } from "./whatsapp/pool.js";
-import { describe, peopleGraph } from "./whatsapp/graph.js";
+import { describe, peopleGraph, readGraphFiles } from "./whatsapp/graph.js";
 import { spawn, spawnSync } from "node:child_process";
 import { WhatsAppLink } from "./whatsapp/link.js";
 import { describeImages, ollamaProblem, transcribe } from "./whatsapp/local.js";
+import { readMediaOnline } from "./whatsapp/online.js";
 import { WaStore, type WaMessage } from "./whatsapp/store.js";
 import { ReplyDrafter, replyOptions } from "./whatsapp/drafter.js";
 import { CallDesk } from "./calls/desk.js";
@@ -45,6 +46,7 @@ import { ToolRegistry } from "./ai/tools.js";
 import { ModelRouter } from "./ai/route.js";
 import { BuildDesk } from "./builds/desk.js";
 import { createRepo } from "./builds/repo.js";
+import { keepRepo, loadRepos } from "./repos/actions.js";
 import { projectsDir } from "./actions/registry.js";
 import { AGENTIC } from "./brain/capabilities.js";
 import { ConvoDesk, NoWhisperDevice } from "./convos/desk.js";
@@ -187,7 +189,12 @@ export function buildSystem(config: Config) {
         return "";
       }
     },
-    createRepo: (name, spec) => createRepo(name, spec, { dir: projectsDir(config), remote: config.branches.remote }),
+    createRepo: async (name, spec) => {
+      const dir = await createRepo(name, spec, { dir: projectsDir(config), remote: config.branches.remote });
+      keepRepo({ config }, basename(dir), dir);
+      return dir;
+    },
+    isOwned: (folder) => loadRepos({ config }).some((r) => resolve(r.dir) === folder),
     pickAgents: async () => {
       const [agent, reviewer] = (await models.routeFor("coding", "large")).chain.filter((id) => AGENTIC[id]);
       return { agent, reviewer };
@@ -481,11 +488,18 @@ async function cmdWhatsApp(config: Config, sub = "status") {
     if (transcript) console.log(`${m.mediaType === "image" ? "photo described" : "voice note transcribed"}: "${transcript.slice(0, 60)}${transcript.length > 60 ? "…" : ""}"`);
     forward.send([{ ...m, transcript }]);
   };
+  const groq = config.providers.groq;
+  const onlineMedia = {
+    voice: new GroqVoice({ baseUrl: groq.baseUrl, keys: [...groq.apiKeys, groq.apiKey ?? ""], model: groq.model, transcribeModel: groq.transcribeModel, onTranscribe: (ok, ms) => store.recordUsage("whisper:groq", config.node.name, ok, ms) }),
+    gemini: { apiKey: config.tts.gemini.apiKey, baseUrl: config.tts.gemini.baseUrl, model: config.whatsapp.onlineVisionModel },
+  };
+  const online = config.whatsapp.media === "online";
   const link: WhatsAppLink = new WhatsAppLink(wa, {
     dataDir: resolve(config.dataDir),
     history: config.whatsapp.history,
     voiceNotes: config.whatsapp.voiceNotes,
     images: config.whatsapp.images,
+    historyVoice: !online,
     ignore: config.whatsapp.ignore,
     print: (s) => console.log(s),
     onLive: (ms) => {
@@ -501,7 +515,7 @@ async function cmdWhatsApp(config: Config, sub = "status") {
       if (!held.has(m.id)) return; // a history note: `orc style learn` transcribes those
       if (!ok) return release(m.id);
       whisper = whisper
-        .then(async () => void (m.mediaType === "image" ? await describeImages(wa, config.style) : await transcribe(wa, config.style, () => {}, ROOT)))
+        .then(async () => void (online ? await readMediaOnline(wa, m, onlineMedia) : m.mediaType === "image" ? await describeImages(wa, config.style) : await transcribe(wa, config.style, () => {}, ROOT)))
         .then(
           () => {},
           (e) => console.warn(`! ${m.mediaType === "image" ? "photo not described" : "voice note not transcribed"}: ${(e as Error).message}`),
@@ -550,9 +564,16 @@ async function cmdStyle(config: Config, sub = "show", opts: { who?: string; ask?
       let saved = 0;
       for (let i = 0; i < recent.length; i += 2000) saved += (await hubCall(config, "POST", "/api/whatsapp/messages", { messages: recent.slice(i, i + 2000), live: false })).saved;
       console.log(`Sent ${recent.length} recent messages for context (${saved} new on the hub).`);
+      const graph = readGraphFiles(resolve(config.dataDir));
+      if (Object.keys(graph).length) console.log(`People graph sent: ${(await hubCall(config, "PUT", "/api/style/graph", { files: graph })).saved.join(", ")}.`);
+      else console.log("No people graph here yet: `orc style graph` makes one, then push again.");
+    } else if (sub === "pull") {
+      await pullMessages(config, store, wa);
     } else if (sub === "learn") {
       const problem = await ollamaProblem(config.style);
       if (problem) throw new Error(problem);
+      // The link may run on the hub: learn from what it has saved since last time.
+      if (config.whatsapp.hub) await pullMessages(config, store, wa).catch((e) => console.warn(`! Learning from what is here: could not pull from the hub (${(e as Error).message})`));
       const t = await transcribe(wa, config.style, (s) => console.log(s), ROOT);
       if (t.done || t.failed) console.log(`Voice notes: ${t.done} transcribed${t.failed ? `, ${t.failed} could not be read` : ""}.`);
       console.log(`Studying your chats with ${config.style.model}…`);
@@ -636,6 +657,24 @@ function quietSignalNoise(): () => number {
   return () => n;
 }
 
+/**
+ * Copies the messages the hub's link saved to this device, in pages. The last 500 are read again
+ * each time, because a voice note's transcript can land just after its message.
+ */
+async function pullMessages(config: Config, store: Store, wa: WaStore) {
+  if (!config.whatsapp.hub) throw new Error("whatsapp.hub is not set: this device is the hub");
+  let after = Math.max(0, Number(store.getPref("whatsapp.pulled") ?? 0) - 500);
+  let added = 0;
+  for (;;) {
+    const page = (await hubGet(config, `/api/whatsapp/messages?after=${after}&limit=2000`)) as { messages: WaMessage[]; next: number };
+    if (!page.messages.length) break;
+    added += wa.save(page.messages);
+    after = page.next;
+    store.setPref("whatsapp.pulled", String(after));
+  }
+  console.log(`${added} new message(s) from ${hubUrl(config)}.`);
+}
+
 /** Where reply drafting happens: `whatsapp.hub`, else the hub on this device. */
 const hubUrl = (config: Config) => (config.whatsapp.hub || `http://127.0.0.1:${config.server.port}`).replace(/\/$/, "");
 
@@ -648,6 +687,13 @@ async function hubCall(config: Config, method: string, path: string, body: unkno
     headers: { "Content-Type": "application/json", ...(config.server.token ? { Authorization: `Bearer ${config.server.token}` } : {}) },
     body: JSON.stringify(body),
   });
+  const out = (await res.json().catch(() => ({}))) as any;
+  if (!res.ok) throw new Error(`hub ${res.status}: ${out.error ?? res.statusText}`);
+  return out;
+}
+
+async function hubGet(config: Config, path: string): Promise<any> {
+  const res = await fetch(`${hubUrl(config)}${path}`, { headers: config.server.token ? { Authorization: `Bearer ${config.server.token}` } : {} });
   const out = (await res.json().catch(() => ({}))) as any;
   if (!res.ok) throw new Error(`hub ${res.status}: ${out.error ?? res.statusText}`);
   return out;
@@ -1027,7 +1073,7 @@ async function main() {
     case "style":
       return cmdStyle(config, rest[0], { who: rest.slice(1).join(" "), ask: v.ask as string | undefined, draft: !!v.draft, raw: !!v.raw });
     default:
-      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|check|status|disconnect]|whatsapp [link|status]|style [learn|push|show|graph|pool <name> [--ask "…"] [--draft]]|wake [--threshold 0.5] [--device <mic>]|init|mcp>`);
+      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|check|status|disconnect]|whatsapp [link|status]|style [learn|push|pull|show|graph|pool <name> [--ask "…"] [--draft]]|wake [--threshold 0.5] [--device <mic>]|init|mcp>`);
       process.exitCode = 1;
   }
 }
