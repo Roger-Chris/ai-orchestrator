@@ -319,7 +319,7 @@ const ConfigSchema = z.object({
       headless: z.boolean().default(false),
       timeoutMinutes: z.number().min(1).max(30).default(10),
       /** Stores that only get a search link on the phone, never the agent. */
-      linkOnly: z.array(z.string()).default(["amazon"]),
+      linkOnly: z.array(z.string()).default([]),
     })
     .prefault({}),
   /** Your WhatsApp as a read-only linked device (`orc whatsapp link`). Nothing is ever sent. */
