@@ -312,7 +312,7 @@ const ConfigSchema = z.object({
   /** Carts filled by a browser agent (src/shop). It stops at the cart; the owner orders in the store. */
   shopping: z
     .object({
-      /** The device with a screen, Chrome and the Claude CLI; empty = builds.androidNode, else this one. */
+      /** The device whose screen, Chrome and Claude CLI it uses; empty = this one (the Linux hub has a desktop). */
       node: z.string().default(""),
       command: z.string().default("claude"),
       model: z.string().default("sonnet"),

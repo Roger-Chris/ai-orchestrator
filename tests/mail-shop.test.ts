@@ -6,7 +6,7 @@ import { ActionLog } from "../src/actions/log.js";
 import { rawMessage } from "../src/integrations/gmail.js";
 import { MailDesk, parseMail } from "../src/mail/desk.js";
 import { scopeProblem } from "../src/outside/mcp.js";
-import { GUARD_SCRIPT, ORDER_WORDS, parseCart, SECRET_FIELD } from "../src/shop/agent.js";
+import { desktopVars, GUARD_SCRIPT, ORDER_WORDS, parseCart, SECRET_FIELD } from "../src/shop/agent.js";
 import { ShopDesk } from "../src/shop/desk.js";
 import { Store } from "../src/store/db.js";
 
@@ -110,6 +110,11 @@ describe("the cart agent's answer and walls", () => {
     for (const t of ["password", "ap_password", "enter otp", "cardNumber", "cc-number", "cvv", "upi id"]) expect(SECRET_FIELD.test(t), t).toBe(true);
     expect(SECRET_FIELD.test("twotabsearchtextbox")).toBe(false);
     expect(() => new Function(GUARD_SCRIPT)).not.toThrow();
+  });
+
+  it("finds the logged-in desktop in systemd's environment, and only takes what a window needs", () => {
+    expect(desktopVars('PATH=/bin\nDISPLAY=:0\nXAUTHORITY="/run/user/1000/auth"\nWAYLAND_DISPLAY=wayland-0\nORC_TOKEN=x\n')).toEqual({ DISPLAY: ":0", XAUTHORITY: "/run/user/1000/auth", WAYLAND_DISPLAY: "wayland-0" });
+    expect(desktopVars("PATH=/bin\n")).toEqual({});
   });
 
   it("outside agents can't drive the owner's store accounts", () => {

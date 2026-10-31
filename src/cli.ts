@@ -16,7 +16,7 @@ import { workspaceMap } from "./context/graphify.js";
 import { AssistantTasks } from "./integrations/assistant.js";
 import { GmailReader, SEND_SCOPES } from "./integrations/gmail.js";
 import { MailDesk } from "./mail/desk.js";
-import { profileDir, STORE_IDS, STORES, type StoreId } from "./shop/agent.js";
+import { desktopEnv, profileDir, STORE_IDS, STORES, type StoreId } from "./shop/agent.js";
 import { ShopDesk } from "./shop/desk.js";
 import { Memory } from "./memory/memory.js";
 import { openReplica } from "./shared/setup.js";
@@ -270,13 +270,13 @@ export function buildSystem(config: Config) {
     notify: (p) => void notifier.notify(p),
     node: config.node.name,
   });
-  // Shopping: the browser agent runs on the device set for it, normally the laptop.
+  // Shopping: the browser agent runs on this machine's screen, or on shopping.node if that is set.
   const shop = new ShopDesk({
     store,
     act: (node, req, who) => actions.act(node, req, { who }),
     log: actions.log,
     notify: (p) => void notifier.notify(p),
-    node: config.shopping.node || config.builds.androidNode || undefined,
+    node: config.shopping.node || undefined,
     logNode: config.node.name,
     linkOnly: config.shopping.linkOnly,
     findIn: config.shopping.findIn,
@@ -448,13 +448,13 @@ async function cmdDoctor(config: Config, live: boolean) {
 }
 
 /** Opens the cart agent's own browser profile at a store, so the owner can sign in there by hand. */
-function cmdShop(config: Config, sub = "", store = "") {
+async function cmdShop(config: Config, sub = "", store = "") {
   if (sub !== "login" || !STORE_IDS.includes(store as StoreId)) {
     console.log(`usage: orc shop login <${STORE_IDS.join("|")}>`);
     return;
   }
   const chrome = process.platform === "win32" ? `${process.env.ProgramFiles}\\Google\\Chrome\\Application\\chrome.exe` : process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "google-chrome";
-  spawn(chrome, [`--user-data-dir=${profileDir(resolve(config.dataDir))}`, STORES[store as StoreId].home], { detached: true, stdio: "ignore" }).unref();
+  spawn(chrome, [`--user-data-dir=${profileDir(resolve(config.dataDir))}`, STORES[store as StoreId].home], { detached: true, stdio: "ignore", env: { ...process.env, ...(await desktopEnv()) } }).unref();
   console.log(`Sign in to ${STORES[store as StoreId].name} in the window that opened, then close it. Jarvis never sees your password; it only reuses the sign-in.`);
 }
 

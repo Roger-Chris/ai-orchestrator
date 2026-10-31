@@ -149,6 +149,28 @@ export interface CartAgentOptions {
 /** The browser profile that keeps the store sign-ins, separate from the owner's own browser. */
 export const profileDir = (dataDir: string) => resolve(dataDir, "shop", "profile");
 
+/**
+ * The hub is a systemd user service that may start before anyone logs in, so it doesn't know the
+ * desktop. The logged-in session tells systemd its display; a window needs those few variables.
+ */
+export function desktopVars(showEnvironment: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const line of showEnvironment.split("\n")) {
+    const m = line.match(/^(DISPLAY|WAYLAND_DISPLAY|XAUTHORITY|XDG_RUNTIME_DIR)=(.*)$/);
+    if (m) env[m[1]] = m[2].replace(/^"(.*)"$/, "$1");
+  }
+  return env;
+}
+
+/** Variables for opening a window here. Throws when this Linux machine has no one logged in on its screen. */
+export async function desktopEnv(exec: typeof runProcess = runProcess): Promise<NodeJS.ProcessEnv> {
+  if (process.platform !== "linux" || process.env.DISPLAY || process.env.WAYLAND_DISPLAY) return {};
+  const r = await exec({ command: "systemctl", args: ["--user", "show-environment"], timeoutMs: 10_000 });
+  const env = desktopVars(r.stdout);
+  if (!env.DISPLAY && !env.WAYLAND_DISPLAY) throw new Error("no desktop is logged in on this machine, so the browser has no screen: log in on it, then ask again");
+  return env;
+}
+
 /** A pinned Playwright MCP in the agent's own folder, installed on first use; npx can't start it on Windows. */
 async function browserServer(dir: string, exec: typeof runProcess): Promise<string> {
   const cli = join(dir, "tools", "node_modules", "@playwright", "mcp", "cli.js");
@@ -176,6 +198,7 @@ export async function runCartAgent(store: StoreId | StoreId[], request: string, 
     }),
   );
   const r = await exec({
+    env: o.headless ? undefined : await desktopEnv(exec),
     command: o.command,
     // Its own folder and no settings of this machine: only the browser, none of the owner's tools or hooks.
     args: ["-p", cartPrompt(store, request), "--model", o.model, "--output-format", "text", "--strict-mcp-config", "--mcp-config", config, "--setting-sources", "project", "--tools", "", "--allowedTools", TOOLS.join(","), "--disallowedTools", NEVER.join(",")],
