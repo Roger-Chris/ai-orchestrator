@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { loadConnection } from "../lib/api";
+import { startSender } from "../lib/recordings";
 import { useWakeWord } from "../lib/wake";
 import { ensureChannels, routeFor } from "../lib/push";
 import { useColors } from "../lib/theme";
@@ -24,6 +25,9 @@ export default function RootLayout() {
       if (!conn) router.replace("/connect");
     });
   }, []);
+
+  // Recordings that have not reached the hub yet are sent again from wherever you are in the app.
+  useEffect(() => (ready ? startSender() : undefined), [ready]);
 
   // Tapping a notification opens the conversation it is about (or the call screen for an alarm).
   useEffect(() => {

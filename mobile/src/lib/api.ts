@@ -291,6 +291,34 @@ export type AppUpdate =
 /** The hub's address, for links the phone opens itself (preview pages, APK downloads). */
 export const hubUrl = () => current?.url;
 
+/**
+ * Sends a recorded file as the multipart field `audio`, streamed from disk by the native side, so a long
+ * recording is not read into memory. Expo's fetch refuses React Native's `{uri, name, type}` form part
+ * ("Unsupported FormDataPart implementation"), so no audio upload may go through FormData.
+ */
+async function uploadAudio(path: string, uri: string, parameters: Record<string, string> = {}): Promise<{ ok: boolean; status: number; data: unknown }> {
+  if (!current) throw new Error("Not connected to a hub yet.");
+  // Loaded here because the hub's tests run this file without the native module.
+  const { FileSystemUploadType, uploadAsync } = await import("expo-file-system/legacy");
+  const res = await uploadAsync(`${current.url}${path}`, uri, {
+    httpMethod: "POST",
+    uploadType: FileSystemUploadType.MULTIPART,
+    fieldName: "audio",
+    mimeType: uri.endsWith(".3gp") ? "audio/3gpp" : "audio/mp4",
+    parameters,
+    headers: authHeaders(),
+  }).catch(() => {
+    throw new Error(`Can't reach the hub at ${current?.url}. Check Tailscale is connected on this phone.`);
+  });
+  let data: unknown = {};
+  try {
+    data = JSON.parse(res.body);
+  } catch {
+    /* not JSON: the status says what happened */
+  }
+  return { ok: res.status >= 200 && res.status < 300, status: res.status, data };
+}
+
 /** A spoken exchange: what the hub heard, the full answer for the screen, and `say` to speak. */
 export interface TalkReply extends AssistantReply {
   heard: string;
@@ -311,14 +339,9 @@ export const Api = {
   /** A recorded clip instead, for phones without speech recognition; the hub transcribes it (needs its Groq key). */
   async talkClip(uri: string, history: { role: "user" | "assistant"; content: string }[] = []): Promise<TalkReply> {
     if (!current) throw new Error("Not connected to a hub yet.");
-    const form = new FormData();
-    const name = uri.split("/").pop() || "talk.m4a";
-    form.append("audio", { uri, name, type: name.endsWith(".3gp") ? "audio/3gpp" : "audio/mp4" } as never);
-    form.append("history", JSON.stringify(history));
-    const res = await fetch(`${current.url}/api/assistant/voice`, { method: "POST", headers: authHeaders(), body: form });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`);
-    return data as TalkReply;
+    const res = await uploadAudio("/api/assistant/voice", uri, { history: JSON.stringify(history) });
+    if (!res.ok) throw new Error((res.data as { error?: string }).error ?? `HTTP ${res.status}`);
+    return res.data as TalkReply;
   },
   // ---- the learning harness (the brain's learn.py)
   feedback: (episodeId: number, good: boolean, note = "") =>
@@ -408,15 +431,10 @@ export const Api = {
   // ---- recorded conversations
   convos: () => api<Convo[]>("/api/convos"),
   convoRetry: (id: string) => api<Convo>(`/api/convos/${id}/retry`, { body: {} }),
-  async convoUpload(uri: string, durationSec: number): Promise<Convo> {
+  async convoUpload(uri: string, durationSec: number, clientId: string): Promise<Convo> {
     if (!current) throw new Error("Not connected to a hub yet.");
-    const form = new FormData();
-    const name = uri.split("/").pop() || "conversation.m4a";
-    form.append("audio", { uri, name, type: name.endsWith(".3gp") ? "audio/3gpp" : "audio/mp4" } as never);
-    form.append("durationSec", String(durationSec));
-    form.append("source", "phone");
-    const res = await fetch(`${current.url}/api/convos`, { method: "POST", headers: authHeaders(), body: form });
-    const data = await res.json().catch(() => ({}));
+    const res = await uploadAudio("/api/convos", uri, { durationSec: String(durationSec), source: "phone", clientId });
+    const data = res.data;
     if (!res.ok) throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`);
     return data as Convo;
   },
@@ -475,24 +493,20 @@ export const Calls = {
   answer: (alertId: number) => api<{ say: string; voice: boolean }>(`/api/calls/${alertId}/answer`, { body: {}, timeoutMs: 45_000 }),
   say: (alertId: number, text: string) => api<CallTurn>(`/api/calls/${alertId}/turn`, { body: { text }, timeoutMs: 90_000 }),
   end: (alertId: number) => api(`/api/calls/${alertId}/end`, { body: {} }),
-  /** Sends a recorded clip (a file uri from expo-audio) as multipart; React Native reads the file itself. */
+  /** Sends a recorded clip (a file uri from expo-audio). */
   async voice(alertId: number, uri: string): Promise<CallTurn> {
     if (!current) throw new Error("Not connected to a hub yet.");
-    const form = new FormData();
-    const name = uri.split("/").pop() || "turn.m4a";
-    form.append("audio", { uri, name, type: name.endsWith(".3gp") ? "audio/3gpp" : "audio/mp4" } as never);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 90_000);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<never>((_, no) => {
+      timer = setTimeout(() => no(new Error("The hub took too long to answer.")), 90_000);
+    });
     try {
-      const res = await fetch(`${current.url}/api/calls/${alertId}/turn`, { method: "POST", headers: authHeaders(), body: form, signal: ctrl.signal });
+      const res = await Promise.race([uploadAudio(`/api/calls/${alertId}/turn`, uri), late]);
       if (res.status === 401) throw new Unauthorized("The hub rejected the access token.");
-      const data = (await res.json().catch(() => ({}))) as CallTurn & { error?: string; fallback?: string };
+      const data = res.data as CallTurn & { error?: string; fallback?: string };
       if (res.status === 409 && data.fallback === "text") throw new NeedsText(data.error ?? "Type your answer instead.");
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       return data;
-    } catch (e) {
-      if ((e as Error).name === "AbortError") throw new Error("The hub took too long to answer.");
-      throw e;
     } finally {
       clearTimeout(timer);
     }

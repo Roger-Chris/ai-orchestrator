@@ -604,6 +604,8 @@ export interface ConvoTask {
 export interface Convo {
   id: string;
   source: string;
+  /** The sender's id for this recording: sending it again returns this one instead of a copy. */
+  clientId?: string;
   status: "waiting" | "transcribing" | "thinking" | "saving" | "done" | "failed";
   /** The audio, on the hub (not shown in the app). */
   file?: string;

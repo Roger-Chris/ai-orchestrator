@@ -28,7 +28,7 @@ export function mountConvos(app: Hono, d: { convos?: ConvoDesk; whisper?: { here
       const file = form.audio;
       if (!(file instanceof File)) return c.json({ error: "send the recording in the `audio` field" }, 400);
       const seconds = Number(form.durationSec);
-      return c.json(d.convos.addAudio(new Uint8Array(await file.arrayBuffer()), file.type || "audio/mp4", String(form.source ?? "phone").slice(0, 40), Number.isFinite(seconds) ? seconds : undefined), 201);
+      return c.json(d.convos.addAudio(new Uint8Array(await file.arrayBuffer()), file.type || "audio/mp4", String(form.source ?? "phone").slice(0, 40), Number.isFinite(seconds) ? seconds : undefined, form.clientId ? String(form.clientId).slice(0, 80) : undefined), 201);
     }
     const parsed = TextBody.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) return c.json({ error: "send `audio` or `text`" }, 400);

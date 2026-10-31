@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshControl, ScrollView, Text, View } from "react-native";
 import { Button, Card, ErrorText, Muted } from "../components/ui";
 import { Api, type Convo } from "../lib/api";
+import { keepRecording, sendWaiting, watchWaiting } from "../lib/recordings";
+import type { Waiting } from "../lib/sendqueue";
 import { useColors } from "../lib/theme";
 
 /**
@@ -34,9 +36,8 @@ export default function Record() {
   const [seconds, setSeconds] = useState(0);
   const [items, setItems] = useState<Convo[]>();
   const [error, setError] = useState("");
-  const [sending, setSending] = useState(false);
-  /** A recording that could not be sent: kept so nothing said is lost. */
-  const [unsent, setUnsent] = useState<{ uri: string; seconds: number }>();
+  /** Recordings kept on this phone until the hub has them; they are sent again by themselves. */
+  const [waiting, setWaiting] = useState<Waiting[]>([]);
   const [loading, setLoading] = useState(false);
   const started = useRef(false);
   const onRef = useRef(false);
@@ -53,6 +54,10 @@ export default function Record() {
     }
   }, []);
   useFocusEffect(useCallback(() => void load(), [load]));
+  useEffect(() => watchWaiting(setWaiting), []);
+  // A recording just reached the hub: show it in the list.
+  const waitingCount = waiting.length;
+  useEffect(() => void load(), [waitingCount, load]);
 
   // Watch recordings still being worked on while this screen is open.
   useEffect(() => {
@@ -94,31 +99,13 @@ export default function Record() {
     }
   }, [recorder]);
 
-  const send = useCallback(
-    async (uri: string, length: number) => {
-      setSending(true);
-      setError("");
-      try {
-        await Api.convoUpload(uri, length);
-        setUnsent(undefined);
-        await load();
-      } catch (e) {
-        setUnsent({ uri, seconds: length });
-        setError(`${(e as Error).message} The recording is safe on this phone: tap Send again.`);
-      } finally {
-        setSending(false);
-      }
-    },
-    [load],
-  );
-
   const stop = async () => {
     const length = seconds;
     try {
       await recorder.stop();
       setOn(false);
       await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true, allowsBackgroundRecording: false });
-      if (recorder.uri) await send(recorder.uri, length);
+      if (recorder.uri) await keepRecording(recorder.uri, length);
       else setError("The phone did not keep a recording.");
     } catch (e) {
       setOn(false);
@@ -139,15 +126,21 @@ export default function Record() {
         <Text style={{ color: c.text, fontSize: 40, fontWeight: "700", fontVariant: ["tabular-nums"] }}>{clock(on ? seconds : 0)}</Text>
         <Muted small>{on ? "Recording. You can lock the phone. Stay on this screen to keep it going." : "Records the conversation, transcribes it on your laptop, and adds tasks and notes for Jarvis. Let people know you are recording."}</Muted>
         <View style={{ marginTop: 12 }}>
-          {on ? <Button kind="primary" title="Stop and send" onPress={() => void stop()} /> : <Button kind="primary" title="Start recording" busy={sending} onPress={() => void begin()} />}
+          {on ? <Button kind="primary" title="Stop and send" onPress={() => void stop()} /> : <Button kind="primary" title="Start recording" onPress={() => void begin()} />}
         </View>
-        {!!unsent && !on && (
-          <View style={{ marginTop: 8 }}>
-            <Button title="Send again" busy={sending} onPress={() => void send(unsent.uri, unsent.seconds)} />
-          </View>
-        )}
         <ErrorText text={error} />
       </Card>
+
+      {waiting.length > 0 && (
+        <Card attention>
+          <Text style={{ color: c.text, fontWeight: "600" }}>{`${waiting.length} recording${waiting.length === 1 ? "" : "s"} waiting to send`}</Text>
+          <Muted small>Safe on this phone, even if you close the app. It keeps trying while the app is open.</Muted>
+          {!!waiting.find((w) => w.error) && <Muted small>{waiting.find((w) => w.error)!.error}</Muted>}
+          <View style={{ marginTop: 8 }}>
+            <Button small title="Try now" onPress={() => void sendWaiting()} />
+          </View>
+        </Card>
+      )}
 
       {items?.map((x) => (
         <Card key={x.id}>

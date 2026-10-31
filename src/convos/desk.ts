@@ -78,14 +78,22 @@ export class ConvoDesk {
     return (this.d.store.db.prepare("SELECT record FROM convos ORDER BY created_at DESC LIMIT ?").all(limit) as { record: string }[]).map((r) => JSON.parse(r.record));
   }
 
+  private byClientId(clientId: string): Convo | undefined {
+    const row = this.d.store.db.prepare("SELECT record FROM convos WHERE json_extract(record, '$.clientId') = ? LIMIT 1").get(clientId) as { record: string } | undefined;
+    return row ? JSON.parse(row.record) : undefined;
+  }
+
   private blank(source: string, durationSec?: number): Convo {
     const at = this.now();
     return { id: `c${randomBytes(4).toString("hex")}`, source, durationSec, status: "waiting", tasks: [], facts: [], aboutMe: [], attempts: 0, createdAt: at, updatedAt: at };
   }
 
   /** A recording: saved first, processed in the background. */
-  addAudio(data: Uint8Array, mime: string, source: string, durationSec?: number): Convo {
+  addAudio(data: Uint8Array, mime: string, source: string, durationSec?: number, clientId?: string): Convo {
+    const seen = clientId ? this.byClientId(clientId) : undefined;
+    if (seen) return seen; // a retry whose first answer got lost
     const c = this.blank(source, durationSec);
+    c.clientId = clientId;
     const dir = resolve(this.d.dataDir, "convos");
     mkdirSync(dir, { recursive: true });
     c.file = join(dir, `${c.id}.${EXT[mime.split(";")[0]] ?? "m4a"}`);
