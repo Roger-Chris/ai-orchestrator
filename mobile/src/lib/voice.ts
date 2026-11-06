@@ -101,15 +101,15 @@ export async function phoneVoices(): Promise<{ id: string; label: string }[]> {
     .map((v) => ({ id: v.identifier, label: `${v.name} (${v.language})` }));
 }
 
-function phoneSay(text: string): Promise<void> {
+function phoneSay(text: string, onStart?: () => void): Promise<void> {
   return new Promise((done) => {
     stopCurrent = () => void Speech.stop().catch(() => {});
-    Speech.speak(text, { language: SPEAK_LANG, voice: choice.phoneVoice || undefined, rate: 1.0, onDone: () => done(), onStopped: () => done(), onError: () => done() });
+    Speech.speak(text, { language: SPEAK_LANG, voice: choice.phoneVoice || undefined, rate: 1.0, onStart, onDone: () => done(), onStopped: () => done(), onError: () => done() });
   });
 }
 
 /** Plays the hub's audio for `text`. Resolves "done" or "stopped"; "failed" means the phone should say it. */
-function hubSay(text: string): Promise<"done" | "stopped" | "failed"> {
+function hubSay(text: string, onStart?: () => void): Promise<"done" | "stopped" | "failed"> {
   const conn = connection();
   if (!conn) return Promise.resolve("failed");
   const q = new URLSearchParams({ text });
@@ -137,6 +137,7 @@ function hubSay(text: string): Promise<"done" | "stopped" | "failed"> {
     const sub = p.addListener("playbackStatusUpdate", (s) => {
       if (s.error) return finish("failed");
       if (s.isLoaded) clearTimeout(timer);
+      if (s.playing) onStart?.();
       if (s.didJustFinish) finish("done");
     });
     stopCurrent = () => finish("stopped");
@@ -145,19 +146,19 @@ function hubSay(text: string): Promise<"done" | "stopped" | "failed"> {
 }
 
 /** Says `text` aloud with the chosen voice; anything still being said is cut off first. Resolves when it ends or is stopped. */
-export async function speak(text: string): Promise<void> {
+export async function speak(text: string, onStart?: () => void): Promise<void> {
   stopSpeaking();
   const mine = generation;
-  if (!text.trim()) return;
+  if (!text.trim()) return onStart?.();
   await load();
   const useHub = choice.engine === "hub" || (choice.engine === "auto" && !!(await hubTts())?.providers.some((p) => p.ready));
   if (mine !== generation) return;
   if (useHub) {
-    const r = await hubSay(text);
+    const r = await hubSay(text, onStart);
     if (r !== "failed" || mine !== generation) return;
     hubStatus = null; // re-check next time; this line goes to the phone
   }
-  await phoneSay(text);
+  await phoneSay(text, onStart);
 }
 
 export function stopSpeaking() {

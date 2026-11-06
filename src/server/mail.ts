@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import type { GmailStatus } from "../integrations/gmail.js";
-import type { MailDesk } from "../mail/desk.js";
+import { type MailDesk, NeedsAddress } from "../mail/desk.js";
 
 /**
  * - `POST /api/mail {to, about, subject?, name?, by?}`: the brain's `mail` tool, or the app. Only writes a draft.
@@ -20,6 +20,7 @@ export function mountMail(app: Hono, d: { mail?: MailDesk; mailSender?: { status
     try {
       return c.json(await d.mail.draft({ to: String(b.to ?? ""), about: String(b.about ?? ""), subject: opt(b.subject), name: opt(b.name), by: opt(b.by) }));
     } catch (e) {
+      if (e instanceof NeedsAddress) return c.json({ error: e.message, needsAddress: true, candidates: e.candidates }, 409);
       return c.json({ error: (e as Error).message }, 400);
     }
   });

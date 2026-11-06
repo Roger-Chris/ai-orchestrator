@@ -1,6 +1,8 @@
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
+import { useTabSpace } from "../../components/FloatingTabs";
+import { convo } from "../../lib/convo";
 import { Button, Dot, ErrorText, Muted } from "../../components/ui";
 import { type ActiveRun, Api, type Thread, Unauthorized } from "../../lib/api";
 import { useColors } from "../../lib/theme";
@@ -45,6 +47,8 @@ export default function Conversations() {
     }, [load]),
   );
 
+  const space = useTabSpace();
+  const lastJarvis = convo.get().at(-1);
   const status = new Map(active.map((r) => [r.threadId, r.status]));
 
   return (
@@ -53,8 +57,18 @@ export default function Conversations() {
         data={threads}
         keyExtractor={(t) => t.id}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} colors={[c.accent]} />}
-        contentContainerStyle={{ padding: 12, gap: 8, flexGrow: 1 }}
-        ListHeaderComponent={<ErrorText text={error} />}
+        contentContainerStyle={{ padding: 16, paddingBottom: space, gap: 8, flexGrow: 1 }}
+        ListHeaderComponent={
+          <View style={{ gap: 8 }}>
+            <ErrorText text={error} />
+            {lastJarvis && (
+              <Pressable accessibilityRole="link" onPress={() => router.navigate("/assistant")} style={({ pressed }) => ({ backgroundColor: c.surface, borderColor: c.border, borderWidth: 0.5, borderRadius: 16, padding: 14, gap: 2, opacity: pressed ? 0.7 : 1 })}>
+                <Text style={{ color: c.text, fontSize: 16, fontWeight: "600" }}>Jarvis</Text>
+                <Text style={{ color: c.muted, fontSize: 14 }} numberOfLines={1}>{lastJarvis.reply?.answer ?? lastJarvis.you}</Text>
+              </Pressable>
+            )}
+          </View>
+        }
         ListEmptyComponent={
           !error ? (
             <View style={{ flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 24 }}>
@@ -70,7 +84,7 @@ export default function Conversations() {
             <Pressable
               accessibilityRole="link"
               onPress={() => router.push(`/t/${item.id}`)}
-              style={({ pressed }) => ({ backgroundColor: c.surface, borderColor: c.border, borderWidth: 1, borderRadius: 12, padding: 14, flexDirection: "row", alignItems: "center", gap: 10, opacity: pressed ? 0.7 : 1 })}
+              style={({ pressed }) => ({ backgroundColor: c.surface, borderColor: c.border, borderWidth: 0.5, borderRadius: 16, padding: 14, flexDirection: "row", alignItems: "center", gap: 10, opacity: pressed ? 0.7 : 1 })}
             >
               <Dot color={s === "waiting" || s === "awaiting_approval" ? c.warn : s ? c.accent : c.border} />
               <Text style={{ color: c.text, fontSize: 16, flex: 1 }} numberOfLines={2}>

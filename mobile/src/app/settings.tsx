@@ -112,24 +112,6 @@ export default function Settings() {
 
       <Card>
         <Text style={h2}>Assistant</Text>
-        <Muted small>Tasks found in your mail and WhatsApp, your shared memory, and which WhatsApp chats are read.</Muted>
-        <Row>
-          <Button title="Tasks" onPress={() => router.push("/tasks")} />
-          <Button title="Memory" onPress={() => router.push("/memory")} />
-          <Button title="WhatsApp chats" onPress={() => router.push("/wa-chats")} />
-          <Button title="People" onPress={() => router.push("/people")} />
-        </Row>
-        <Row>
-          <Button title="Learning" onPress={() => router.push("/learning" as never)} />
-          <Button title="AI hub" onPress={() => router.push("/ai-hub" as never)} />
-          <Button title="Tokens and limits" onPress={() => router.push("/limits" as never)} />
-          <Button title="Builds" onPress={() => router.push("/builds" as never)} />
-          <Button title="Phone" onPress={() => router.push("/phone" as never)} />
-          <Button title="Mail" onPress={() => router.push("/mail" as never)} />
-          <Button title="Shopping" onPress={() => router.push("/shop" as never)} />
-          <Button title="Outside agents" onPress={() => router.push("/agents" as never)} />
-          <Button title="Update this app" onPress={() => router.push("/update" as never)} />
-        </Row>
         <Row>
           <Button
             title="Send today's brief now"
@@ -137,7 +119,7 @@ export default function Settings() {
             onPress={() => {
               setBusy("brief");
               Api.briefNow()
-                .then(() => setBriefMsg("Sent: it shows under Needs you on Home."))
+                .then(() => setBriefMsg("Sent: it shows under Needs you on Today."))
                 .catch((e) => setBriefMsg((e as Error).message))
                 .finally(() => setBusy(""));
             }}
@@ -157,7 +139,7 @@ export default function Settings() {
             <Text style={{ color: brain.ok ? c.text : c.err }}>
               {brain.ok ? `From the AI_Assistant brain: ${brain.today ?? 0} task(s) today` : `The brain is not reachable: ${brain.lastError ?? "not synced yet"}`}
             </Text>
-            <Muted small>The brain reads your Gmail and turns mail into tasks; today's appear on Home, and ticking one off there marks it done in the brain.</Muted>
+            <Muted small>The brain reads your Gmail and turns mail into tasks; today's appear on Today, and ticking one off there marks it done in the brain.</Muted>
           </>
         )}
         {gmail?.connected ? (

@@ -3,6 +3,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import type { ModelRouter } from "../ai/route.js";
+import { matchesName, parseAddresses } from "../mail/address.js";
 import type { ProviderPool } from "../providers/registry.js";
 import { localDay } from "../server/home.js";
 import type { Store } from "../store/db.js";
@@ -281,6 +282,22 @@ export class GmailReader {
       if (text) out.push(text.slice(0, 800));
     }
     return out;
+  }
+
+  /** Addresses of this person from mail the owner sent them or got from them, most recent first. */
+  async findAddress(name: string, limit = 5): Promise<string[]> {
+    const q = encodeURIComponent(`(to:"${name.replace(/"/g, "")}" OR from:"${name.replace(/"/g, "")}")`);
+    const found = (await this.get<{ messages?: { id: string }[] }>(`/messages?maxResults=15&q=${q}`)).messages ?? [];
+    const own = this.status().email?.toLowerCase();
+    const out = new Set<string>();
+    for (const m of found) {
+      const msg = await this.get<any>(`/messages/${m.id}?format=metadata&metadataHeaders=To&metadataHeaders=From`);
+      for (const h of msg.payload?.headers ?? []) {
+        for (const a of parseAddresses(String(h.value ?? ""))) if (a.address !== own && matchesName(a, name)) out.add(a.address);
+      }
+      if (out.size >= limit) break;
+    }
+    return [...out];
   }
 
   private async get<T>(path: string): Promise<T> {

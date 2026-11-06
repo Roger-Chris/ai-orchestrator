@@ -37,7 +37,7 @@ function Toggle({ label, value, onChange }: { label: string; value: boolean; onC
   return (
     <Pressable accessibilityRole="switch" accessibilityState={{ checked: value }} onPress={() => onChange(!value)} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", minHeight: 44 }}>
       <Text style={{ color: c.text, fontSize: 15, flex: 1 }}>{label}</Text>
-      <Switch value={value} onValueChange={onChange} trackColor={{ true: c.accent }} />
+      <Switch value={value} onValueChange={onChange} thumbColor="#ffffff" trackColor={{ true: c.accent }} />
     </Pressable>
   );
 }

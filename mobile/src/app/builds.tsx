@@ -1,6 +1,7 @@
 import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { Linking, Pressable, RefreshControl, ScrollView, Switch, Text, View } from "react-native";
+import { useTabSpace } from "../components/FloatingTabs";
 import { Button, Card, Chip, ErrorText, Field, Muted, Row } from "../components/ui";
 import { Api, type Build, type PendingApproval } from "../lib/api";
 import { type Colors, LABEL, useColors } from "../lib/theme";
@@ -20,6 +21,7 @@ const tokens = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M`
 
 export default function Builds() {
   const c = useColors();
+  const space = useTabSpace(); // also shown inside the Work tab, under the floating bar
   const { id } = useLocalSearchParams<{ id?: string }>();
   const [builds, setBuilds] = useState<Build[]>();
   const [open, setOpen] = useState<string | undefined>(id);
@@ -76,7 +78,7 @@ export default function Builds() {
   const active = builds?.filter((b) => b.status === "running") ?? [];
   const h2 = { color: c.text, fontSize: 17, fontWeight: "700" as const };
   return (
-    <ScrollView contentContainerStyle={{ padding: 16, gap: 14 }} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} colors={[c.accent]} />}>
+    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: space, gap: 14 }} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} colors={[c.accent]} />}>
       <ErrorText text={error} />
       {builds && (
         <Row>
@@ -87,7 +89,7 @@ export default function Builds() {
       {deviceAsks.length > 0 && (
         <Card attention>
           <Text style={h2}>Device actions to approve</Text>
-          <Muted small>Asked for on your devices, not by a build. They are also on Home under Approve?</Muted>
+          <Muted small>Asked for on your devices, not by a build. They are also on Today under Approve?</Muted>
           {deviceAsks.map((a) => (
             <View key={a.id} style={{ gap: 6 }}>
               <Text style={{ color: c.text }}>{`${a.node}: ${a.summary}`}</Text>
@@ -110,11 +112,11 @@ export default function Builds() {
           <Field label="App name" value={form.name} onChangeText={(name) => setForm({ ...form, name })} placeholder="Expense tracker" />
           <Field label="What to build or change" value={form.spec} onChangeText={(spec) => setForm({ ...form, spec })} multiline style={{ minHeight: 110 }} placeholder="A web page to log expenses by category, with a monthly total" />
           <Row>
-            <Switch value={form.cont} onValueChange={(cont) => setForm({ ...form, cont })} trackColor={{ true: c.accent, false: c.border }} />
+            <Switch value={form.cont} onValueChange={(cont) => setForm({ ...form, cont })} thumbColor="#ffffff" trackColor={{ true: c.accent, false: c.border }} />
             <Text style={{ color: c.text }}>Continue the last build of this app</Text>
           </Row>
           <Row>
-            <Switch value={form.design} onValueChange={(design) => setForm({ ...form, design })} trackColor={{ true: c.accent, false: c.border }} />
+            <Switch value={form.design} onValueChange={(design) => setForm({ ...form, design })} thumbColor="#ffffff" trackColor={{ true: c.accent, false: c.border }} />
             <Text style={{ color: c.text }}>Show me the design before building</Text>
           </Row>
           {!form.cont && <Field label="Folder on the hub (empty: a new private repo)" value={form.repo} onChangeText={(repo) => setForm({ ...form, repo })} autoCapitalize="none" placeholder="/home/roger/Desktop/expenses" />}
@@ -158,6 +160,7 @@ export default function Builds() {
                 <Muted key={i} small>{`${r.provider ? (LABEL[r.provider] ?? r.provider) : "Reviewer"} says:\n${r.output.slice(0, 1500)}`}</Muted>
               ))}
               <Field label="Changes you want, or a note for the builder" value={changes[b.id] ?? ""} onChangeText={(t) => setChanges({ ...changes, [b.id]: t })} multiline style={{ minHeight: 70 }} />
+              <ErrorText text={error} />
               <Row>
                 <Button kind="primary" small title="Looks good, build it" busy={busy === `y${b.id}`} onPress={() => void act(`y${b.id}`, () => Api.approve(b.runId, changes[b.id] ?? ""))} />
                 <Button small title="Change the design" disabled={!changes[b.id]?.trim()} busy={busy === `n${b.id}`} onPress={() => void act(`n${b.id}`, () => Api.revise(b.runId, changes[b.id]))} />

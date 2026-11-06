@@ -5,6 +5,7 @@ import type { PushPayload } from "../server/push.js";
 import type { Store } from "../store/db.js";
 import type { MailDraft } from "../types.js";
 import { writingNote } from "../integrations/writing.js";
+import { ADDRESS, spokenEmail } from "./address.js";
 
 /**
  * Mail the assistant writes for the owner. `draft()` writes it in the owner's voice and waits; only
@@ -12,12 +13,24 @@ import { writingNote } from "../integrations/writing.js";
  * words on that screen. The brain gets a tool for draft() and never one for send().
  */
 
-const ADDRESS = /^[^\s@<>,;"]+@[^\s@<>,;"]+\.[^\s@<>,;"]+$/;
+/** The brain has only a name and neither memory nor Gmail gave one clear address: it asks the owner. */
+export class NeedsAddress extends Error {
+  constructor(
+    readonly who: string,
+    readonly candidates: string[],
+  ) {
+    super(candidates.length ? `several addresses fit ${who}: ${candidates.join(", ")}` : `no email address found for ${who}`);
+  }
+}
 
 export interface MailDeskDeps {
   store: Store;
   /** The sign-in that may send (data/gmail-send-token.json). */
-  gmail: Pick<GmailReader, "send" | "recentSent">;
+  gmail: Pick<GmailReader, "send" | "recentSent"> & Partial<Pick<GmailReader, "findAddress" | "status">>;
+  /** Every mail goes from this account; a sign-in on any other is refused at Send. */
+  sendFrom?: string;
+  /** The name to sign with. */
+  owner?: string;
   think: (prompt: string) => Promise<string>;
   /** The owner's overall voice, from the style book. */
   voice?: () => string | undefined;
@@ -32,10 +45,11 @@ export interface MailDeskDeps {
   now?: () => number;
 }
 
-export function mailPrompt(i: { to: string; about: string; subject?: string; voice?: string; samples: string[]; knowledge?: string; writing?: string[] }): string {
+export function mailPrompt(i: { to: string; about: string; subject?: string; voice?: string; samples: string[]; knowledge?: string; writing?: string[]; owner?: string }): string {
   return [
     `Write an email from me to ${i.to}. What it should say: ${JSON.stringify(i.about)}.`,
     i.subject ? `Subject: ${i.subject}` : "",
+    i.owner ? `My name, to sign with: ${i.owner}` : "",
     i.voice ? `How I write in general: ${i.voice}` : "",
     writingNote(i.writing ?? []),
     i.knowledge ? `Background from my own notes, never quote it or mention notes:\n${i.knowledge}` : "",
@@ -81,18 +95,26 @@ export class MailDesk {
 
   /** Writes a draft and tells the phone. `to` may be a name; the owner fills in the address before sending. */
   async draft(i: { to: string; about: string; subject?: string; name?: string; by?: string }): Promise<MailDraft> {
-    const to = i.to.trim();
-    if (!to || !i.about.trim()) throw new Error("a mail needs someone to write to and what to say");
-    const isAddress = ADDRESS.test(to);
+    const said = i.to.trim();
+    if (!said || !i.about.trim()) throw new Error("a mail needs someone to write to and what to say");
+    let address = spokenEmail(said);
+    if (!address) {
+      const found = (await this.d.gmail.findAddress?.(said).catch(() => [] as string[])) ?? [];
+      if (found.length === 1) address = found[0];
+      else if (i.by === "brain") throw new NeedsAddress(said, found);
+    }
+    const to = address ?? said;
+    const isAddress = !!address;
     // Examples are a help, not a need: without the send sign-in the draft is still written.
-    const samples = await this.d.gmail.recentSent(isAddress ? to : undefined).catch(() => [] as string[]);
-    const who = i.name ?? to;
-    const written = parseMail(await this.d.think(mailPrompt({ to: who, about: i.about, subject: i.subject, voice: this.d.voice?.(), samples, knowledge: this.d.knowledge?.(who), writing: this.d.writing?.() })));
+    const samples = await this.d.gmail.recentSent(address).catch(() => [] as string[]);
+    const name = i.name && !spokenEmail(i.name) ? i.name : !spokenEmail(said) ? said : undefined;
+    const who = name ?? to;
+    const written = parseMail(await this.d.think(mailPrompt({ to: who, about: i.about, subject: i.subject, owner: this.d.owner, voice: this.d.voice?.(), samples, knowledge: this.d.knowledge?.(who), writing: this.d.writing?.() })));
     if (!written) throw new Error("the model did not write a readable mail");
     const m = this.save({
       id: `m${randomBytes(4).toString("hex")}`,
       to: isAddress ? to : "",
-      toName: i.name ?? (isAddress ? undefined : to),
+      toName: name,
       subject: i.subject?.replace(/[\r\n]+/g, " ").trim() || written.subject,
       body: written.body,
       about: i.about,
@@ -125,6 +147,8 @@ export class MailDesk {
     const subject = edit.subject.replace(/[\r\n]+/g, " ").trim();
     if (!ADDRESS.test(to)) throw new Error(`"${to}" is not one email address`);
     if (!subject || !edit.body.trim()) throw new Error("a mail needs a subject and some text");
+    const from = this.d.gmail.status?.().email;
+    if (this.d.sendFrom && from?.toLowerCase() !== this.d.sendFrom.toLowerCase()) throw new Error(`Mail must go from ${this.d.sendFrom}, but this hub is signed in as ${from ?? "nobody"}. Run \`orc gmail connect-send\` on the hub and sign in as ${this.d.sendFrom}.`);
     const m = this.get(id);
     if (!m) throw new Error("no such draft");
     const taken = this.d.store.db.prepare("UPDATE mail_drafts SET status = 'sending' WHERE id = ? AND status IN ('draft', 'failed')").run(id);

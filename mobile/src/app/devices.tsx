@@ -1,9 +1,9 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
-import { Button, Card, Chip, Dot, ErrorText, Field, Muted, Row } from "../../components/ui";
-import { Api, connection, hubList, type NodeInfo } from "../../lib/api";
-import { type Colors, LABEL, useColors } from "../../lib/theme";
+import { Button, Card, Chip, Dot, ErrorText, Field, Muted, Row } from "../components/ui";
+import { Api, connection, hubList, type NodeInfo } from "../lib/api";
+import { type Colors, LABEL, useColors } from "../lib/theme";
 
 const OS: Record<string, string> = { win32: "Windows", darwin: "macOS", linux: "Linux" };
 type FileNode = Awaited<ReturnType<typeof Api.fileNodes>>[number];
@@ -26,7 +26,7 @@ function toolState(c: Colors, p: Tool): { word: string; color: string } {
 
 /**
  * Your devices on the tailnet that run the orchestrator: which one is the hub and which are its
- * backups, what each can do (AI tools, files) and a few actions. A screenshot asks first: approve it on Home.
+ * backups, what each can do (AI tools, files) and a few actions. A screenshot asks first: approve it on Today.
  */
 export default function Devices() {
   const c = useColors();
@@ -72,7 +72,7 @@ export default function Devices() {
     setNote("");
     try {
       const r = await Api.act(node, action, {}, "asked from the app's Devices screen");
-      if (r.status === "pending") setNote(`${label} on ${node}: approve it on Home.`);
+      if (r.status === "pending") setNote(`${label} on ${node}: approve it on Today.`);
       else if (r.status === "done") setNote(`${node}: ${r.result?.output ?? "done"}`);
       else setNote(`${node}: ${r.error ?? "refused"}`);
       if (action === "files.index") await load();
@@ -101,7 +101,7 @@ export default function Devices() {
   const online = all.filter((n) => n.online !== false).length;
 
   return (
-    <ScrollView contentContainerStyle={{ padding: 16, gap: 14 }} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(true)} colors={[c.accent]} />}>
+    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32, gap: 14 }} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={loading} onRefresh={() => load(true)} colors={[c.accent]} />}>
       <ErrorText text={error} />
       {!!note && (
         <Card>

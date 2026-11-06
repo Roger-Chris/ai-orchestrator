@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 
 /** One recording through the laptop's Whisper (tools/transcribe.py, the same script as voice notes). */
 export async function whisperFile(path: string, o: { uv: string; whisperModel: string; whisperLanguage: string }, root: string): Promise<{ text: string; language?: string }> {
-  const args = ["run", resolve(root, "tools", "transcribe.py"), "--model", o.whisperModel];
+  const args = ["run", resolve(root, "tools", "transcribe.py"), "--model", o.whisperModel, "--speakers"];
   if (o.whisperLanguage) args.push("--language", o.whisperLanguage);
   const child = spawn(o.uv, args, { stdio: ["pipe", "pipe", "pipe"] });
   const closed = new Promise<number | null>((ok, no) => {

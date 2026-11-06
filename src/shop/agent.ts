@@ -141,8 +141,8 @@ function writeHook(dir: string, stores: StoreId[], hosts: string[]) {
   writeFileSync(join(dir, ".claude", "settings.json"), JSON.stringify({ hooks: { PreToolUse: [{ matcher: "mcp__browser__.*", hooks: [{ type: "command", command: `${quoted(process.execPath)} ${quoted(hook)} ${quoted(policy)}` }] }] } }));
 }
 
-const TOOLS = ["browser_navigate", "browser_navigate_back", "browser_snapshot", "browser_find", "browser_click", "browser_type", "browser_press_key", "browser_select_option", "browser_hover", "browser_wait_for", "browser_tabs", "browser_handle_dialog", "browser_close"].map((t) => `mcp__browser__${t}`);
-const NEVER = ["browser_evaluate", "browser_run_code", "browser_run_code_unsafe", "browser_file_upload", "browser_fill_form", "browser_install", "browser_drag", "browser_drop"].map((t) => `mcp__browser__${t}`);
+export const WEB_TOOLS = ["browser_navigate", "browser_navigate_back", "browser_snapshot", "browser_find", "browser_click", "browser_type", "browser_press_key", "browser_select_option", "browser_hover", "browser_wait_for", "browser_tabs", "browser_handle_dialog", "browser_close"].map((t) => `mcp__browser__${t}`);
+export const NEVER_TOOLS = ["browser_evaluate", "browser_run_code", "browser_run_code_unsafe", "browser_file_upload", "browser_fill_form", "browser_install", "browser_drag", "browser_drop"].map((t) => `mcp__browser__${t}`);
 
 export interface CartItem {
   name: string;
@@ -395,7 +395,7 @@ export async function runCartAgent(store: StoreId | StoreId[], request: string, 
     env: { MAX_MCP_OUTPUT_TOKENS: "80000", ...(o.headless ? {} : await desktopEnv(exec)) },
     command: o.command,
     // Its own folder and no settings of this machine: only the browser, none of the owner's tools or hooks.
-    args: ["-p", cartPrompt(store, request, o.compareOnly), "--model", o.model, "--output-format", "text", "--strict-mcp-config", "--mcp-config", config, "--setting-sources", "project", "--tools", "", "--allowedTools", TOOLS.join(","), "--disallowedTools", NEVER.join(",")],
+    args: ["-p", cartPrompt(store, request, o.compareOnly), "--model", o.model, "--output-format", "text", "--strict-mcp-config", "--mcp-config", config, "--setting-sources", "project", "--tools", "", "--allowedTools", WEB_TOOLS.join(","), "--disallowedTools", NEVER_TOOLS.join(",")],
     cwd: dir,
     timeoutMs: o.timeoutMinutes * 60_000,
     signal: o.signal,

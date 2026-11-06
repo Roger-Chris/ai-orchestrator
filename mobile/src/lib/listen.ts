@@ -28,6 +28,10 @@ const MESSAGES: Record<string, string> = {
   network: "Speech recognition needs the internet on this phone.",
 };
 
+/** How long a pause ends your sentence, and how long it waits for you to begin. */
+const PAUSE_MS = 2500;
+const FIRST_WORD_MS = 8000;
+
 /**
  * `start()` listens until you pause; `partial` shows the words so far; `onFinal` gets the full
  * sentence. Nothing heard calls `onFinal("")`.
@@ -37,6 +41,8 @@ export function useListen(onFinal: (text: string) => void) {
   const [partial, setPartial] = useState("");
   const [error, setError] = useState("");
   const final = useRef("");
+  const latest = useRef("");
+  const quiet = useRef<ReturnType<typeof setTimeout>>(undefined);
   const sent = useRef(true);
   const cb = useRef(onFinal);
   cb.current = onFinal;
@@ -44,18 +50,35 @@ export function useListen(onFinal: (text: string) => void) {
   // The recogniser's events reach every listener in the app: only react while this screen owns it.
   const mine = () => micOwner() === "listen" && !sent.current;
 
+  // Android cuts in at its own very short pause, so it runs continuously and we decide when you stopped.
+  const stopAfter = (ms: number) => {
+    clearTimeout(quiet.current);
+    quiet.current = setTimeout(() => {
+      try {
+        ExpoSpeechRecognitionModule.stop();
+      } catch {
+        /* not listening */
+      }
+    }, ms);
+  };
+
   const finish = () => {
     if (sent.current) return;
     sent.current = true;
-    cb.current(final.current.trim());
+    clearTimeout(quiet.current);
+    cb.current(`${final.current} ${latest.current}`.trim());
   };
 
   useSpeechRecognitionEvent("start", () => mine() && setListening(true));
   useSpeechRecognitionEvent("result", (e) => {
     if (!mine()) return;
     const t = e.results[0]?.transcript ?? "";
-    setPartial(t);
-    if (e.isFinal) final.current = t;
+    if (e.isFinal) {
+      final.current = `${final.current} ${t}`.trim();
+      latest.current = "";
+    } else latest.current = t;
+    setPartial(`${final.current} ${latest.current}`.trim());
+    stopAfter(PAUSE_MS);
   });
   useSpeechRecognitionEvent("error", (e) => {
     if (!mine()) return;
@@ -78,14 +101,17 @@ export function useListen(onFinal: (text: string) => void) {
     }
     await claimMic();
     final.current = "";
+    latest.current = "";
     sent.current = false;
     setPartial("");
-    ExpoSpeechRecognitionModule.start({ lang: LISTEN_LANG, interimResults: true, continuous: false, addsPunctuation: true });
+    ExpoSpeechRecognitionModule.start({ lang: LISTEN_LANG, interimResults: true, continuous: true, addsPunctuation: true, androidIntentOptions: { EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS: PAUSE_MS, EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS: PAUSE_MS } });
+    stopAfter(FIRST_WORD_MS);
     return true;
   }, []);
 
   /** Stop and use what was heard so far. */
   const stop = useCallback(() => {
+    clearTimeout(quiet.current);
     try {
       ExpoSpeechRecognitionModule.stop();
     } catch {
@@ -95,6 +121,7 @@ export function useListen(onFinal: (text: string) => void) {
 
   /** Stop and throw away what was heard. */
   const cancel = useCallback(() => {
+    clearTimeout(quiet.current);
     sent.current = true;
     setListening(false);
     if (micOwner() === "listen") setMicOwner("none");

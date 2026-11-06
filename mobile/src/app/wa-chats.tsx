@@ -45,7 +45,7 @@ export default function WaChats() {
             <Text style={{ color: chat.muted ? c.muted : c.text, fontSize: 16 }} numberOfLines={1}>{chat.name}</Text>
             <Text style={{ color: c.muted, fontSize: 13 }}>{`${chat.is_group ? "group · " : ""}${chat.messages} messages${chat.muted ? " · muted" : ""}`}</Text>
           </View>
-          <Switch value={!chat.muted} onValueChange={() => void toggle(chat)} trackColor={{ true: c.accent, false: c.border }} />
+          <Switch value={!chat.muted} onValueChange={() => void toggle(chat)} thumbColor="#ffffff" trackColor={{ true: c.accent, false: c.border }} />
         </View>
       ))}
       {chats && !chats.length && <Muted>No WhatsApp chats yet: the bridge has not sent any messages.</Muted>}

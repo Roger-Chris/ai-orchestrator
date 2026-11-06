@@ -1,4 +1,4 @@
-import { Stack, router, useLocalSearchParams } from "expo-router";
+import { Stack, router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { type ComponentRef, useCallback, useEffect, useRef, useState } from "react";
 import { KeyboardAvoidingView, ScrollView, Text, View } from "react-native";
 import { Composer } from "../../components/Composer";
@@ -31,9 +31,16 @@ export default function Conversation() {
   }, [id, isNew]);
 
   useEffect(() => {
-    void load();
     Api.agents().then(setAgents).catch(() => {});
-  }, [load]);
+  }, []);
+  // New runs from any device, and the title, while this screen is showing.
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+      const t = setInterval(() => void load(), 6000);
+      return () => clearInterval(t);
+    }, [load]),
+  );
 
   const send = async (text: string, o: RunOptions) => {
     if (isNew) {

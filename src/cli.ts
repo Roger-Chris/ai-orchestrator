@@ -268,6 +268,8 @@ export function buildSystem(config: Config) {
   const mail = new MailDesk({
     store,
     gmail: mailSender,
+    sendFrom: config.gmail.sendFrom,
+    owner: config.profile.name || process.env.OWNER_NAME || undefined,
     think: async (prompt) => (await models.run("mail_write", { prompt, timeoutMs: 120_000 })).text,
     voice: () => drafter.book()?.owner.voice?.summary,
     knowledge: replica ? (name) => personKnowledge(replica, { name, chatId: "", isGroup: false }).join("\n") || undefined : undefined,

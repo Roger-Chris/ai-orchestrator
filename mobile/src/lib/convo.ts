@@ -1,3 +1,4 @@
+import * as FileSystem from "expo-file-system/legacy";
 import type { AssistantReply } from "./api";
 
 /** One exchange with the assistant, typed or spoken. */
@@ -10,17 +11,35 @@ export interface Turn {
 }
 
 /**
- * The conversation, kept for the whole app session and shared by the Assistant tab and the Talk
+ * The conversation, saved on this phone and shared by the Assistant tab and the Talk
  * screen, so you can start by voice and carry on typing (or the other way round).
  */
 let log: Turn[] = [];
 let nextId = 1;
 const listeners = new Set<(t: Turn[]) => void>();
 
+const FILE = `${FileSystem.documentDirectory}jarvis-chat.json`;
+let saving: ReturnType<typeof setTimeout> | undefined;
+function save() {
+  clearTimeout(saving);
+  saving = setTimeout(() => void FileSystem.writeAsStringAsync(FILE, JSON.stringify(log.slice(-40))).catch(() => {}), 500);
+}
+
 export const convo = {
   get: () => log,
+  /** Brings back the chat from the last time the app was open; a missing or broken file is an empty chat. */
+  async load() {
+    try {
+      const saved = JSON.parse(await FileSystem.readAsStringAsync(FILE)) as Turn[];
+      nextId = Math.max(0, ...saved.map((t) => t.id)) + 1;
+      convo.set(saved);
+    } catch {
+      /* nothing saved yet */
+    }
+  },
   set(t: Turn[]) {
     log = t;
+    save();
     for (const l of listeners) l(log);
   },
   add(you: string, spoken = false): Turn {

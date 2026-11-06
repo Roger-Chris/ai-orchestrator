@@ -5,13 +5,15 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { loadConnection } from "../lib/api";
+import { convo } from "../lib/convo";
 import { startSender } from "../lib/recordings";
 import { useWakeWord } from "../lib/wake";
 import { ensureChannels, routeFor } from "../lib/push";
-import { useColors } from "../lib/theme";
+import { loadLook, useColors, useIsDark } from "../lib/theme";
 
 export default function RootLayout() {
   const c = useColors();
+  const isDark = useIsDark();
   const [ready, setReady] = useState(false);
   const lastTap = Notifications.useLastNotificationResponse();
   useWakeWord(); // "Hey Jarvis" while the app is open, when turned on in Settings → Voice
@@ -20,6 +22,8 @@ export default function RootLayout() {
     // The alarm channel must exist before the first alarm arrives, also on phones that turned
     // notifications on before it was added.
     ensureChannels().catch(() => {});
+    void loadLook();
+    void convo.load();
     loadConnection().then((conn) => {
       setReady(true);
       if (!conn) router.replace("/connect");
@@ -47,16 +51,21 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="auto" />
+      <StatusBar style={isDark ? "light" : "dark"} />
       <Stack
         screenOptions={{
-          headerStyle: { backgroundColor: c.surface },
-          headerTintColor: c.text,
-          headerTitleStyle: { fontWeight: "700" },
+          animation: "ios_from_right",
+          headerStyle: { backgroundColor: c.bg },
+          headerShadowVisible: false,
+          headerTintColor: c.accent,
+          headerTitleStyle: { fontWeight: "600", color: c.text },
           contentStyle: { backgroundColor: c.bg },
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="look" options={{ title: "Colours and feel" }} />
+        <Stack.Screen name="devices" options={{ title: "Devices" }} />
+        <Stack.Screen name="insights" options={{ title: "Insights" }} />
         <Stack.Screen name="connect" options={{ title: "Connect to your hub" }} />
         <Stack.Screen name="settings" options={{ title: "Settings" }} />
         <Stack.Screen name="tasks" options={{ title: "Tasks" }} />

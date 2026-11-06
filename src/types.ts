@@ -728,6 +728,7 @@ export type PhoneActionSpec =
   | { kind: "alarm"; hour: number; minute: number; label?: string }
   | { kind: "reminder"; at: string; text: string }
   | { kind: "open_app"; app: string; package?: string }
+  | { kind: "link"; url: string; label?: string }
   | { kind: "call"; number: string; name?: string }
   | { kind: "sms"; number: string; text: string; name?: string }
   | { kind: "file"; path: string };

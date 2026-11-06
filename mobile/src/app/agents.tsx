@@ -74,7 +74,7 @@ export default function Agents() {
       <Card attention={paused}>
         <Row>
           <Text style={{ color: c.text, fontSize: 16, flex: 1 }}>{paused ? "All outside agents are stopped" : "Outside agents may work"}</Text>
-          <Switch value={!paused} disabled={busy === "pause"} onValueChange={(on) => void run("pause", () => Api.pauseOutsideAgents(!on))} trackColor={{ true: c.accent, false: c.err }} />
+          <Switch value={!paused} disabled={busy === "pause"} onValueChange={(on) => void run("pause", () => Api.pauseOutsideAgents(!on))} thumbColor="#ffffff" trackColor={{ true: c.accent, false: c.err }} />
         </Row>
         <Muted small>{`They connect to ${connection()?.url ?? "the hub"}/mcp with their own token. Turning this off stops every one of them at once.`}</Muted>
       </Card>
@@ -116,7 +116,7 @@ export default function Agents() {
             ))}
           </Row>
           <Row>
-            <Switch value={form.memoryWrite} onValueChange={(memoryWrite) => setForm({ ...form, memoryWrite })} trackColor={{ true: c.accent, false: c.border }} />
+            <Switch value={form.memoryWrite} onValueChange={(memoryWrite) => setForm({ ...form, memoryWrite })} thumbColor="#ffffff" trackColor={{ true: c.accent, false: c.border }} />
             <Text style={{ color: c.text }}>May add to the shared memory</Text>
           </Row>
           <Row>

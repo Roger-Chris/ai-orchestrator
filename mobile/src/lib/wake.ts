@@ -98,7 +98,7 @@ export function useWakeWord() {
     woke.current = null;
     pausedUntil.current = Date.now() + 3000;
     setTimeout(() => bump((n) => n + 1), 3100); // re-check once the pause is over
-    void stop().then(() => router.push({ pathname: "/talk", params: rest ? { say: rest } : {} }));
+    void stop().then(() => router.navigate({ pathname: "/assistant", params: rest ? { say: rest } : { listen: "1" } }));
   };
 
   useSpeechRecognitionEvent("result", (e) => {

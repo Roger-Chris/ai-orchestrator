@@ -2,7 +2,9 @@ import { router, useFocusEffect } from "expo-router";
 import { type ReactNode, useCallback, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Linking, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ErrorText } from "../../components/ui";
+import { useTabSpace } from "../../components/FloatingTabs";
+import { Button, ErrorText, Title } from "../../components/ui";
+import { feel } from "../../lib/feel";
 import { type AlertAction, Api, type Attention, type BrainAlert, type DayTask, type Decision, type Home as HomeData, type HomeBuild, hubUrl, type PendingApproval, type QuietChat, type ReplyDraft, type Running, Unauthorized } from "../../lib/api";
 import { useColors } from "../../lib/theme";
 import { openWhatsApp } from "../../lib/whatsapp";
@@ -42,12 +44,12 @@ function headline(h: HomeData): string {
 function Section({ label, right, children }: { label: string; right?: ReactNode; children: ReactNode }) {
   const c = useColors();
   return (
-    <View style={{ marginTop: 28 }}>
-      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <Text style={{ color: c.muted, fontSize: 13 }}>{label}</Text>
-        {typeof right === "string" || typeof right === "number" ? <Text style={{ color: c.muted, fontSize: 13 }}>{right}</Text> : right}
+    <View style={{ marginTop: 24 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", gap: 12, marginBottom: 8 }}>
+        <Text accessibilityRole="header" style={{ color: c.text, fontSize: 20, fontWeight: "700" }}>{label}</Text>
+        {typeof right === "string" || typeof right === "number" ? <Text style={{ color: c.muted, fontSize: 15 }}>{right}</Text> : right}
       </View>
-      {children}
+      <View style={{ backgroundColor: c.surface, borderColor: c.border, borderWidth: 0.5, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 2 }}>{children}</View>
     </View>
   );
 }
@@ -80,8 +82,8 @@ function TaskRow({ t, first, onToggle }: { t: DayTask; first: boolean; onToggle:
     <Row first={first}>
       <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: t.done }} accessibilityLabel={t.title} onPress={onToggle} hitSlop={6} style={{ flexDirection: "row", gap: 12 }}>
         <Text style={{ width: 54, color: c.muted, fontSize: 14, paddingTop: 1, fontVariant: ["tabular-nums"] }}>{t.time ?? "today"}</Text>
-        <View style={{ width: 18, height: 18, marginTop: 2, borderRadius: 4, borderWidth: 1.5, borderColor: t.done ? c.text : c.muted, backgroundColor: t.done ? c.text : "transparent", alignItems: "center", justifyContent: "center" }}>
-          {t.done && <Text style={{ color: c.bg, fontSize: 12, fontWeight: "700", lineHeight: 14 }}>✓</Text>}
+        <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: t.done ? c.accent : c.border, backgroundColor: t.done ? c.accent : "transparent", alignItems: "center", justifyContent: "center" }}>
+          {t.done && <Text style={{ color: c.accentInk, fontSize: 14, fontWeight: "700", lineHeight: 17 }}>✓</Text>}
         </View>
         <View style={{ flex: 1 }}>
           <Text style={{ color: t.done ? c.muted : c.text, fontSize: 16, textDecorationLine: t.done ? "line-through" : "none" }}>{t.title}</Text>
@@ -121,9 +123,9 @@ function ApprovalRow({ a, first, onDone }: { a: PendingApproval; first: boolean;
       <Text style={{ color: outside ? c.warn : c.muted, fontSize: 13 }}>{`${outside ? `Asked by outside agent ${a.by!.slice(6)} · ` : ""}On ${a.node} · ${ago(a.since)} · ${left} min left`}</Text>
       <Text style={{ color: c.text, fontSize: 16, marginTop: 3 }}>{a.summary}</Text>
       {!!a.reason && <Text style={{ color: c.muted, fontSize: 14, lineHeight: 20, marginTop: 3 }}>{`Why: ${a.reason}`}</Text>}
-      <View style={{ flexDirection: "row", gap: 20, marginTop: 10, alignItems: "center" }}>
-        <TextLink title="Approve" onPress={() => void decide(true)} />
-        <TextLink title="Deny" color={c.muted} onPress={() => void decide(false)} />
+      <View style={{ flexDirection: "row", gap: 8, marginTop: 10, alignItems: "center" }}>
+        <Button small kind="primary" title="Approve" disabled={busy} onPress={() => void decide(true)} />
+        <Button small kind="danger" title="Deny" disabled={busy} onPress={() => void decide(false)} />
         {busy && <ActivityIndicator color={c.accent} />}
       </View>
       {!!out && <Text style={{ color: c.muted, fontSize: 13, marginTop: 6 }}>{out}</Text>}
@@ -145,7 +147,7 @@ function BuildRow({ b, first }: { b: HomeBuild; first: boolean }) {
       <View style={{ flexDirection: "row", gap: 20, marginTop: 10 }}>
         {!!b.web && <TextLink title="Open preview" onPress={() => void Linking.openURL(`${base}${b.web}`)} />}
         {!!b.apk && <TextLink title="Install APK" onPress={() => void Linking.openURL(`${base}${b.apk}`)} />}
-        <TextLink title="Review →" color={c.muted} onPress={() => router.push(`/builds?id=${b.id}` as never)} />
+        <TextLink title="Review →" onPress={() => router.push(`/builds?id=${b.id}` as never)} />
       </View>
     </Row>
   );
@@ -395,46 +397,11 @@ function AttentionRow({ a, first, onRetried }: { a: Attention; first: boolean; o
   );
 }
 
-/** The message box at the bottom: starts a new conversation with the brain. */
-function Ask() {
-  const c = useColors();
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const send = async () => {
-    const t = text.trim();
-    if (!t || busy) return;
-    setBusy(true);
-    try {
-      const thread = await Api.newThread();
-      await Api.send(thread.id, t, {});
-      setText("");
-      router.push(`/t/${thread.id}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <View style={{ paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.bg }}>
-      <View style={{ flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: c.border, borderRadius: 999, paddingLeft: 18, paddingRight: 6, minHeight: 48 }}>
-        <TextInput value={text} onChangeText={setText} placeholder="Message the brain" placeholderTextColor={c.muted} onSubmitEditing={send} returnKeyType="send" style={{ flex: 1, color: c.text, fontSize: 16, paddingVertical: 8 }} />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Send"
-          onPress={send}
-          disabled={!text.trim() || busy}
-          style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: text.trim() ? c.text : c.border, alignItems: "center", justifyContent: "center" }}
-        >
-          {busy ? <ActivityIndicator size="small" color={c.bg} /> : <Text style={{ color: c.bg, fontSize: 18, fontWeight: "700", lineHeight: 20 }}>↑</Text>}
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
 /** Today at a glance: your tasks, what the brain is waiting on you for, what is running, and anything wrong. */
 export default function Home() {
   const c = useColors();
   const insets = useSafeAreaInsets();
+  const space = useTabSpace();
   const [home, setHome] = useState<HomeData>();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -464,6 +431,8 @@ export default function Home() {
   };
 
   const toggle = (t: DayTask) => {
+    if (t.done) feel.tap();
+    else feel.done();
     setHome((h) => h && { ...h, tasks: h.tasks.map((x) => (x.id === t.id ? { ...x, done: !t.done } : x)) });
     Api.taskDone(t.id, !t.done).catch(() => void load());
   };
@@ -474,25 +443,17 @@ export default function Home() {
   return (
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor: c.bg }}>
       <ScrollView
-        contentContainerStyle={{ paddingTop: insets.top + 20, paddingHorizontal: 22, paddingBottom: 28 }}
+        contentContainerStyle={{ paddingTop: insets.top + 16, paddingHorizontal: 16, paddingBottom: space + 12 }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} colors={[c.accent]} />}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-          <Text style={{ color: c.muted, fontSize: 13, flex: 1 }} numberOfLines={1}>
-            {home ? `${date} · hub on ${home.node}${home.devices > 1 ? ` · ${home.devices} devices` : ""}` : date}
-          </Text>
-          <View style={{ flexDirection: "row", gap: 18 }}>
-            <TextLink title="Insights" color={c.muted} onPress={() => router.push("/insights" as never)} />
-            <TextLink title="Settings" color={c.muted} onPress={() => router.push("/settings")} />
-          </View>
-        </View>
+        <Title text="Today" sub={home ? `${date} · hub on ${home.node}${home.devices > 1 ? ` · ${home.devices} devices` : ""}` : date} />
         <ErrorText text={error} />
         {!home ? (
           !error && <ActivityIndicator style={{ marginTop: 40 }} color={c.accent} />
         ) : (
           <>
-            <Text style={{ color: c.text, fontFamily: "serif", fontSize: 30, lineHeight: 38, marginTop: 10 }}>{headline(home)}</Text>
+            <Text style={{ color: c.text, fontSize: 17, lineHeight: 23, marginTop: 10 }}>{headline(home).replace(/,\n/g, ", ").replace(/\n/g, " ")}</Text>
             <View style={{ marginTop: 12, flexDirection: "row" }}>
               <TextLink title="● Record a conversation" onPress={() => router.push("/record?start=1" as never)} />
               <View style={{ width: 16 }} />
@@ -595,7 +556,7 @@ export default function Home() {
             )}
 
             {home.recent.length > 0 && (
-              <Section label="Recent" right={<TextLink title="All chats →" onPress={() => router.push("/chats")} />}>
+              <Section label="Recent" right={<TextLink title="All chats →" onPress={() => router.navigate("/chats")} />}>
                 {home.recent.map((r, i) => (
                   <Row key={r.runId} first={i === 0} onPress={r.threadId ? () => open(r.threadId) : undefined}>
                     <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 12 }}>
@@ -611,7 +572,8 @@ export default function Home() {
           </>
         )}
       </ScrollView>
-      <Ask />
+      {/* keeps scrolled rows from running under the clock */}
+      <View pointerEvents="none" style={{ position: "absolute", top: 0, left: 0, right: 0, height: insets.top, backgroundColor: c.bg }} />
     </KeyboardAvoidingView>
   );
 }

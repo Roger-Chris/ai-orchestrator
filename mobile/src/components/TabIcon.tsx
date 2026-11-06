@@ -4,7 +4,7 @@ import { View, type ViewStyle } from "react-native";
  * The footer's icons, drawn from plain views (no icon font or native package to add): a house,
  * a briefcase, a spark, a speech bubble and a laptop. Filled when the tab is the open one.
  */
-export type TabIconName = "home" | "work" | "assistant" | "chats" | "devices";
+export type TabIconName = "home" | "work" | "assistant" | "chats" | "devices" | "more";
 
 export function TabIcon({ name, color, focused }: { name: TabIconName; color: string; focused: boolean }) {
   const line = 2;
@@ -17,9 +17,10 @@ export function TabIcon({ name, color, focused }: { name: TabIconName; color: st
     assistant: [box({ width: 12, height: 12, top: 6, left: 6, transform: [{ rotate: "45deg" }], borderRadius: 3, backgroundColor: fill }), box({ width: 5, height: 5, top: 1, left: 17, borderRadius: 3, borderWidth: 0, backgroundColor: color })],
     chats: [box({ width: 20, height: 14, top: 3, left: 2, borderRadius: 6, backgroundColor: fill }), box({ width: 6, height: 6, top: 15, left: 5, borderTopWidth: 0, borderRightWidth: 0, transform: [{ rotate: "-20deg" }], backgroundColor: fill })],
     devices: [box({ width: 16, height: 11, top: 4, left: 4, borderRadius: 2, backgroundColor: fill }), box({ width: 22, height: 3, top: 17, left: 1, borderWidth: 0, borderRadius: 2, backgroundColor: color })],
+    more: [3, 10, 17].map((left) => box({ width: 5, height: 5, top: 10, left, borderRadius: 3, borderWidth: 0, backgroundColor: color })),
   };
   return (
-    <View style={{ width: 44, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: focused ? `${color}22` : "transparent" }}>
+    <View style={{ width: 44, height: 26, alignItems: "center", justifyContent: "center" }}>
       <View style={{ width: 24, height: 24 }}>
         {shapes[name].map((s, i) => (
           <View key={i} style={s} />

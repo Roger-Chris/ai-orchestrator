@@ -45,7 +45,6 @@ export default function Connect() {
   return (
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={{ padding: 16, gap: 14 }} keyboardShouldPersistTaps="handled">
-        <Text style={{ color: c.text, fontSize: 22, fontWeight: "700" }}>Connect to your hub</Text>
         <Muted>The hub is the always-on PC running the orchestrator. Turn Tailscale on in this phone first.</Muted>
         <Card>
           <Field label="Hub address" value={url} onChangeText={setUrl} placeholder="http://my-pc:4317" autoCapitalize="none" autoCorrect={false} keyboardType="url" />

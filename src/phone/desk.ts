@@ -19,6 +19,7 @@ export const PhoneActionInput = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("alarm"), hour: z.number().int().min(0).max(23), minute: z.number().int().min(0).max(59), label: z.string().max(120).optional() }),
   z.object({ kind: z.literal("reminder"), at: z.string().min(10).max(40), text: z.string().min(1).max(500) }),
   z.object({ kind: z.literal("open_app"), app: z.string().min(1).max(80), package: z.string().regex(/^[\w.]+$/).max(200).optional() }),
+  z.object({ kind: z.literal("link"), url: z.string().url().regex(/^https?:\/\//i).max(2000), label: z.string().max(80).optional() }),
   z.object({ kind: z.literal("call"), number: z.string().regex(/^\+?[\d\s()-]{3,20}$/), name: z.string().max(80).optional() }),
   z.object({ kind: z.literal("sms"), number: z.string().regex(/^\+?[\d\s()-]{3,20}$/), text: z.string().min(1).max(1000), name: z.string().max(80).optional() }),
   z.object({ kind: z.literal("file"), path: z.string().min(1).max(1000) }),
@@ -35,6 +36,8 @@ export function describePhoneAction(a: PhoneActionInput): string {
       return `Remind you at ${a.at.replace("T", " ").slice(0, 16)}: ${a.text}`;
     case "open_app":
       return `Open ${a.app}`;
+    case "link":
+      return `Open ${a.label ?? a.url}`;
     case "call":
       return `Call ${a.name ?? a.number} (opens the dialer; you press call)`;
     case "sms":

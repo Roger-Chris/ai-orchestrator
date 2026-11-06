@@ -2,10 +2,23 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import type { ActionDef } from "../actions/registry.js";
 import { runCartAgent, STORE_IDS } from "./agent.js";
+import { runWebAgent } from "./web.js";
 
 const def = <A extends z.ZodTypeAny>(d: ActionDef<A>) => d as unknown as ActionDef;
 
 export const SHOP_ACTIONS: ActionDef[] = [
+  def({
+    name: "web.task",
+    describe: "Open a website in the assistant's own browser and do a task there: search it, read it, fill in a form. It can't pay, order, sign in or type passwords. Give the address if you know it.",
+    args: z.object({ goal: z.string().min(3).max(2000), url: z.string().url().regex(/^https?:\/\//i).optional() }),
+    // A task can submit things, so the owner approves each one. Outside agents are refused it (src/outside/mcp.ts).
+    risk: () => "ask",
+    summary: (a) => `Do this in the browser${a.url ? ` at ${a.url}` : ""}: ${a.goal.slice(0, 200)}`,
+    run: async (a, ctx) => {
+      const s = ctx.config.shopping;
+      return runWebAgent(a.goal, a.url, { dataDir: resolve(ctx.config.dataDir), browser: s.browser, command: s.command, model: s.model, headless: s.headless, timeoutMinutes: s.timeoutMinutes, signal: ctx.signal });
+    },
+  }),
   def({
     name: "shop.cart",
     describe: "Find a product on a store and add it to the cart in the assistant's own browser profile, then read the cart back. It can't order or pay. Prefer the shop tool, which shows the owner the result.",

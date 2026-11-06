@@ -304,6 +304,8 @@ const ConfigSchema = z.object({
     .object({
       /** OAuth client (Desktop app) downloaded from Google Cloud. */
       clientFile: z.string().default("gmail-client.json"),
+      /** The owner's account: every mail goes from here, and Send refuses a sign-in on any other. */
+      sendFrom: z.string().default("rogerchris190306@gmail.com"),
       pollMinutes: z.number().min(2).default(15),
       /** Gmail search for mail worth reading. */
       query: z.string().default("in:inbox newer_than:2d -category:promotions -category:social -category:forums"),

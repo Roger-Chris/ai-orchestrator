@@ -44,6 +44,13 @@ function useLiveRun(initial: RunRecord) {
     });
   }, [initial.id, initial.status, refresh]);
 
+  // Live events can stall on a phone network: look again anyway while it works.
+  useEffect(() => {
+    if (FINISHED.includes(run.status)) return;
+    const t = setInterval(() => Api.run(initial.id).then(setRun).catch(() => {}), 5000);
+    return () => clearInterval(t);
+  }, [initial.id, run.status]);
+
   return { run, live, refresh };
 }
 

@@ -1,9 +1,9 @@
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import { RefreshControl, ScrollView, Text, View } from "react-native";
-import { ErrorText } from "../../components/ui";
-import { Api, type Insights as InsightsData } from "../../lib/api";
-import { LABEL, useColors } from "../../lib/theme";
+import { ErrorText } from "../components/ui";
+import { Api, type Insights as InsightsData } from "../lib/api";
+import { LABEL, useColors } from "../lib/theme";
 
 const duration = (ms?: number) => (ms === undefined ? "–" : ms < 60_000 ? `${Math.round(ms / 1000)}s` : ms < 3_600_000 ? `${Math.round(ms / 60_000)}m` : `${(ms / 3_600_000).toFixed(1)}h`);
 
@@ -37,7 +37,7 @@ export default function Insights() {
   const finished = data && data.done + data.failed ? Math.round((data.done / (data.done + data.failed)) * 100) : undefined;
 
   return (
-    <ScrollView contentContainerStyle={{ padding: 22, gap: 28 }} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} colors={[c.accent]} />}>
+    <ScrollView contentContainerStyle={{ padding: 22, paddingBottom: 32, gap: 28 }} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} colors={[c.accent]} />}>
       <ErrorText text={error} />
       {data && (
         <>

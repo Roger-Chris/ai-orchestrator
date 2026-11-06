@@ -24,10 +24,10 @@ export function packageFor(app: string, pkg?: string): string | undefined {
 
 /**
  * Opens what you just asked Jarvis to open. The app is on screen after a spoken or typed request, so
- * Android allows it with no tap. Only apps, and only fresh requests: everything else waits for Do it.
+ * Android allows it with no tap. Only apps and web links, and only fresh requests: everything else waits for Do it.
  */
 export async function openFreshApps(): Promise<void> {
-  const fresh = (await Api.phoneActions()).filter((p) => p.status === "pending" && p.action.kind === "open_app" && Date.now() - p.createdAt < 120_000);
+  const fresh = (await Api.phoneActions()).filter((p) => p.status === "pending" && (p.action.kind === "open_app" || p.action.kind === "link") && Date.now() - p.createdAt < 120_000);
   for (const p of fresh) await doPhoneAction(p).catch(() => undefined); // it stays on the Phone screen
 }
 
@@ -51,6 +51,9 @@ export async function doPhoneAction(p: PhoneAction): Promise<void> {
       IntentLauncher.openApplication(pkg);
       break;
     }
+    case "link":
+      await Linking.openURL(a.url);
+      break;
     case "call":
       await Linking.openURL(`tel:${a.number.replace(/[^\d+]/g, "")}`);
       break;
