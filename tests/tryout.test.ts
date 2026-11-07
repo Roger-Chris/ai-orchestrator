@@ -7,7 +7,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import type { PushPayload } from "../src/server/push.js";
 import { mountTryouts } from "../src/server/tryout.js";
 import { Store } from "../src/store/db.js";
-import { fetchSource, isGitSource, nameOf, readReelData, reelHtml, terminalSteps, TryoutDesk, type TryoutAgentResult, tryoutPrompt } from "../src/tryout/desk.js";
+import { WhatsAppLink } from "../src/whatsapp/link.js";
+import { WaStore } from "../src/whatsapp/store.js";
+import { editDistance, findSentFile, nameScore } from "../src/tryout/whatsapp.js";
+import { fetchSource, freeFolder, isGitSource, nameOf, readReelData, reelHtml, terminalSteps, TryoutDesk, type TryoutAgentResult, tryoutPrompt } from "../src/tryout/desk.js";
 
 const cleanup: (() => void)[] = [];
 afterAll(() => cleanup.forEach((f) => f()));
@@ -81,7 +84,7 @@ describe("tryouts", () => {
     writeFileSync(join(dir, "pkg", "tool-1.0", "main.py"), "print(1)");
     execFileSync("tar", ["-czf", join(dir, "tool.tar.gz"), "-C", join(dir, "pkg"), "tool-1.0"]);
     const root = await fetchSource(join(dir, "tool.tar.gz"), join(dir, "t"));
-    expect(root).toBe(join(dir, "t", "project", "tool-1.0"));
+    expect(root).toBe(join(dir, "t", "project"));
     expect(existsSync(join(root, "main.py"))).toBe(true);
   });
 
@@ -176,5 +179,95 @@ describe("tryouts", () => {
     expect(s.desk.get(first.id)!.status).toBe("ready");
     expect(s.desk.get(second.id)).toMatchObject({ status: "failed", error: "cancelled" });
     expect((await post(s.app, `/api/tryouts/${first.id}/cancel`)).status).toBe(409);
+  });
+
+  it("puts the project in its own new folder under Development, never into an existing one", async () => {
+    const s = setup();
+    const dev = join(s.dir, "Development");
+    mkdirSync(join(dev, "my-app"), { recursive: true });
+    expect(freeFolder(dev, "my-app")).toBe(join(dev, "my-app-2"));
+    let ranIn = "";
+    const desk = new TryoutDesk({ ...s.deps, folder: dev, agent: async (_t, root) => ((ranIn = root), { ok: true, summary: "ok", steps: [] }) });
+    const t = desk.start({ source: s.src });
+    await desk.idle();
+    expect(ranIn).toBe(join(dev, "my-app-2"));
+    expect(existsSync(join(dev, "my-app-2", "README.md"))).toBe(true);
+    expect(desk.get(t.id)!.project).toBe(join(dev, "my-app-2"));
+  });
+
+  it("uploads stream to the hub and start a tryout named after the file", async () => {
+    const s = setup();
+    const res = await s.app.request("/api/tryouts/upload?name=Bday%20wish.zip&goal=open%20it", { method: "POST", body: new TextEncoder().encode("PK fake zip") });
+    expect(res.status).toBe(202);
+    const t = (await res.json()) as any;
+    expect(t).toMatchObject({ name: "Bday wish", goal: "open it", by: "app", status: "queued" });
+    expect((await s.app.request("/api/tryouts/upload", { method: "POST", body: "x" })).status).toBe(400);
+    expect((await s.app.request("/api/tryouts/upload?name=a.zip", { method: "POST", body: new Uint8Array() })).status).toBe(400);
+    await s.desk.idle();
+  });
+});
+
+describe("the zip someone sent on WhatsApp", () => {
+  it("matches spoken names loosely: swapped letters, first names", () => {
+    expect(editDistance("kishanujith", "kishaunjith")).toBe(1);
+    expect(nameScore("Kishanujith", "Kishaunjith")).toBeGreaterThan(0.9);
+    expect(nameScore("jitho san", "Jitho san")).toBe(1);
+    expect(nameScore("jitho", "Jitho san")).toBe(1);
+    expect(nameScore("Kishore", "Kishaunjith")).toBeLessThan(0.75);
+  });
+
+  function wa() {
+    const dir = tmp();
+    const store = new Store(join(dir, "data"));
+    cleanup.unshift(() => store.close());
+    const w = new WaStore(store);
+    const zip = join(dir, "ABC123-Bday_wish.zip");
+    writeFileSync(zip, "PK");
+    w.nameChat("66546357538841@lid", "Kishaunjith");
+    w.nameChat("919176506408@s.whatsapp.net", "Jitho san");
+    w.nameChat("918825838861@s.whatsapp.net", "Kishore");
+    const m = (id: string, chatId: string, text: string, ts: number, mediaPath?: string) => ({ id, chatId, senderId: chatId, fromMe: false, isGroup: false, text, ts, mediaType: "document", mediaPath });
+    w.save([
+      m("1", "66546357538841@lid", "notes.pdf", 300, join(dir, "x.pdf")),
+      m("2", "66546357538841@lid", "Bday wish.zip", 200, zip),
+      m("3", "919176506408@s.whatsapp.net", "game.zip", 100),
+      m("4", "918825838861@s.whatsapp.net", "x.zip", 50),
+    ]);
+    return { store, zip };
+  }
+
+  it("finds the newest archive that person sent, by a misheard name", () => {
+    const { store, zip } = wa();
+    expect(findSentFile(store.db, "kishanujith")).toMatchObject({ path: zip, file: "Bday_wish.zip", person: "Kishaunjith", at: 200 });
+  });
+
+  it("says when the file was never downloaded, and when nobody fits", () => {
+    const { store } = wa();
+    expect(() => findSentFile(store.db, "jitho san")).toThrow(/Jitho san sent "game.zip".*doesn't have the file.*send it again, or upload it/);
+    expect(() => findSentFile(store.db, "Venkata")).toThrow(/No file from anyone called "Venkata"/);
+  });
+
+  it("a tryout from WhatsApp takes the file's name and says who sent it", async () => {
+    const { store } = wa();
+    const s = setup();
+    const desk = new TryoutDesk({ ...s.deps, findSent: (who) => findSentFile(store.db, who) });
+    const t = desk.start({ from: "Kishanujith", goal: "show it" });
+    expect(t).toMatchObject({ name: "Bday_wish", from: "Kishaunjith on WhatsApp" });
+    expect(() => desk.start({ from: "jitho san" })).toThrow(/send it again/);
+    await desk.idle();
+    // the test "zip" is two bytes, so it gets as far as unpacking the file WhatsApp kept
+    expect(desk.get(t.id)).toMatchObject({ status: "failed", error: expect.stringMatching(/could not unpack ABC123-Bday_wish.zip/) });
+  });
+
+  it("the WhatsApp link keeps archives from direct chats, not from groups or history", () => {
+    const store = new Store(join(tmp(), "data"));
+    cleanup.unshift(() => store.close());
+    const link = new WhatsAppLink(new WaStore(store), { dataDir: tmp(), history: "recent", voiceNotes: true, images: true, ignore: [], print: () => {} });
+    const doc = (fileName: string) => ({ key: { id: "d" }, message: { documentMessage: { fileName } } }) as any;
+    const m = { id: "d", chatId: "91@s.whatsapp.net", senderId: "91@s.whatsapp.net", fromMe: false, isGroup: false, text: "", ts: 1, mediaType: "document" };
+    expect(link.wantsFile(m, doc("project.zip"))).toBe(true);
+    expect(link.wantsFile(m, doc("slides.pdf"))).toBe(false);
+    expect(link.wantsFile({ ...m, isGroup: true }, doc("project.zip"))).toBe(false);
+    expect(link.wantsFile(m, doc("project.zip"), false)).toBe(false);
   });
 });

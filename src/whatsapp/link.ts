@@ -22,6 +22,8 @@ export interface LinkOptions {
   onLive?: (messages: WaMessage[]) => void;
   /** Download photos people send you in direct chats (live ones only), so they can be described. */
   images: boolean;
+  /** Download archives (zip, tar…) that arrive in direct chats, for tryouts. Default on. */
+  files?: boolean;
   /** Also download the voice notes in history (for a device that transcribes them itself). */
   historyVoice?: boolean;
   /** A queued voice note or photo was downloaded (`ok`) or could not be. Fired for history voice notes too. */
@@ -39,6 +41,15 @@ export interface LinkStatus {
 }
 
 const MAX_MEDIA_BYTES = 6 * 1024 * 1024;
+/** Projects people send (zips, tarballs) are downloaded so "run the zip X sent me" can find them (src/tryout). */
+const MAX_FILE_BYTES = 200 * 1024 * 1024;
+export const PROJECT_FILE = /\.(zip|tar|tgz|gz|xz|bz2|7z|rar)$/i;
+
+/** The file name of a document message, or undefined for anything else. */
+export function documentName(message: any): string | undefined {
+  const d = unwrap(message).documentMessage;
+  return d ? String(d.fileName ?? d.title ?? "file") : undefined;
+}
 /** proto.WebMessageInfo.StubType.CIPHERTEXT: a message Baileys could not decrypt. */
 const CIPHERTEXT = 2;
 
@@ -120,6 +131,7 @@ export class WhatsAppLink {
     this.loadLidMappings(authDir);
     mkdirSync(join(this.opts.dataDir, "whatsapp", "voice"), { recursive: true });
     mkdirSync(join(this.opts.dataDir, "whatsapp", "images"), { recursive: true });
+    mkdirSync(join(this.opts.dataDir, "whatsapp", "files"), { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
     const sock = makeWASocket({
@@ -240,6 +252,12 @@ export class WhatsAppLink {
     return m.mediaType === "image" && live && this.opts.images && !m.fromMe && !m.isGroup;
   }
 
+  /** Archives that arrive live, in your direct chats (yours too): kept for tryouts, never transcribed. */
+  wantsFile(m: WaMessage, msg: WAMessage, live = true): boolean {
+    if (!live || m.mediaType !== "document" || m.isGroup || this.opts.files === false) return false;
+    return PROJECT_FILE.test(documentName(msg.message) ?? "");
+  }
+
   /** Converts, stores and queues media for download; returns what was kept. */
   private keep(messages: WAMessage[], live: boolean): WaMessage[] {
     const out: WaMessage[] = [];
@@ -247,7 +265,7 @@ export class WhatsAppLink {
       const m = this.convert(msg);
       if (!m) continue;
       out.push(m);
-      if (this.wantsMedia(m, live)) this.mediaQueue.push({ msg, out: m });
+      if (this.wantsMedia(m, live) || this.wantsFile(m, msg, live)) this.mediaQueue.push({ msg, out: m });
     }
     this.store.save(out);
     void this.downloadMedia();
@@ -322,6 +340,20 @@ export class WhatsAppLink {
     return { id: key.id, chatId, senderId, senderName, fromMe, isGroup, text: c.text, mediaType: c.mediaType, quoted: c.quoted, ts, chatPhone };
   }
 
+  /** A document kept as data/whatsapp/files/<message id>-<its name>; no onMedia (nothing to transcribe). */
+  private async downloadFile(msg: WAMessage, out: WaMessage, len: number) {
+    if (len > MAX_FILE_BYTES || !this.sock) return;
+    try {
+      const buf = await downloadMediaMessage(msg, "buffer", {}, { logger: silent as any, reuploadRequest: this.sock.updateMediaMessage });
+      const name = (documentName(msg.message) ?? "file").replace(/[^\w.+-]+/g, "_").slice(-120);
+      const path = join(this.opts.dataDir, "whatsapp", "files", `${out.id.replace(/[^\w-]/g, "_")}-${name}`);
+      writeFileSync(path, buf);
+      this.store.save([{ ...out, mediaPath: path }]);
+    } catch {
+      /* expired or gone: "run it" will say so */
+    }
+  }
+
   /** Downloads queued voice notes and photos one at a time; old ones WhatsApp no longer has are skipped. */
   private async downloadMedia() {
     if (this.downloading || !this.sock) return;
@@ -330,6 +362,10 @@ export class WhatsAppLink {
       while (this.mediaQueue.length) {
         const { msg, out } = this.mediaQueue.shift()!;
         const inner = unwrap(msg.message);
+        if (out.mediaType === "document") {
+          await this.downloadFile(msg, out, Number(inner.documentMessage?.fileLength ?? 0));
+          continue;
+        }
         const len = Number((inner.audioMessage ?? inner.imageMessage)?.fileLength ?? 0);
         if (len > MAX_MEDIA_BYTES) {
           this.opts.onMedia?.(out, false);

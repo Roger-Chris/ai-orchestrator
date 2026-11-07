@@ -10,6 +10,7 @@ const SECTIONS = [
       ["Devices", "Your computers, files and screenshots", "/devices"],
       ["Mail", "Drafts waiting for your Send", "/mail"],
       ["Shopping", "Carts it filled and where to buy", "/shop"],
+      ["Try a project", "Run a zip, repo or link and get a video", "/tryouts"],
       ["On your phone", "Things waiting for your tap", "/phone"],
       ["Record", "Record a conversation", "/record"],
     ],

@@ -733,6 +733,27 @@ export type PhoneActionSpec =
   | { kind: "sms"; number: string; text: string; name?: string }
   | { kind: "file"; path: string };
 
+/** A project the hub downloaded, ran and recorded (src/tryout), as the app sees it. */
+export interface TryoutView {
+  id: string;
+  source: string;
+  name: string;
+  status: "queued" | "fetching" | "running" | "recording" | "ready" | "failed";
+  goal?: string;
+  by?: string;
+  /** "Kishaunjith on WhatsApp" */
+  from?: string;
+  /** The folder it was put in and run from. */
+  project?: string;
+  summary?: string;
+  error?: string;
+  hasVideo: boolean;
+  /** `/f/<key>` on the hub: the video, while its phone action lasts. */
+  videoUrl?: string;
+  createdAt: number;
+  finishedAt?: number;
+}
+
 export interface PhoneAction {
   id: string;
   action: PhoneActionSpec;

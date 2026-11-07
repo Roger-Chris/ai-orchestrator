@@ -346,6 +346,8 @@ const ConfigSchema = z.object({
       command: z.string().default("claude"),
       model: z.string().default("sonnet"),
       timeoutMinutes: z.number().min(5).max(120).default(30),
+      /** Where projects are put and run, each in its own new folder (e.g. ~/Desktop/Development); empty: data/tryouts/<id>/project. */
+      folder: z.string().default(""),
     })
     .prefault({}),
   /** Your WhatsApp as a read-only linked device (`orc whatsapp link`). Nothing is ever sent. */

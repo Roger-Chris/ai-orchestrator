@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readdirSync, readlinkSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { redact } from "../actions/registry.js";
 import type { PushPayload } from "../server/push.js";
@@ -33,8 +33,12 @@ export interface Tryout {
   by?: string;
   name: string;
   status: TryoutStatus;
-  /** data/tryouts/<id> */
+  /** data/tryouts/<id>: the video, logs and (with no `folder` set) the project. */
   dir: string;
+  /** Where the project was put and run. */
+  project?: string;
+  /** "Kishaunjith on WhatsApp": who sent the file, when it came from a chat. */
+  from?: string;
   /** The agent's last words: what it set up and what it saw. */
   summary?: string;
   error?: string;
@@ -67,6 +71,10 @@ export interface TryoutDeskDeps {
   exec?: Exec;
   fetchFile?: typeof fetch;
   now?: () => number;
+  /** Projects go in <folder>/<name> (config tryout.folder, e.g. ~/Desktop/Development); empty: in the tryout's own folder. */
+  folder?: string;
+  /** The newest archive a person sent on WhatsApp (`./whatsapp.ts`). */
+  findSent?: (who: string) => { path: string; file: string; person: string; at: number };
 }
 
 export class TryoutError extends Error {
@@ -106,17 +114,38 @@ export class TryoutDesk {
   }
 
   /** Queues a tryout; one runs at a time (the hub has 8 GB). Returns at once. */
-  start(input: { source: string; goal?: string; by?: string }): Tryout {
-    const source = input.source.trim();
-    if (!source) throw new TryoutError("what should I try? Give a git URL, a link to a file or archive, or a path on the hub");
+  start(input: { source?: string; from?: string; goal?: string; by?: string; name?: string }): Tryout {
+    let source = input.source?.trim() ?? "";
+    let from: string | undefined;
+    let name = input.name;
+    if (!source && input.from?.trim()) {
+      if (!this.d.findSent) throw new TryoutError("this hub does not read WhatsApp, so it can't find files people sent", 404);
+      try {
+        const f = this.d.findSent(input.from.trim());
+        source = f.path;
+        name ??= nameOf(f.file);
+        from = `${f.person} on WhatsApp`;
+      } catch (e) {
+        const status = (e as { status?: number }).status;
+        throw new TryoutError((e as Error).message, status === 404 || status === 409 ? status : 400);
+      }
+    }
+    if (!source) throw new TryoutError("what should I try? Give a git URL, a link to a file or archive, a path on the hub, or who sent it on WhatsApp");
     if (!/^(https?:\/\/|git@)/i.test(source) && !existsSync(resolve(source))) throw new TryoutError(`not found on the hub: ${source}`, 404);
     const id = `t${randomBytes(4).toString("hex")}`;
-    const t: Tryout = { id, source, goal: input.goal?.trim() || undefined, by: input.by, name: nameOf(source), status: "queued", dir: resolve(this.d.dataDir, "tryouts", id), createdAt: this.now() };
+    const t: Tryout = { id, source, from, goal: input.goal?.trim() || undefined, by: input.by, name: name ?? nameOf(source), status: "queued", dir: resolve(this.d.dataDir, "tryouts", id), createdAt: this.now() };
     this.save(t);
     const ctl = new AbortController();
     this.aborts.set(id, ctl);
     this.queue = this.queue.then(() => this.run(id, ctl.signal)).catch(() => undefined);
     return t;
+  }
+
+  /** Where an uploaded file is kept before its tryout: data/tryouts/uploads/<random>-<name>. */
+  uploadPath(name: string): string {
+    const dir = resolve(this.d.dataDir, "tryouts", "uploads");
+    mkdirSync(dir, { recursive: true });
+    return join(dir, `${randomBytes(3).toString("hex")}-${basename(name).replace(/[^\w.+-]+/g, "_").slice(-120) || "upload"}`);
   }
 
   /** Resolves when everything queued so far has finished (tests, shutdown). */
@@ -156,13 +185,15 @@ export class TryoutDesk {
   private async run(id: string, signal: AbortSignal): Promise<void> {
     let t = this.get(id);
     if (!t || signal.aborted) return;
-    const project = join(t.dir, "project");
+    const project = this.d.folder ? freeFolder(this.d.folder, t.name) : join(t.dir, "project");
     const media = join(t.dir, "media");
     try {
       mkdirSync(media, { recursive: true });
-      t = this.set(id, { status: "fetching" });
+      t = this.set(id, { status: "fetching", project });
       if (!t) return;
-      const root = await fetchSource(t.source, t.dir, { exec: this.exec, fetchFile: this.d.fetchFile, signal });
+      const root = await fetchSource(t.source, t.dir, { exec: this.exec, fetchFile: this.d.fetchFile, signal, project });
+      t = this.set(id, { project: root });
+      if (!t) return;
       if (signal.aborted) return;
       t = this.set(id, { status: "running" });
       if (!t) return;
@@ -199,9 +230,9 @@ export class TryoutDesk {
  * Puts the source in <dir>/project and returns the project's root folder (the one folder inside an
  * archive that has everything, or project itself).
  */
-export async function fetchSource(source: string, dir: string, o: { exec?: Exec; fetchFile?: typeof fetch; signal?: AbortSignal } = {}): Promise<string> {
+export async function fetchSource(source: string, dir: string, o: { exec?: Exec; fetchFile?: typeof fetch; signal?: AbortSignal; project?: string } = {}): Promise<string> {
   const exec = o.exec ?? runProcess;
-  const project = join(dir, "project");
+  const project = o.project ?? join(dir, "project");
   mkdirSync(dir, { recursive: true });
   if (isGitSource(source)) {
     const r = await exec({ command: "git", args: ["clone", "--depth", "1", "--", source, project], timeoutMs: 600_000, signal: o.signal, env: { GIT_TERMINAL_PROMPT: "0" } });
@@ -226,17 +257,45 @@ export async function fetchSource(source: string, dir: string, o: { exec?: Exec;
     }
     file = local;
   }
-  mkdirSync(project, { recursive: true });
   if (ARCHIVE.test(file)) {
+    // Unpacked beside the project first: an archive with one top folder becomes the project itself, not project/<folder>.
+    const unpack = join(dir, "unpack");
+    rmSync(unpack, { recursive: true, force: true });
+    mkdirSync(unpack, { recursive: true });
     const r = /\.zip$/i.test(file)
-      ? await exec({ command: "unzip", args: ["-q", "-o", file, "-d", project], timeoutMs: 300_000, signal: o.signal })
-      : await exec({ command: "tar", args: ["-xf", file, "-C", project], timeoutMs: 300_000, signal: o.signal });
+      ? await exec({ command: "unzip", args: ["-q", "-o", file, "-d", unpack], timeoutMs: 300_000, signal: o.signal })
+      : await exec({ command: "tar", args: ["-xf", file, "-C", unpack], timeoutMs: 300_000, signal: o.signal });
     if (r.code !== 0) throw new Error(`could not unpack ${basename(file)}: ${(r.stderr || r.spawnError || "").trim().slice(-300)}`);
-    const inside = readdirSync(project).filter((n) => n !== "__MACOSX");
-    return inside.length === 1 && statSync(join(project, inside[0])).isDirectory() ? join(project, inside[0]) : project;
+    rmSync(join(unpack, "__MACOSX"), { recursive: true, force: true });
+    const inside = readdirSync(unpack);
+    const top = inside.length === 1 && statSync(join(unpack, inside[0])).isDirectory() ? join(unpack, inside[0]) : unpack;
+    move(top, project);
+    rmSync(unpack, { recursive: true, force: true });
+    return project;
   }
+  mkdirSync(project, { recursive: true });
   cpSync(file, join(project, basename(file)));
   return project;
+}
+
+/** rename, or copy and delete when the two are on different disks. */
+function move(from: string, to: string) {
+  mkdirSync(resolve(to, ".."), { recursive: true });
+  try {
+    renameSync(from, to);
+  } catch {
+    cpSync(from, to, { recursive: true });
+    rmSync(from, { recursive: true, force: true });
+  }
+}
+
+/** <folder>/<name>, or <name>-2, -3… when that is taken: a tryout never writes into an existing project. */
+export function freeFolder(folder: string, name: string): string {
+  const base = name.replace(/[^\w.+-]+/g, "-").replace(/^[-.]+|-+$/g, "").slice(0, 60) || "project";
+  for (let i = 1; ; i++) {
+    const p = join(resolve(folder), i === 1 ? base : `${base}-${i}`);
+    if (!existsSync(p)) return p;
+  }
 }
 
 /** Kills what the agent left running in the project (dev servers it started in the background). */

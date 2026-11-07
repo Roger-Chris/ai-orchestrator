@@ -6,7 +6,8 @@ import type { ActionLogEntry, Convo, MailDraft, ShopRun } from "../../../src/typ
 export type { MailDraft, ShopRun } from "../../../src/types";
 import type { AiHub, Build, BrainAlert, ModelLimits, OutsideAgent, OutsideAgentScopes, OutsideAuditEntry, PhoneAction, Home, Insights, JobKind, ProviderId, ReplyDraft, ReviewDecision, RunOptions, RunRecord, Thread } from "../../../src/types";
 
-export type { ActionLogEntry, Convo } from "../../../src/types";
+export type { ActionLogEntry, Convo, TryoutView } from "../../../src/types";
+import type { TryoutView } from "../../../src/types";
 export type { PersonSummary } from "../../../src/types";
 export type { WorkPerson, WorkPersonView, WorkStatus, WorkTask, WorkUpdate } from "../../../src/types";
 export type { AiHub, Build, BuildBranch, BuildLive, LimitWindow, ModelLimit, ModelLimits, Tokens, OutsideAgent, OutsideAgentScopes, OutsideAuditEntry, PhoneAction, JobKind, ProviderId, ToolInfo, ToolState } from "../../../src/types";
@@ -458,6 +459,31 @@ export const Api = {
   mailDiscard: (id: string) => api<MailDraft>(`/api/mail/${id}/discard`, { body: {} }),
   // ---- carts Jarvis filled: you order in the store
   shopRuns: () => api<ShopRun[]>("/api/shop"),
+  // ---- tryouts: the hub downloads a project, runs it, records it, and the video comes here
+  tryouts: () => api<TryoutView[]>("/api/tryouts"),
+  /** `source`: a git URL, a link or a path on the hub; or `from`: who sent the zip on WhatsApp. */
+  tryoutStart: (b: { source?: string; from?: string; goal?: string }) => api<TryoutView>("/api/tryouts", { body: { ...b, by: "app" } }),
+  tryoutCancel: (id: string) => api<TryoutView>(`/api/tryouts/${id}/cancel`, { body: {} }),
+  /** Streams a picked file from disk as the raw body (no FormData: see uploadAudio). */
+  tryoutUpload: async (uri: string, name: string, goal?: string): Promise<TryoutView> => {
+    if (!current) throw new Error("Not connected to a hub yet.");
+    const { FileSystemUploadType, uploadAsync } = await import("expo-file-system/legacy");
+    const res = await uploadAsync(`${current.url}/api/tryouts/upload?${q({ name, goal })}`, uri, {
+      httpMethod: "POST",
+      uploadType: FileSystemUploadType.BINARY_CONTENT,
+      headers: { ...authHeaders(), "Content-Type": "application/octet-stream" },
+    }).catch(() => {
+      throw new Error(`Can't reach the hub at ${current?.url}. Check Tailscale is connected on this phone.`);
+    });
+    let data: any = {};
+    try {
+      data = JSON.parse(res.body);
+    } catch {
+      /* the status says what happened */
+    }
+    if (res.status < 200 || res.status >= 300) throw new Error(data.error ?? `The hub answered ${res.status}.`);
+    return data as TryoutView;
+  },
   wakeNode: (name: string) => api<{ sent: boolean }>(`/api/nodes/${encodeURIComponent(name)}/wake`, { body: {} }),
   shopRun: (id: string) => api<ShopRun>(`/api/shop/${id}`),
   shopCheckout: (id: string, total: string) => api<ShopRun>(`/api/shop/${id}/checkout`, { body: { total } }),

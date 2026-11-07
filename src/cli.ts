@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { randomBytes } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -65,6 +66,7 @@ import { previewer } from "./server/builds.js";
 import { preferredFor } from "./server/ai-hub.js";
 import { addTerms } from "./whatsapp/address.js";
 import { claudeTryoutAgent, playwrightRecorder, TryoutDesk } from "./tryout/desk.js";
+import { findSentFile } from "./tryout/whatsapp.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -303,6 +305,8 @@ export function buildSystem(config: Config) {
         agent: claudeTryoutAgent({ dataDir, command: config.tryout.command, model: config.tryout.model, timeoutMinutes: config.tryout.timeoutMinutes }),
         record: playwrightRecorder({ dataDir }),
         share: (video, t) => phone.add({ kind: "file", path: video }, `the recording of ${t.name}`).id,
+        folder: config.tryout.folder ? resolve(config.tryout.folder.replace(/^~(?=$|\/)/, homedir())) : undefined,
+        findSent: (who) => findSentFile(store.db, who),
         notify: (p) => void notifier.notify(p),
       })
     : undefined;
