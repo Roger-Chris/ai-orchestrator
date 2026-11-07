@@ -35,6 +35,8 @@ import type { MailDesk } from "../mail/desk.js";
 import type { ShopDesk } from "../shop/desk.js";
 import { mountMail } from "./mail.js";
 import { mountPhone } from "./phone.js";
+import { mountTryouts } from "./tryout.js";
+import type { TryoutDesk } from "../tryout/desk.js";
 import { mountShop } from "./shop.js";
 import { mountOutside } from "./outside.js";
 import { mountWork } from "./work.js";
@@ -85,6 +87,8 @@ export interface AppDeps {
   files?: FileClient;
   /** Things to do on the phone, waiting for the owner's tap (D3). */
   phone?: PhoneDesk;
+  /** Projects downloaded, run and recorded for the owner (src/tryout). */
+  tryouts?: TryoutDesk;
   /** Mail written for the owner's Send, and the sign-in that may send. */
   mail?: MailDesk;
   mailSender?: GmailReader;
@@ -243,6 +247,7 @@ export function createApp(d: AppDeps) {
   mountApkNode(app, d);
   mountFiles(app, d);
   mountPhone(app, d);
+  mountTryouts(app, d);
   mountMail(app, d);
   mountShop(app, d);
   mountConvos(app, d);

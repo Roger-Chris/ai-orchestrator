@@ -336,6 +336,18 @@ const ConfigSchema = z.object({
       allowHosts: z.array(z.string()).default([]),
     })
     .prefault({}),
+  /**
+   * Tryouts (src/tryout): the hub downloads a project, a coding agent with full access sets it up,
+   * runs it and uses it in a recorded browser or terminal, and the video goes to the phone.
+   */
+  tryout: z
+    .object({
+      enabled: z.boolean().default(true),
+      command: z.string().default("claude"),
+      model: z.string().default("sonnet"),
+      timeoutMinutes: z.number().min(5).max(120).default(30),
+    })
+    .prefault({}),
   /** Your WhatsApp as a read-only linked device (`orc whatsapp link`). Nothing is ever sent. */
   whatsapp: z
     .object({

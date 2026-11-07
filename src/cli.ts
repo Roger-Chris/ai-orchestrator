@@ -64,6 +64,7 @@ import { PreviewMaker } from "./builds/preview.js";
 import { previewer } from "./server/builds.js";
 import { preferredFor } from "./server/ai-hub.js";
 import { addTerms } from "./whatsapp/address.js";
+import { claudeTryoutAgent, playwrightRecorder, TryoutDesk } from "./tryout/desk.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -292,7 +293,20 @@ export function buildSystem(config: Config) {
     compareOnly: config.shopping.compareOnly,
     findIn: config.shopping.findIn,
   });
-  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, mail, mailSender, shop, assistant, drafter, calls, tts, tools, models, builds, preview, convos, whisper, fileIndex, files, phone: new PhoneDesk(store, config, (p) => void notifier.notify(p)), outside: new OutsideAgents(store, replica), work };
+  const phone = new PhoneDesk(store, config, (p) => void notifier.notify(p));
+  // Tryouts: download a project, run it with full access, record it, send the video to the phone.
+  const dataDir = resolve(config.dataDir);
+  const tryouts = config.tryout.enabled
+    ? new TryoutDesk({
+        store,
+        dataDir,
+        agent: claudeTryoutAgent({ dataDir, command: config.tryout.command, model: config.tryout.model, timeoutMinutes: config.tryout.timeoutMinutes }),
+        record: playwrightRecorder({ dataDir }),
+        share: (video, t) => phone.add({ kind: "file", path: video }, `the recording of ${t.name}`).id,
+        notify: (p) => void notifier.notify(p),
+      })
+    : undefined;
+  return { store, pool, cluster, router, orchestrator, agents, memory, replica, actions, notifier, gmail, mail, mailSender, shop, assistant, drafter, calls, tts, tools, models, builds, preview, convos, whisper, fileIndex, files, phone, tryouts, outside: new OutsideAgents(store, replica), work };
 }
 
 /** The Android app's notifications, when a Firebase service-account key is set up. */
@@ -760,6 +774,21 @@ async function hubCall(config: Config, method: string, path: string, body: unkno
   return out;
 }
 
+/** `orc try <git URL | link | path> [--ask "what to show"]`: the hub runs it and records it; the video goes to the phone. */
+async function cmdTry(config: Config, source: string, goal?: string) {
+  if (!source) throw new Error('usage: orc try <git URL | link to a file or archive | path on the hub> [--ask "what to show"]');
+  let t = await hubCall(config, "POST", "/api/tryouts", { source, goal, by: "cli" });
+  console.log(`tryout ${t.id} (${t.name}) queued; the video goes to your phone when it is done`);
+  let last = "";
+  while (!["ready", "failed"].includes(t.status)) {
+    await new Promise((r) => setTimeout(r, 10_000));
+    t = await hubGet(config, `/api/tryouts/${t.id}`);
+    if (t.status !== last) console.log(`  ${(last = t.status)}`);
+  }
+  console.log(t.status === "ready" ? `\n${t.summary ?? ""}` : `failed: ${t.error}`);
+  if (t.status === "failed") process.exitCode = 1;
+}
+
 async function hubGet(config: Config, path: string): Promise<any> {
   const res = await fetch(`${hubUrl(config)}${path}`, { headers: config.server.token ? { Authorization: `Bearer ${config.server.token}` } : {} });
   const out = (await res.json().catch(() => ({}))) as any;
@@ -1140,10 +1169,12 @@ async function main() {
       return cmdWake(config, { threshold: v.threshold ? Number(v.threshold) : undefined, device: v.device as string | undefined });
     case "record":
       return cmdRecord(config, { seconds: v.seconds ? Number(v.seconds) : undefined, file: v.file as string | undefined });
+    case "try":
+      return cmdTry(config, rest.join(" "), v.ask as string | undefined);
     case "style":
       return cmdStyle(config, rest[0], { who: rest.slice(1).join(" "), ask: v.ask as string | undefined, draft: !!v.draft, raw: !!v.raw });
     default:
-      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|connect-send|check|status|disconnect]|shop login <store>|whatsapp [link|status]|style [learn|push|pull|show|graph|pool <name> [--ask "…"] [--draft]]|wake [--threshold 0.5] [--device <mic>]|init|mcp>`);
+      console.log(`usage: orc <serve|run "task"|doctor [--live]|nodes|agents|gmail [connect|connect-send|check|status|disconnect]|shop login <store>|whatsapp [link|status]|style [learn|push|pull|show|graph|pool <name> [--ask "…"] [--draft]]|try <git URL|link|path> [--ask "what to show"]|wake [--threshold 0.5] [--device <mic>]|init|mcp>`);
       process.exitCode = 1;
   }
 }
