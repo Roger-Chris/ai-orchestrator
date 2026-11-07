@@ -72,6 +72,8 @@ export interface BuildDeskDeps {
   isOwned?: (folder: string) => boolean;
   /** Rules and audits for every build, put into the task. */
   guidelines?: () => string;
+  /** What a build's coding agents may do (config builds.permission): edit files, or full (shell commands too). */
+  permission?: "edit" | "full";
   /** A new private repo for a project; returns its folder (`./repo.ts`). */
   createRepo?: (name: string, spec: string) => Promise<string>;
   /** The best free coding agent and a different reviewer right now. */
@@ -222,7 +224,7 @@ export class BuildDesk {
     const id = `b${randomBytes(4).toString("hex")}`;
     const kind = input.kind ?? prev?.kind ?? "app";
     const task = buildTask({ name, spec: input.spec, agent, reviewer, prev, kind, guidelines: this.d.guidelines?.(), confirmDesign: input.confirmDesign });
-    const run = this.d.runner.submit(task, { branches: true, permission: "edit", cwd: folder, nodes: node ? [node] : undefined, mode: input.confirmDesign ? "design" : "plan", buildId: id });
+    const run = this.d.runner.submit(task, { branches: true, permission: this.d.permission ?? "edit", cwd: folder, nodes: node ? [node] : undefined, mode: input.confirmDesign ? "design" : "plan", buildId: id });
     const b: Build = {
       id,
       name,

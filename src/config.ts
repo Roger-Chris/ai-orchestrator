@@ -176,6 +176,8 @@ const ConfigSchema = z.object({
       projectsDir: z.string().default(""),
       /** Rules and audits for every build, put into the coding agent's task. */
       guidelines: z.string().default("docs/BUILD_GUIDELINES.md"),
+      /** What a build's coding agents may do: edit files only, or full (they also run shell commands: installs, tests, builds). */
+      permission: z.enum(["edit", "full"]).default("edit"),
     })
     .prefault({}),
   /** Recorded conversations. */

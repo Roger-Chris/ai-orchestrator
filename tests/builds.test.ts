@@ -88,6 +88,13 @@ describe("builds (phase 2)", () => {
     expect(() => s.desk.start({ name: "x", spec: "y" })).toThrow(/which folder/);
   });
 
+  it("B1b: builds.permission full lets the coding agents run shell commands", () => {
+    const s = setup();
+    const desk = new BuildDesk({ store: s.store, runner: s.runner, node: "hub", permission: "full" });
+    desk.start({ name: "Shell App", spec: "needs npm install and tests", repo: s.repo });
+    expect(s.runs[0].options.permission).toBe("full");
+  });
+
   it("a finished run makes the build ready, tells the phone and writes the shared memory (B3)", async () => {
     const s = setup();
     const b = s.desk.start({ name: "Expense Tracker", spec: "Track expenses", repo: s.repo });

@@ -190,6 +190,7 @@ export function buildSystem(config: Config) {
     onReady: (b) => void (config.builds.autoPreview ? preview?.(b) : undefined),
     node: config.node.name,
     projectsDir: projectsDir(config),
+    permission: config.builds.permission,
     guidelines: () => {
       try {
         return readFileSync(resolve(ROOT, config.builds.guidelines), "utf8");
