@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Typecheck, Test & Build Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          cd mobile && npm ci
+
+      - name: Type checking
+        run: npm run typecheck
+
+      - name: Unit & Integration tests
+        run: npm run test
+
+      - name: Server build verification
+        run: npm run build
+
+      - name: Web build verification
+        run: npm run build:web
+
